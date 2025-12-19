@@ -56,8 +56,9 @@ src/
 - [ ] 依存関係追加（`rusqlite`, `ulid`, `thiserror`, `serde`）
 - [ ] DB 接続・マイグレーション実装
 - [ ] Deck CRUD
-- [ ] Column CRUD
-- [ ] Card CRUD
+- [ ] Column CRUD（論理削除/復元を含む）
+- [ ] Card CRUD（論理削除/復元を含む）
+- [ ] 物理削除バッチ処理（30日経過後）
 - [ ] CLI で動作確認
 
 ### 学ぶこと
@@ -157,6 +158,7 @@ jot-deck/
   - [ ] `#` 補完
   - [ ] タグフィルタ
 - [ ] Column 遅延ロード（Intersection Observer）
+- [ ] ゴミ箱 UI（削除済み Column/Card の一覧と復元）
 - [ ] ダーク/ライトモード
 - [ ] 設定画面
 
