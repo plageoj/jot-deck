@@ -1,9 +1,29 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use ulid::Ulid;
 
 use crate::error::{JotDeckError, Result};
 use crate::models::{Card, NewCard};
+
+/// RFC3339 文字列を DateTime<Utc> にパースする
+fn parse_datetime(s: &str, col_idx: usize) -> rusqlite::Result<DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                col_idx,
+                rusqlite::types::Type::Text,
+                Box::new(e),
+            )
+        })
+}
+
+/// RFC3339 文字列を Option<DateTime<Utc>> にパースする（deleted_at 用）
+fn parse_datetime_opt(s: &str) -> Option<DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .ok()
+}
 
 /// 次の position を取得する
 fn get_next_position(conn: &Connection, column_id: &str) -> Result<i32> {
@@ -52,13 +72,15 @@ pub fn create_at_position(conn: &Connection, new_card: NewCard, position: i32) -
     let id = Ulid::new().to_string();
     let now = Utc::now();
 
+    let tx = conn.unchecked_transaction()?;
+
     // 挿入位置以降の Card の position を +1 する
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET position = position + 1, updated_at = ?1 WHERE column_id = ?2 AND position >= ?3 AND deleted_at IS NULL",
         params![now.to_rfc3339(), &new_card.column_id, position],
     )?;
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO cards (id, column_id, content, score, position, created_at, updated_at) VALUES (?1, ?2, ?3, 0, ?4, ?5, ?6)",
         params![
             &id,
@@ -69,6 +91,8 @@ pub fn create_at_position(conn: &Connection, new_card: NewCard, position: i32) -
             now.to_rfc3339(),
         ],
     )?;
+
+    tx.commit()?;
 
     Ok(Card {
         id,
@@ -93,17 +117,9 @@ fn row_to_card(row: &rusqlite::Row) -> rusqlite::Result<Card> {
         content: row.get(2)?,
         score: row.get(3)?,
         position: row.get(4)?,
-        created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
-            .unwrap()
-            .with_timezone(&Utc),
-        updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(6)?)
-            .unwrap()
-            .with_timezone(&Utc),
-        deleted_at: deleted_at_str.map(|s| {
-            chrono::DateTime::parse_from_rfc3339(&s)
-                .unwrap()
-                .with_timezone(&Utc)
-        }),
+        created_at: parse_datetime(&row.get::<_, String>(5)?, 5)?,
+        updated_at: parse_datetime(&row.get::<_, String>(6)?, 6)?,
+        deleted_at: deleted_at_str.and_then(|s| parse_datetime_opt(&s)),
         deleted_with_column: deleted_with_column != 0,
     })
 }
@@ -131,8 +147,7 @@ pub fn get_by_column_id(conn: &Connection, column_id: &str) -> Result<Vec<Card>>
 
     let cards = stmt
         .query_map(params![column_id], row_to_card)?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(cards)
 }
@@ -199,19 +214,30 @@ pub fn move_to_column(conn: &Connection, id: &str, new_column_id: &str) -> Resul
     let now = Utc::now();
     let old_column_id = &card.column_id;
 
+    let tx = conn.unchecked_transaction()?;
+
     // 元の Column 内の position を詰める
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET position = position - 1, updated_at = ?1 WHERE column_id = ?2 AND position > ?3 AND deleted_at IS NULL",
         params![now.to_rfc3339(), old_column_id, card.position],
     )?;
 
-    // 新しい Column での position を取得
-    let new_position = get_next_position(conn, new_column_id)?;
+    // 新しい Column での position を取得（トランザクション内で実行）
+    let new_position: i32 = {
+        let max_pos: Option<i32> = tx.query_row(
+            "SELECT MAX(position) FROM cards WHERE column_id = ?1 AND deleted_at IS NULL",
+            params![new_column_id],
+            |row| row.get(0),
+        )?;
+        max_pos.unwrap_or(-1) + 1
+    };
 
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET column_id = ?1, position = ?2, updated_at = ?3 WHERE id = ?4",
         params![new_column_id, new_position, now.to_rfc3339(), id],
     )?;
+
+    tx.commit()?;
 
     Ok(Card {
         column_id: new_column_id.to_string(),
@@ -234,24 +260,28 @@ pub fn move_to_position(conn: &Connection, id: &str, new_position: i32) -> Resul
     let old_position = card.position;
     let now = Utc::now();
 
+    let tx = conn.unchecked_transaction()?;
+
     if new_position > old_position {
         // 下に移動: old_position < x <= new_position の Card を -1
-        conn.execute(
+        tx.execute(
             "UPDATE cards SET position = position - 1, updated_at = ?1 WHERE column_id = ?2 AND position > ?3 AND position <= ?4 AND deleted_at IS NULL",
             params![now.to_rfc3339(), &card.column_id, old_position, new_position],
         )?;
     } else if new_position < old_position {
         // 上に移動: new_position <= x < old_position の Card を +1
-        conn.execute(
+        tx.execute(
             "UPDATE cards SET position = position + 1, updated_at = ?1 WHERE column_id = ?2 AND position >= ?3 AND position < ?4 AND deleted_at IS NULL",
             params![now.to_rfc3339(), &card.column_id, new_position, old_position],
         )?;
     }
 
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET position = ?1, updated_at = ?2 WHERE id = ?3",
         params![new_position, now.to_rfc3339(), id],
     )?;
+
+    tx.commit()?;
 
     Ok(Card {
         position: new_position,
@@ -272,16 +302,20 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
 
     let now = Utc::now();
 
-    conn.execute(
+    let tx = conn.unchecked_transaction()?;
+
+    tx.execute(
         "UPDATE cards SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
         params![now.to_rfc3339(), id],
     )?;
 
     // position を詰める
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET position = position - 1, updated_at = ?1 WHERE column_id = ?2 AND position > ?3 AND deleted_at IS NULL",
         params![now.to_rfc3339(), &card.column_id, card.position],
     )?;
+
+    tx.commit()?;
 
     Ok(())
 }
@@ -327,8 +361,7 @@ pub fn get_deleted(conn: &Connection, column_id: &str) -> Result<Vec<Card>> {
 
     let cards = stmt
         .query_map(params![column_id], row_to_card)?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(cards)
 }
@@ -345,8 +378,7 @@ pub fn get_deleted_by_deck(conn: &Connection, deck_id: &str) -> Result<Vec<Card>
 
     let cards = stmt
         .query_map(params![deck_id], row_to_card)?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(cards)
 }

@@ -120,8 +120,7 @@ pub fn get_tags_by_card(conn: &Connection, card_id: &str) -> Result<Vec<Tag>> {
                 name: row.get(1)?,
             })
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(tags)
 }
@@ -145,8 +144,7 @@ pub fn get_tags_by_deck(conn: &Connection, deck_id: &str) -> Result<Vec<Tag>> {
                 name: row.get(1)?,
             })
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(tags)
 }
@@ -164,8 +162,7 @@ pub fn get_cards_by_tag(conn: &Connection, deck_id: &str, tag_name: &str) -> Res
 
     let card_ids = stmt
         .query_map(params![deck_id, tag_name], |row| row.get(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(card_ids)
 }
@@ -191,8 +188,7 @@ pub fn get_tag_suggestions(conn: &Connection, deck_id: &str, prefix: &str) -> Re
                 name: row.get(1)?,
             })
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(tags)
 }

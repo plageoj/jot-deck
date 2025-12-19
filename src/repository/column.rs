@@ -1,9 +1,29 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use ulid::Ulid;
 
 use crate::error::{JotDeckError, Result};
 use crate::models::{Column, NewColumn};
+
+/// RFC3339 文字列を DateTime<Utc> にパースする
+fn parse_datetime(s: &str, col_idx: usize) -> rusqlite::Result<DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                col_idx,
+                rusqlite::types::Type::Text,
+                Box::new(e),
+            )
+        })
+}
+
+/// RFC3339 文字列を Option<DateTime<Utc>> にパースする（deleted_at 用）
+fn parse_datetime_opt(s: &str) -> Option<DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .ok()
+}
 
 /// 次の Column 名を自動生成する
 /// a-col, b-col, ..., z-col, aa-col, ab-col, ...
@@ -82,13 +102,15 @@ pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i3
         new_column.name
     };
 
+    let tx = conn.unchecked_transaction()?;
+
     // 挿入位置以降の Column の position を +1 する
-    conn.execute(
+    tx.execute(
         "UPDATE columns SET position = position + 1, updated_at = ?1 WHERE deck_id = ?2 AND position >= ?3 AND deleted_at IS NULL",
         params![now.to_rfc3339(), &new_column.deck_id, position],
     )?;
 
-    conn.execute(
+    tx.execute(
         "INSERT INTO columns (id, deck_id, name, position, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             &id,
@@ -99,6 +121,8 @@ pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i3
             now.to_rfc3339(),
         ],
     )?;
+
+    tx.commit()?;
 
     Ok(Column {
         id,
@@ -119,17 +143,9 @@ fn row_to_column(row: &rusqlite::Row) -> rusqlite::Result<Column> {
         deck_id: row.get(1)?,
         name: row.get(2)?,
         position: row.get(3)?,
-        created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-            .unwrap()
-            .with_timezone(&Utc),
-        updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(5)?)
-            .unwrap()
-            .with_timezone(&Utc),
-        deleted_at: deleted_at_str.map(|s| {
-            chrono::DateTime::parse_from_rfc3339(&s)
-                .unwrap()
-                .with_timezone(&Utc)
-        }),
+        created_at: parse_datetime(&row.get::<_, String>(4)?, 4)?,
+        updated_at: parse_datetime(&row.get::<_, String>(5)?, 5)?,
+        deleted_at: deleted_at_str.and_then(|s| parse_datetime_opt(&s)),
     })
 }
 
@@ -156,8 +172,7 @@ pub fn get_by_deck_id(conn: &Connection, deck_id: &str) -> Result<Vec<Column>> {
 
     let columns = stmt
         .query_map(params![deck_id], row_to_column)?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(columns)
 }
@@ -204,24 +219,28 @@ pub fn move_to_position(conn: &Connection, id: &str, new_position: i32) -> Resul
     let old_position = column.position;
     let now = Utc::now();
 
+    let tx = conn.unchecked_transaction()?;
+
     if new_position > old_position {
         // 下に移動: old_position < x <= new_position の Column を -1
-        conn.execute(
+        tx.execute(
             "UPDATE columns SET position = position - 1, updated_at = ?1 WHERE deck_id = ?2 AND position > ?3 AND position <= ?4 AND deleted_at IS NULL",
             params![now.to_rfc3339(), &column.deck_id, old_position, new_position],
         )?;
     } else if new_position < old_position {
         // 上に移動: new_position <= x < old_position の Column を +1
-        conn.execute(
+        tx.execute(
             "UPDATE columns SET position = position + 1, updated_at = ?1 WHERE deck_id = ?2 AND position >= ?3 AND position < ?4 AND deleted_at IS NULL",
             params![now.to_rfc3339(), &column.deck_id, new_position, old_position],
         )?;
     }
 
-    conn.execute(
+    tx.execute(
         "UPDATE columns SET position = ?1, updated_at = ?2 WHERE id = ?3",
         params![new_position, now.to_rfc3339(), id],
     )?;
+
+    tx.commit()?;
 
     Ok(Column {
         position: new_position,
@@ -242,23 +261,27 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
 
     let now = Utc::now();
 
+    let tx = conn.unchecked_transaction()?;
+
     // 所属する Card を連動削除
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET deleted_at = ?1, deleted_with_column = 1, updated_at = ?1 WHERE column_id = ?2 AND deleted_at IS NULL",
         params![now.to_rfc3339(), id],
     )?;
 
     // Column を論理削除
-    conn.execute(
+    tx.execute(
         "UPDATE columns SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
         params![now.to_rfc3339(), id],
     )?;
 
     // position を詰める
-    conn.execute(
+    tx.execute(
         "UPDATE columns SET position = position - 1, updated_at = ?1 WHERE deck_id = ?2 AND position > ?3 AND deleted_at IS NULL",
         params![now.to_rfc3339(), &column.deck_id, column.position],
     )?;
+
+    tx.commit()?;
 
     Ok(())
 }
@@ -276,17 +299,21 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Column> {
     let now = Utc::now();
     let new_position = get_next_position(conn, &column.deck_id)?;
 
+    let tx = conn.unchecked_transaction()?;
+
     // 連動削除された Card を復元
-    conn.execute(
+    tx.execute(
         "UPDATE cards SET deleted_at = NULL, deleted_with_column = 0, updated_at = ?1 WHERE column_id = ?2 AND deleted_with_column = 1",
         params![now.to_rfc3339(), id],
     )?;
 
     // Column を復元
-    conn.execute(
+    tx.execute(
         "UPDATE columns SET deleted_at = NULL, position = ?1, updated_at = ?2 WHERE id = ?3",
         params![new_position, now.to_rfc3339(), id],
     )?;
+
+    tx.commit()?;
 
     Ok(Column {
         deleted_at: None,
@@ -304,8 +331,7 @@ pub fn get_deleted(conn: &Connection, deck_id: &str) -> Result<Vec<Column>> {
 
     let columns = stmt
         .query_map(params![deck_id], row_to_column)?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(columns)
 }

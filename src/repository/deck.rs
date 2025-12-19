@@ -1,9 +1,22 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
 use ulid::Ulid;
 
 use crate::error::{JotDeckError, Result};
 use crate::models::{Deck, NewDeck, SortOrder};
+
+/// RFC3339 文字列を DateTime<Utc> にパースする
+fn parse_datetime(s: &str, col_idx: usize) -> rusqlite::Result<DateTime<Utc>> {
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                col_idx,
+                rusqlite::types::Type::Text,
+                Box::new(e),
+            )
+        })
+}
 
 /// Deck を作成する
 pub fn create(conn: &Connection, new_deck: NewDeck) -> Result<Deck> {
@@ -40,12 +53,8 @@ pub fn get_by_id(conn: &Connection, id: &str) -> Result<Deck> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 sort_order: SortOrder::from_db_value(&row.get::<_, String>(2)?),
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                    .unwrap()
-                    .with_timezone(&Utc),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap()
-                    .with_timezone(&Utc),
+                created_at: parse_datetime(&row.get::<_, String>(3)?, 3)?,
+                updated_at: parse_datetime(&row.get::<_, String>(4)?, 4)?,
             })
         },
     )
@@ -68,16 +77,11 @@ pub fn get_all(conn: &Connection) -> Result<Vec<Deck>> {
                 id: row.get(0)?,
                 name: row.get(1)?,
                 sort_order: SortOrder::from_db_value(&row.get::<_, String>(2)?),
-                created_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(3)?)
-                    .unwrap()
-                    .with_timezone(&Utc),
-                updated_at: chrono::DateTime::parse_from_rfc3339(&row.get::<_, String>(4)?)
-                    .unwrap()
-                    .with_timezone(&Utc),
+                created_at: parse_datetime(&row.get::<_, String>(3)?, 3)?,
+                updated_at: parse_datetime(&row.get::<_, String>(4)?, 4)?,
             })
         })?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(decks)
 }
@@ -110,17 +114,27 @@ pub fn delete(conn: &Connection, id: &str) -> Result<()> {
     // まず Deck が存在するか確認
     let _ = get_by_id(conn, id)?;
 
+    let tx = conn.unchecked_transaction()?;
+
+    // 関連する card_tags を削除
+    tx.execute(
+        "DELETE FROM card_tags WHERE card_id IN (SELECT id FROM cards WHERE column_id IN (SELECT id FROM columns WHERE deck_id = ?1))",
+        params![id],
+    )?;
+
     // 関連する Card を削除
-    conn.execute(
+    tx.execute(
         "DELETE FROM cards WHERE column_id IN (SELECT id FROM columns WHERE deck_id = ?1)",
         params![id],
     )?;
 
     // 関連する Column を削除
-    conn.execute("DELETE FROM columns WHERE deck_id = ?1", params![id])?;
+    tx.execute("DELETE FROM columns WHERE deck_id = ?1", params![id])?;
 
     // Deck を削除
-    conn.execute("DELETE FROM decks WHERE id = ?1", params![id])?;
+    tx.execute("DELETE FROM decks WHERE id = ?1", params![id])?;
+
+    tx.commit()?;
 
     Ok(())
 }
