@@ -60,10 +60,18 @@ CREATE TABLE columns (
     position INTEGER NOT NULL,        -- 表示順序
     created_at INTEGER NOT NULL,      -- 作成日時 (Unix Milliseconds)
     updated_at INTEGER NOT NULL,      -- 最終更新日時
+    is_deleted INTEGER DEFAULT 0,     -- 論理削除フラグ (0:Active, 1:Deleted)
+    deleted_at INTEGER,               -- 削除日時（物理削除判定用）
     FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_columns_deck_id ON columns(deck_id, position);
+-- アクティブな Column の取得
+CREATE INDEX idx_columns_deck_id ON columns(deck_id, position)
+    WHERE is_deleted = 0;
+
+-- 削除済み Column の取得（復元用）
+CREATE INDEX idx_columns_deleted ON columns(deleted_at)
+    WHERE is_deleted = 1;
 ```
 
 ### 2.4 Cards テーブル
@@ -377,10 +385,60 @@ stateDiagram-v2
     Deleted --> [*]: 物理削除 (30日後)
 ```
 
-### 6.2 物理削除バッチ
+### 6.2 Column 削除時の連動削除
+
+Column を論理削除すると、所属する Card も連動して論理削除される。
 
 ```sql
--- 30日以上前に削除されたカードを物理削除
+-- Column 論理削除（トランザクション内で実行）
+BEGIN TRANSACTION;
+
+-- Column を論理削除
+UPDATE columns
+SET is_deleted = 1, deleted_at = ?
+WHERE id = ?;
+
+-- 所属する Card を連動削除
+UPDATE cards
+SET is_deleted = 1, deleted_at = ?
+WHERE column_id = ?
+  AND is_deleted = 0;
+
+COMMIT;
+```
+
+**復元時の挙動:**
+- Column を復元すると、同時刻に削除された Card も復元される
+- Card 単体で削除された場合は Column 復元の影響を受けない
+
+```sql
+-- Column 復元（トランザクション内で実行）
+BEGIN TRANSACTION;
+
+-- Column を復元
+UPDATE columns
+SET is_deleted = 0, deleted_at = NULL
+WHERE id = ?;
+
+-- 同時刻に削除された Card を復元
+UPDATE cards
+SET is_deleted = 0, deleted_at = NULL
+WHERE column_id = ?
+  AND deleted_at = ?;  -- Column と同じ deleted_at を持つ Card のみ
+
+COMMIT;
+```
+
+### 6.3 物理削除バッチ
+
+```sql
+-- 30日以上前に削除された Column を物理削除
+-- (CASCADE により所属 Card も削除される)
+DELETE FROM columns
+WHERE is_deleted = 1
+  AND deleted_at < (strftime('%s', 'now') * 1000 - 30 * 24 * 60 * 60 * 1000);
+
+-- 30日以上前に削除された Card を物理削除
 DELETE FROM cards
 WHERE is_deleted = 1
   AND deleted_at < (strftime('%s', 'now') * 1000 - 30 * 24 * 60 * 60 * 1000);

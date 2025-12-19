@@ -3,24 +3,98 @@
 ## 1. 設計方針
 
 ### 1.1 基本原則
-* **Vim ライク:** `h/j/k/l` によるナビゲーションを基本とする。
-* **モード切り替え:** Normal / Insert モードを持つ（CodeMirror の Vim モード）。
+* **Vim + Twitter ハイブリッド:** `h/j/k/l` による Vim ライクなナビゲーションと、`g` プレフィックスによる Twitter ライクなジャンプを組み合わせる。
+* **フォーカスベース:** フォーカス対象（Column / Card）によって同じキーが異なる動作を行う。
 * **修飾キー最小化:** 頻繁な操作は修飾キーなしで実行可能。
 * **カスタマイズ可能:** ユーザーが全キーバインドを変更可能。
 
-### 1.2 モード定義
+### 1.2 フォーカスモデル
 
-| モード | 説明 |
-|:---|:---|
-| **Normal** | カード間・カラム間のナビゲーション。カード編集なし。 |
-| **Insert** | カード内テキスト編集中。CodeMirror がフォーカス状態。 |
-| **Command** | コマンドパレット表示中。 |
+アプリケーションは以下のフォーカス状態を持つ：
+
+| フォーカス | 説明 | 遷移方法 |
+|:---|:---|:---|
+| **Column** | カラムヘッダーにフォーカス。カラム単位の操作が可能。 | Card フォーカス時に `Escape`、または空のカラムを選択 |
+| **Card** | カード本体にフォーカス。カード単位の操作が可能。 | Column フォーカス時に `j` / `k` / `Enter` |
+| **Edit** | カード内テキスト編集中。CodeMirror がアクティブ。 | Card フォーカス時に `i` / `a` / `Enter` |
+| **Command** | コマンドパレット表示中。 | `Ctrl+Shift+p` / `F1` |
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      Column Focus                        │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
+│  │ [Column A]  │  │ [Column B]  │  │ [Column C]  │ ←── H/L で移動、並び替え
+│  ├─────────────┤  ├─────────────┤  ├─────────────┤      │
+│  │   Card 1    │  │   Card 1    │  │   Card 1    │      │
+│  │   Card 2    │  │   Card 2    │  │   Card 2    │      │
+│  │   Card 3    │  │   Card 3    │  │             │      │
+│  └─────────────┘  └─────────────┘  └─────────────┘      │
+└─────────────────────────────────────────────────────────┘
+        │ j/Enter (最初のカード)    k (最後のカード)
+        ▼                           ▼
+┌─────────────────────────────────────────────────────────┐
+│                       Card Focus                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │
+│  │  Column A   │  │  Column B   │  │  Column C   │      │
+│  ├─────────────┤  ├─────────────┤  ├─────────────┤      │
+│  │  [Card 1]   │←─┼─────────────┼──┼─────────────┼─── H/L で別カラムへ移動
+│  │   Card 2    │  │   Card 1    │  │   Card 1    │      │
+│  │   Card 3    │  │   Card 2    │  │             │  j/k で上下移動
+│  └─────────────┘  └─────────────┘  └─────────────┘      │
+└─────────────────────────────────────────────────────────┘
+        │ i/a/Enter                 ▲
+        ▼                           │ Escape
+┌─────────────────────────────────────────────────────────┐
+│                       Edit Focus                         │
+│  ┌─────────────────────────────────────────────────┐    │
+│  │  CodeMirror (Vim mode)                          │    │
+│  │  ┌───────────────────────────────────────────┐  │    │
+│  │  │ カードのテキスト内容を編集中...            │  │    │
+│  │  │ █                                         │  │    │
+│  │  └───────────────────────────────────────────┘  │    │
+│  └─────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 2. Normal モード
+## 2. Column フォーカス
 
-### 2.1 カードナビゲーション
+カラムヘッダーにフォーカスがある状態。カラム単位の操作を行う。
+
+### 2.1 ナビゲーション
+
+| キー | 動作 |
+|:---|:---|
+| `h` | 左のカラムへフォーカス移動 |
+| `l` | 右のカラムへフォーカス移動 |
+| `j` | Card フォーカスへ遷移（カラム内の最初のカードを選択） |
+| `k` | Card フォーカスへ遷移（カラム内の最後のカードを選択） |
+| `Enter` | Card フォーカスへ遷移（カラム内の最初のカードを選択） |
+| `g 1` 〜 `g 9` | n 番目のカラムへ移動（Twitter 風） |
+
+### 2.2 カラム操作
+
+| キー | 動作 |
+|:---|:---|
+| `H` | カラムを左へ移動（並び替え） |
+| `L` | カラムを右へ移動（並び替え） |
+| `o` | 現在のカラムに新規カード作成 → Edit フォーカス |
+| `n` | 現在のカラムに新規カード作成 → Edit フォーカス（`o` のエイリアス、Twitter 風） |
+| `c` | 新規カラム作成（現在のカラムの右） |
+| `N` | 新規カラム作成（`c` のエイリアス） |
+| `Ctrl+w` | カラムを削除（`u` で Undo 可能） |
+| `d d` | カラムを削除（`Ctrl+w` と同等） |
+| `Delete` | カラムを削除 |
+| `r` | カラム名を編集 |
+
+---
+
+## 3. Card フォーカス
+
+カード本体にフォーカスがある状態。カード単位の操作を行う。
+
+### 3.1 ナビゲーション
 
 | キー | 動作 |
 |:---|:---|
@@ -28,138 +102,250 @@
 | `k` | 上のカードへ移動 |
 | `h` | 左のカラムへ移動（同じ行位置を維持） |
 | `l` | 右のカラムへ移動（同じ行位置を維持） |
+| `H` | カードを左のカラムへ移動 |
+| `L` | カードを右のカラムへ移動 |
+| `J` | カードをカラム内で下へ移動（並び替え） |
+| `K` | カードをカラム内で上へ移動（並び替え） |
 | `g g` | カラム内の最初のカードへ |
 | `G` | カラム内の最後のカードへ |
+| `g 1` 〜 `g 9` | n 番目のカラムへ移動（Twitter 風） |
 | `Ctrl+u` | 半ページ上へスクロール |
 | `Ctrl+d` | 半ページ下へスクロール |
+| `Escape` | Column フォーカスへ遷移 |
 
-### 2.2 カード操作
+### 3.2 カード操作
 
 | キー | 動作 |
 |:---|:---|
-| `i` | Insert モードへ（カーソル位置維持） |
-| `a` | Insert モードへ（カーソルを末尾に移動） |
-| `o` | 現在のカードの下に新規カード作成 → Insert モード |
-| `O` | 現在のカードの上に新規カード作成 → Insert モード |
+| `i` | Edit フォーカスへ（カーソル位置維持） |
+| `a` | Edit フォーカスへ（カーソルを末尾に移動） |
+| `o` | 現在のカードの下に新規カード作成 → Edit フォーカス |
+| `n` | 現在のカードの下に新規カード作成 → Edit フォーカス（`o` のエイリアス、Twitter 風） |
+| `O` | 現在のカードの上に新規カード作成 → Edit フォーカス |
+| `N` | 新規カラム作成（現在のカラムの右） |
 | `Enter` | 現在のカードを編集（= `i`） |
 | `d d` | カードを削除（論理削除） |
+| `Delete` | カードを削除（論理削除） |
 | `y y` | カードをコピー |
 | `p` | カードを下にペースト |
 | `P` | カードを上にペースト |
-| `+` / `=` | カードの score を +1 |
-| `-` | カードの score を -1 |
-
-### 2.3 カラム操作
-
-| キー | 動作 |
-|:---|:---|
-| `H` | カラムを左へ移動（並び替え） |
-| `L` | カラムを右へ移動（並び替え） |
-| `Ctrl+n` | 新規カラム作成（現在のカラムの右） |
-| `Ctrl+w` | カラムを削除（確認ダイアログ） |
-| `r` | カラム名を編集 |
-
-### 2.4 Deck 操作
-
-| キー | 動作 |
-|:---|:---|
-| `Ctrl+r` | Deck 切り替え（コマンドパレット） |
-| `Ctrl+Shift+n` | 新規 Deck 作成 |
-
-### 2.5 検索・フィルタ
-
-| キー | 動作 |
-|:---|:---|
-| `/` | 検索モード（Deck 内検索） |
-| `#` | タグフィルタモード |
-| `Escape` | フィルタ解除 |
-
-### 2.6 その他
-
-| キー | 動作 |
-|:---|:---|
-| `Ctrl+p` | コマンドパレット表示 |
-| `?` または `F1` | キーバインドチートシート表示 |
-| `Ctrl+,` | 設定画面を開く |
-| `Ctrl+z` | Undo |
-| `Ctrl+Shift+z` | Redo |
-| `u` | Undo（Vim 風） |
-| `Ctrl+r` | Redo（Vim 風、Deck 切り替えと競合 → 要検討） |
+| `f` | カードの score を +1（Twitter 風 favorite） |
+| `F` | カードの score を -1 |
+| `+` / `=` | カードの score を +1（Vim 風） |
+| `-` | カードの score を -1（Vim 風） |
 
 ---
 
-## 3. Insert モード
+## 4. 共通キーバインド（Column / Card フォーカス共通）
 
-### 3.1 テキスト編集
+### 4.1 Deck 操作
+
+| キー | 動作 |
+|:---|:---|
+| `g h` | Deck 切り替え（Deck 切り替えパレット表示、Twitter 風） |
+| `g d` | Deck 切り替え（`g h` のエイリアス） |
+| `Ctrl+p` | Deck 切り替え（Deck 切り替えパレット表示） |
+| `Ctrl+n` | 新規 Deck 作成 |
+
+### 4.2 カラム切り替え
+
+| キー | 動作 |
+|:---|:---|
+| `g n` | カラム切り替え（カラム切り替えパレット表示、Twitter 風） |
+| `g c` | カラム切り替え（`g n` のエイリアス） |
+| `Ctrl+t` | カラム切り替え（カラム切り替えパレット表示） |
+
+### 4.3 検索
+
+| キー | 動作 |
+|:---|:---|
+| `/` | 検索モード（Deck 内検索、`/#tag` でタグフィルタ） |
+
+### 4.4 ゴミ箱（復元）
+
+| キー | 動作 |
+|:---|:---|
+| `g t` | ゴミ箱一覧を表示（削除済み Column/Card の復元が可能） |
+
+### 4.5 その他
+
+| キー | 動作 |
+|:---|:---|
+| `Ctrl+Shift+p` または `F1` | コマンドパレット表示 |
+| `?` または `Ctrl+/` | キーバインドチートシート表示 |
+| `Ctrl+,` | 設定画面を開く |
+| `Ctrl+z` | Undo |
+| `Ctrl+Shift+z`, `Ctrl+y` | Redo |
+| `u` | Undo（Vim 風、削除直後は復元として機能） |
+| `Ctrl+r` | Redo（Vim 風） |
+
+---
+
+## 5. Edit フォーカス
+
+カード内のテキストを編集中の状態。CodeMirror の Vim モードがアクティブ。
+
+### 5.1 テキスト編集
 CodeMirror の Vim モードがそのまま適用される。
 
 | キー | 動作 |
 |:---|:---|
-| `Escape` | Normal モードへ戻る |
-| `Ctrl+[` | Normal モードへ戻る（Vim 互換） |
+| `Escape` | Card フォーカスへ戻る |
+| `Ctrl+[` | Card フォーカスへ戻る（Vim 互換） |
 | 通常のVimキー | CodeMirror Vim モードの標準動作 |
 
-### 3.2 特殊操作
+### 5.2 特殊操作
 
 | キー | 動作 |
 |:---|:---|
 | `#` + 文字入力 | タグ補完候補を表示 |
 | `Tab` | 補完候補を確定 |
 | `Ctrl+Enter` | カードを保存して次のカードを新規作成 |
-| `Shift+Enter` | カードを保存して Normal モードへ |
+| `Shift+Enter` | カードを保存して Card フォーカスへ |
 
 ---
 
-## 4. Command モード（コマンドパレット）
+## 6. Command フォーカス（コマンドパレット）
 
-### 4.1 ナビゲーション
+### 6.1 ナビゲーション
 
 | キー | 動作 |
 |:---|:---|
-| `Escape` | コマンドパレットを閉じる |
+| `Escape` | コマンドパレットを閉じる（元のフォーカスへ戻る） |
 | `Enter` | 選択中のコマンドを実行 |
 | `j` / `↓` | 次の候補へ |
 | `k` / `↑` | 前の候補へ |
 | 文字入力 | コマンド絞り込み |
 
-### 4.2 利用可能なコマンド
+### 6.2 利用可能なコマンド
 
 | コマンド | 説明 |
 |:---|:---|
 | `Switch Deck` | Deck 一覧を表示して切り替え |
 | `New Deck` | 新規 Deck 作成 |
 | `New Column` | 新規 Column 作成 |
-| `Delete Column` | Column 削除 |
+| `Delete Column` | Column 論理削除 |
+| `Trash` | ゴミ箱一覧を表示（削除済み Column/Card の復元） |
 | `Settings` | 設定画面を開く |
 | `AI Draft` | AI 清書を開始 |
 | `Toggle Theme` | ダーク/ライトモード切り替え |
-| `Export Deck` | Deck をエクスポート（将来実装） |
 | `Keyboard Shortcuts` | キーバインド一覧表示 |
 
 ---
 
-## 5. カスタマイズ
+## 7. カスタマイズ
 
-### 5.1 設定ファイル形式
+### 7.1 設定ファイル形式
 
 ```json
 {
   "keybindings": {
-    "normal": {
+    "column": {
+      "h": "column.focus.prev",
+      "l": "column.focus.next",
+      "j": "focus.card.first",
+      "k": "focus.card.last",
+      "Enter": "focus.card.first",
+      "H": "column.move.left",
+      "L": "column.move.right",
+      "o": "card.create",
+      "n": "card.create",
+      "c": "column.create",
+      "N": "column.create",
+      "dd": "column.delete",
+      "Ctrl+w": "column.delete",
+      "Delete": "column.delete",
+      "r": "column.rename",
+      "g1": "column.goto.1",
+      "g2": "column.goto.2",
+      "g3": "column.goto.3",
+      "g4": "column.goto.4",
+      "g5": "column.goto.5",
+      "g6": "column.goto.6",
+      "g7": "column.goto.7",
+      "g8": "column.goto.8",
+      "g9": "column.goto.9",
+      "gh": "deck.switcher",
+      "gd": "deck.switcher",
+      "gn": "column.switcher",
+      "gc": "column.switcher",
+      "Ctrl+p": "deck.switcher",
+      "Ctrl+t": "column.switcher",
+      "Ctrl+n": "deck.create",
+      "Ctrl+Shift+p": "palette.open",
+      "F1": "palette.open",
+      "/": "search.open",
+      "?": "help.shortcuts",
+      "Ctrl+/": "help.shortcuts",
+      "Ctrl+,": "settings.open",
+      "gt": "trash.open",
+      "u": "undo",
+      "Ctrl+z": "undo",
+      "Ctrl+r": "redo",
+      "Ctrl+y": "redo",
+      "Ctrl+Shift+z": "redo"
+    },
+    "card": {
       "j": "card.next",
       "k": "card.prev",
-      "h": "column.prev",
-      "l": "column.next",
+      "h": "card.column.prev",
+      "l": "card.column.next",
+      "H": "card.move.left",
+      "L": "card.move.right",
+      "J": "card.move.down",
+      "K": "card.move.up",
+      "gg": "card.first",
+      "G": "card.last",
+      "g1": "column.goto.1",
+      "g2": "column.goto.2",
+      "g3": "column.goto.3",
+      "g4": "column.goto.4",
+      "g5": "column.goto.5",
+      "g6": "column.goto.6",
+      "g7": "column.goto.7",
+      "g8": "column.goto.8",
+      "g9": "column.goto.9",
+      "gh": "deck.switcher",
+      "gd": "deck.switcher",
+      "gn": "column.switcher",
+      "gc": "column.switcher",
+      "Ctrl+p": "deck.switcher",
+      "Ctrl+t": "column.switcher",
+      "Ctrl+n": "deck.create",
+      "i": "focus.edit",
+      "a": "focus.edit.append",
+      "Enter": "focus.edit",
       "o": "card.create.below",
+      "n": "card.create.below",
       "O": "card.create.above",
+      "N": "column.create",
       "dd": "card.delete",
+      "Delete": "card.delete",
       "yy": "card.copy",
       "p": "card.paste.below",
-      "P": "card.paste.above"
+      "P": "card.paste.above",
+      "f": "card.score.up",
+      "F": "card.score.down",
+      "+": "card.score.up",
+      "=": "card.score.up",
+      "-": "card.score.down",
+      "Escape": "focus.column",
+      "Ctrl+Shift+p": "palette.open",
+      "F1": "palette.open",
+      "/": "search.open",
+      "?": "help.shortcuts",
+      "Ctrl+/": "help.shortcuts",
+      "Ctrl+,": "settings.open",
+      "gt": "trash.open",
+      "u": "undo",
+      "Ctrl+z": "undo",
+      "Ctrl+r": "redo",
+      "Ctrl+y": "redo",
+      "Ctrl+Shift+z": "redo"
     },
-    "insert": {
-      "Escape": "mode.normal",
-      "Ctrl+[": "mode.normal",
+    "edit": {
+      "Escape": "focus.card",
+      "Ctrl+[": "focus.card",
       "Ctrl+Enter": "card.save.and.create",
       "Shift+Enter": "card.save"
     },
@@ -173,52 +359,100 @@ CodeMirror の Vim モードがそのまま適用される。
 }
 ```
 
-### 5.2 コマンド一覧
+### 7.2 コマンド一覧
 
 | コマンドID | 説明 |
 |:---|:---|
+| **フォーカス遷移** | |
+| `focus.column` | Column フォーカスへ |
+| `focus.card.first` | Card フォーカスへ（最初のカードを選択） |
+| `focus.card.last` | Card フォーカスへ（最後のカードを選択） |
+| `focus.edit` | Edit フォーカスへ（カーソル位置維持） |
+| `focus.edit.append` | Edit フォーカスへ（カーソル末尾） |
+| **カード操作** | |
 | `card.next` | 下のカードへ |
 | `card.prev` | 上のカードへ |
+| `card.first` | カラム内の最初のカードへ |
+| `card.last` | カラム内の最後のカードへ |
+| `card.column.prev` | 左のカラムへ移動（カードフォーカス維持） |
+| `card.column.next` | 右のカラムへ移動（カードフォーカス維持） |
+| `card.move.left` | カードを左のカラムへ移動 |
+| `card.move.right` | カードを右のカラムへ移動 |
+| `card.move.up` | カードをカラム内で上へ移動（並び替え） |
+| `card.move.down` | カードをカラム内で下へ移動（並び替え） |
+| `card.create` | 新規カード作成 |
 | `card.create.below` | 下に新規カード |
 | `card.create.above` | 上に新規カード |
 | `card.delete` | カード削除 |
 | `card.copy` | カードコピー |
 | `card.paste.below` | 下にペースト |
 | `card.paste.above` | 上にペースト |
-| `card.score.up` | スコア +1 |
+| `card.score.up` | スコア +1（favorite） |
 | `card.score.down` | スコア -1 |
-| `column.next` | 右のカラムへ |
-| `column.prev` | 左のカラムへ |
+| `card.save` | カードを保存 |
+| `card.save.and.create` | カードを保存して新規作成 |
+| **カラム操作** | |
+| `column.focus.prev` | 左のカラムへフォーカス移動 |
+| `column.focus.next` | 右のカラムへフォーカス移動 |
+| `column.goto.{n}` | n 番目のカラムへ移動（1〜9） |
+| `column.switcher` | カラム切り替えパレット表示 |
 | `column.create` | 新規カラム |
 | `column.delete` | カラム削除 |
 | `column.rename` | カラム名変更 |
-| `column.move.left` | カラムを左へ |
-| `column.move.right` | カラムを右へ |
-| `deck.switch` | Deck 切り替え |
+| `column.move.left` | カラムを左へ並び替え |
+| `column.move.right` | カラムを右へ並び替え |
+| **Deck 操作** | |
+| `deck.switcher` | Deck 切り替えパレット表示 |
 | `deck.create` | 新規 Deck |
-| `mode.normal` | Normal モードへ |
-| `mode.insert` | Insert モードへ |
-| `mode.command` | コマンドパレット表示 |
-| `search.open` | 検索 |
-| `filter.tag` | タグフィルタ |
-| `filter.clear` | フィルタ解除 |
-| `settings.open` | 設定を開く |
-| `ai.draft` | AI 清書 |
-| `theme.toggle` | テーマ切り替え |
-| `undo` | 元に戻す |
-| `redo` | やり直し |
-| `help.shortcuts` | ショートカット一覧 |
+| **その他** | |
+| `palette.open` | コマンドパレット表示 |
 | `palette.close` | パレットを閉じる |
 | `palette.execute` | 選択コマンド実行 |
 | `palette.next` | 次の候補 |
 | `palette.prev` | 前の候補 |
+| `search.open` | 検索 |
+| `settings.open` | 設定を開く |
+| `trash.open` | ゴミ箱一覧を表示（Column/Card の復元） |
+| `ai.draft` | AI 清書 |
+| `theme.toggle` | テーマ切り替え |
+| `undo` | 元に戻す（削除直後は復元として機能） |
+| `redo` | やり直し |
+| `help.shortcuts` | ショートカット一覧 |
 
 ---
 
-## 6. 競合・未解決事項
+## 8. 競合・未解決事項
 
 | 項目 | 問題 | 案 |
 |:---|:---|:---|
-| `Ctrl+r` | Vim の Redo と Deck 切り替えが競合 | Deck 切り替えを `Ctrl+Shift+r` に変更、または Normal モード限定で `Ctrl+r` を Deck 切り替えに |
-| `#` | Normal モードでタグジャンプ vs Insert モードでタグ入力 | Normal では `/` + `#tag` で検索、Insert では `#` でタグ補完 |
 | マルチカーソル | CodeMirror の Vim モードではサポート限定的 | MVP では対応しない |
+
+---
+
+## 9. キーバインド設計の由来
+
+### 9.1 Vim 由来のキーバインド
+* `h/j/k/l` - 方向キー（左/下/上/右）
+* `i/a` - Edit フォーカス開始
+* `o/O` - 新規カード作成
+* `d d` - 削除
+* `y y` - ヤンク（コピー）
+* `p/P` - ペースト
+* `g g` - 先頭へ移動
+* `G` - 末尾へ移動
+* `u` - Undo
+* `Ctrl+r` - Redo
+* `H/L` - フォーカスに応じた移動（Column: 並び替え、Card: カラム間移動）
+* `J/K` - Card フォーカス時のカード並び替え
+* `Escape` - 上位フォーカスへ戻る
+
+### 9.2 Twitter (X) 由来のキーバインド
+* `j/k` - 投稿間の移動（Vim と共通）
+* `f` - Favorite（スコアアップ）※ 旧 Twitter の favorite キー
+* `F` - Unfavorite（スコアダウン）
+* `g h` - Deck 切り替え（Twitter の Home へ移動に類似）
+* `g n` - カラム切り替え（Twitter の Notifications に類似）
+* `g 1` 〜 `g 9` - n 番目のカラムへ（Twitter のリスト移動に類似）
+* `/` - 検索（Twitter と共通、`/#tag` でタグフィルタ）
+* `?` - ショートカット一覧表示（Twitter と共通）
+* `n` - 新規投稿（Jot Deck では `o` のエイリアスとして採用）
