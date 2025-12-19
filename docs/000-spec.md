@@ -13,45 +13,17 @@
 | **GitHub リポジトリ** | `plageoj/jot-deck` |
 | **リポジトリ構成** | monorepo (pnpm workspaces) |
 
-### 1.2 monorepo 構成
-
-```
-jot-deck/
-├── apps/
-│   └── desktop/              # Tauri + Svelte アプリ
-│       ├── src/              # Svelte フロントエンド
-│       ├── src-tauri/        # Rust バックエンド
-│       └── package.json
-├── packages/
-│   ├── ui/                   # 共通 UI コンポーネント
-│   ├── partykit/             # PartyKit 同期サーバー (jot-deck.partykit.dev)
-│   └── workers/              # Cloudflare Workers API (api.jot-deck.com)
-│       ├── src/
-│       │   ├── index.ts      # エントリポイント
-│       │   ├── routes/       # API ルート
-│       │   │   ├── auth.ts   # Google OAuth
-│       │   │   ├── stripe.ts # Stripe Webhook
-│       │   │   └── ai.ts     # AI API プロキシ
-│       │   └── db/           # D1 スキーマ・クエリ
-│       ├── wrangler.toml
-│       └── package.json
-├── docs/                     # 設計ドキュメント
-├── pnpm-workspace.yaml
-├── package.json
-└── turbo.json                # Turborepo (ビルド最適化)
-```
-
-### 1.3 コンセプト
+### 1.2 コンセプト
 **「思考の速度で書き、AIで結晶化させる」**
 NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じるパワーユーザーに向けた、キーボード操作特化型のローカルファースト・メモアプリ。TweetDeckのようなカラム型UIを採用し、断片的なアイデア（ドラフト）を高速に入力・結合・整理する。
 
-### 1.4 コアバリュー (USP)
+### 1.3 コアバリュー (USP)
 * **圧倒的な速度:** 起動0.5秒、入力遅延ゼロ。数万件のカードがあってもカクつかない。
 * **思考の断片化:** 長文を書かせず、140字程度の「カード」を積み重ねる体験。
 * **キーボード完結:** マウスに手を伸ばす時間を排除。
 * **AIによる収束:** 散らばった断片をAIが文脈を理解して統合・清書する（マネタイズポイント）。
 
-### 1.5 用語定義
+### 1.4 用語定義
 | 用語 | 説明 |
 | :--- | :--- |
 | **Deck** | Columnの集合。Excelのワークブックに相当。ユーザーは複数のDeckを持てる。 |
@@ -61,39 +33,36 @@ NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じ�
 
 ---
 
-## 2. 技術スタック選定
-
-「パフォーマンス」と「クロスプラットフォーム開発効率」を最優先する。
+## 2. 技術スタック
 
 ### 2.1 クライアント
 
-| レイヤー | 採用技術 | 選定理由 |
-| :--- | :--- | :--- |
-| **App Shell** | **Tauri v2** | 軽量(数MB)、爆速起動、OSネイティブWebview利用。 |
-| **Backend** | **Rust** | メモリ安全性、高速処理、AI/DB制御の堅牢性。 |
-| **Frontend** | **Svelte + TypeScript** | 仮想DOMを持たないため、大量のDOM描画でも高速。 |
-| **Database** | **SQLite + rusqlite** | ローカル単一ファイル、FTS5(全文検索)。非同期化が必要になった場合は sqlx へ移行検討。 |
-| **ID生成** | **ULID** | 時間順ソート可能、文字列比較でソート可能、UUID v7 より安定。 |
-| **Editor** | **CodeMirror 6** | 軽量かつ高機能。Vimモード対応が容易。 |
-| **Virtualization** | **TanStack Virtual** | 画面外の要素を描画しない仮想スクロール（必須要件）。 |
+| レイヤー | 採用技術 |
+| :--- | :--- |
+| **App Shell** | Tauri v2 |
+| **Backend** | Rust |
+| **Frontend** | Svelte + TypeScript |
+| **Database** | SQLite (FTS5) |
+| **ID生成** | ULID |
+| **Editor** | CodeMirror 6 (Vim モード) |
 
 ### 2.2 クラウド（将来実装）
 
-| レイヤー | 採用技術 | 選定理由 |
-| :--- | :--- | :--- |
-| **API** | **Cloudflare Workers** | エッジ実行による低レイテンシ。 |
-| **Database** | **Cloudflare D1** | SQLite互換、ローカルDBとスキーマ共有可能。 |
-| **Storage** | **Cloudflare R2** | Automergeドキュメントのバイナリ保存。 |
-| **Realtime** | **PartyKit** | WebSocket + Automerge同期。Cloudflare上で動作。 |
-| **CRDT** | **Automerge** | 競合のない同期。Rust/WASM対応。 |
+| レイヤー | 採用技術 |
+| :--- | :--- |
+| **API** | Cloudflare Workers |
+| **Database** | Cloudflare D1 |
+| **Storage** | Cloudflare R2 |
+| **Realtime** | PartyKit |
+| **CRDT** | Automerge |
 
 ### 2.3 外部サービス
 
-| レイヤー | 採用技術 | 選定理由 |
-| :--- | :--- | :--- |
-| **AI** | **Gemini (Streaming)** | MVP での AI 清書機能。ストリーミングでUX向上。将来的に Claude/OpenAI への拡張を想定。 |
-| **認証** | **Google OAuth** | MVP ではGoogle認証のみ。 |
-| **決済** | **Stripe** | サブスクリプション課金。 |
+| レイヤー | 採用技術 |
+| :--- | :--- |
+| **AI** | Gemini (MVP)、将来的に Claude/OpenAI |
+| **認証** | Google OAuth |
+| **決済** | Stripe |
 
 ---
 
@@ -104,11 +73,8 @@ NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じ�
 * **カード:** 各カラム内にテキスト入力エリア（カード）がスタックされる。
 * **ソート順:** デフォルトは `created_at DESC`（新しい順）。Deck ごとに設定可能。
 
-### 3.2 入力体験の最適化
-* **View / Edit モードの分離:**
-    * 通常時: 軽量な `div` または Markdownレンダラー（描画コスト低）。
-    * フォーカス時: `CodeMirror` インスタンスに切り替え（編集機能有効化）。
-* **CodeMirror インスタンスプール:** フォーカスごとに生成せず、LRUキャッシュで使い回す。
+### 3.2 入力体験
+* **View / Edit モードの分離:** 通常時は閲覧モード、フォーカス時にエディタ起動。
 * **Markdown表示:** 設定で Markdown レンダリング / プレーンテキスト表示を切り替え可能。編集時は常にプレーンテキスト。
 
 ### 3.3 タグ機能
@@ -127,7 +93,6 @@ NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じ�
 * **Undo:** 削除直後は `u` で復元可能。
 * **ゴミ箱:** `g t` で削除済み一覧を表示し、復元可能。
 * **物理削除:** 30日後に自動で物理削除。
-* **遅延ロード:** 可視領域外の Column はプレースホルダー表示、Intersection Observer で可視時にロード。
 
 ### 3.5 Deck 管理
 * ユーザーは複数の Deck を作成可能。
@@ -179,17 +144,11 @@ Deck 全体のカードを読み取り、AIが文章として清書する。
     * 新しい Deck として取り込み
     * クリップボードにコピー
 
-### 4.3 技術仕様
+### 4.3 仕様
 * **LLM:** Gemini（MVP）。将来的に Claude/OpenAI に拡張し、ユーザーがモデルを選択可能にする。
-* **レスポンス形式:** ストリーミング（Server-Sent Events）
-* **実装方式:**
-    * Rust 側で Gemini API のストリーミングレスポンスを受信
-    * Tauri Event (`ai-chunk`) でフロントエンドに逐次送信
-    * フロントエンドでリアルタイム描画
+* **レスポンス形式:** ストリーミング（リアルタイム表示）
 * **会話履歴:** 保存しない。
-* **エラーハンドリング:**
-    * API エラー: モーダルで通知、リトライボタン表示
-    * ネットワーク切断: ストリーム中断を検知し、途中結果を保持
+* **エラー時:** モーダルで通知、リトライ可能。ネットワーク切断時は途中結果を保持。
 
 ---
 
@@ -225,56 +184,16 @@ Deck 全体のカードを読み取り、AIが文章として清書する。
 ### 7.1 対象プラン
 * **Essential / Power User** プラン限定。Free プランはローカルのみ。
 
-### 7.2 インフラ構成
-
-```mermaid
-flowchart TB
-    subgraph Client["Tauri Client"]
-        LocalDB["SQLite\n(meta.db)"]
-        AutomergeLocal["Automerge\n(.automerge)"]
-    end
-
-    subgraph Cloudflare
-        Workers["Workers\n(REST API)"]
-        D1["D1\n(メタデータ)"]
-        R2["R2\n(Automerge)"]
-    end
-
-    subgraph PartyKit
-        SyncRoom["Sync Room\n(WebSocket)"]
-    end
-
-    Client <-->|REST API| Workers
-    Workers --> D1
-    Client <-->|WebSocket| SyncRoom
-    SyncRoom <--> R2
-```
-
-### 7.3 コンポーネント役割
-
-| コンポーネント | 役割 |
-|:---|:---|
-| **Workers** | REST API、認証、Stripe Webhook、AI API 中継 |
-| **D1** | ユーザー情報、課金状態、Deck/Column メタデータ |
-| **R2** | Automerge ドキュメント（`/{user_id}/{deck_id}.automerge`） |
-| **PartyKit** | WebSocket 接続管理、リアルタイム同期、Automerge マージ |
-
-### 7.4 同期方式
+### 7.2 同期方式
 * **CRDT ベース**: Automerge を採用し、競合のない同期を実現。
 * **同期単位**: Deck 単位（Card テキストは文字レベルでマージ可能）。
 
-### 7.5 競合解決
+### 7.3 競合解決
 * **テキスト編集:** 文字レベルで自動マージ（同時編集可能）
 * **メタデータ**（score, column_id 等）: Last-Writer-Wins
 * **削除:** 削除フラグが優先（tombstone 方式）
 
-### 7.6 同期フロー
-1. クライアントが PartyKit Sync Room に WebSocket 接続
-2. ローカル変更を Automerge バイナリ差分として送信
-3. PartyKit が差分をマージし、R2 に保存
-4. 他の接続クライアントに差分をブロードキャスト
-
-### 7.7 オフライン対応
+### 7.4 オフライン対応
 * オフライン中の変更はローカルの Automerge ファイルに蓄積。
 * オンライン復帰時に差分を送信、自動マージ。
 * 競合は CRDT により自動解決。
