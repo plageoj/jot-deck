@@ -15,7 +15,7 @@ pub struct CleanupResult {
 }
 
 /// 論理削除から指定日数経過したデータを物理削除する
-pub fn cleanup_old_deleted(conn: &Connection) -> Result<CleanupResult> {
+pub fn cleanup_old_deleted(conn: &mut Connection) -> Result<CleanupResult> {
     let threshold = Utc::now() - Duration::days(DELETE_AFTER_DAYS);
     let threshold_str = threshold.to_rfc3339();
 
@@ -23,38 +23,40 @@ pub fn cleanup_old_deleted(conn: &Connection) -> Result<CleanupResult> {
 }
 
 /// 指定した閾値より古い論理削除データを物理削除する（テスト用）
-pub fn cleanup_with_threshold(conn: &Connection, threshold: &str) -> Result<CleanupResult> {
+pub fn cleanup_with_threshold(conn: &mut Connection, threshold: &str) -> Result<CleanupResult> {
+    let tx = conn.transaction()?;
     let mut result = CleanupResult::default();
 
     // 1. 削除対象の Card に関連するタグの関連を削除
-    conn.execute(
+    tx.execute(
         "DELETE FROM card_tags WHERE card_id IN (SELECT id FROM cards WHERE deleted_at IS NOT NULL AND deleted_at < ?1)",
         params![threshold],
     )?;
 
     // 2. 削除対象の Card を物理削除
-    result.deleted_cards = conn.execute(
+    result.deleted_cards = tx.execute(
         "DELETE FROM cards WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
         params![threshold],
     )?;
 
     // 3. 削除対象の Column を物理削除（所属する Card は既に削除済み、または連動削除で削除されている）
-    result.deleted_columns = conn.execute(
+    result.deleted_columns = tx.execute(
         "DELETE FROM columns WHERE deleted_at IS NOT NULL AND deleted_at < ?1",
         params![threshold],
     )?;
 
     // 4. どの Card にも関連付けられていない孤立タグを削除
-    result.deleted_orphan_tags = conn.execute(
+    result.deleted_orphan_tags = tx.execute(
         "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM card_tags)",
         [],
     )?;
 
+    tx.commit()?;
     Ok(result)
 }
 
 /// 全 Deck の物理削除バッチを実行
-pub fn run_cleanup_batch(conn: &Connection) -> Result<CleanupResult> {
+pub fn run_cleanup_batch(conn: &mut Connection) -> Result<CleanupResult> {
     cleanup_old_deleted(conn)
 }
 
@@ -68,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_old_deleted() {
-        let conn = create_in_memory().unwrap();
+        let mut conn = create_in_memory().unwrap();
 
         // テストデータ作成
         let d = deck::create(
@@ -105,7 +107,7 @@ mod tests {
         card::soft_delete(&conn, &c.id).unwrap();
 
         // 現時点での cleanup では削除されない（30日経過していない）
-        let result = cleanup_old_deleted(&conn).unwrap();
+        let result = cleanup_old_deleted(&mut conn).unwrap();
         assert_eq!(result.deleted_cards, 0);
 
         // deleted_at を 31 日前に更新（テスト用）
@@ -117,7 +119,7 @@ mod tests {
         .unwrap();
 
         // cleanup 実行
-        let result = cleanup_old_deleted(&conn).unwrap();
+        let result = cleanup_old_deleted(&mut conn).unwrap();
         assert_eq!(result.deleted_cards, 1);
         assert_eq!(result.deleted_orphan_tags, 1);
 
@@ -134,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_cleanup_column_with_cards() {
-        let conn = create_in_memory().unwrap();
+        let mut conn = create_in_memory().unwrap();
 
         let d = deck::create(
             &conn,
@@ -189,7 +191,7 @@ mod tests {
         .unwrap();
 
         // cleanup 実行
-        let result = cleanup_old_deleted(&conn).unwrap();
+        let result = cleanup_old_deleted(&mut conn).unwrap();
         assert_eq!(result.deleted_columns, 1);
         assert_eq!(result.deleted_cards, 2);
     }

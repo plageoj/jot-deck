@@ -66,6 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_card_tags_tag_id ON card_tags(tag_id);
 
 /// データベースを初期化する
 pub fn init_db(conn: &Connection) -> Result<()> {
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
     conn.execute_batch(SCHEMA)?;
     Ok(())
 }
