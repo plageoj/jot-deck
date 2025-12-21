@@ -1,9 +1,10 @@
 use std::env;
 use std::io::{self, BufRead, Write};
 
-use jot_deck_core::models::{NewCard, NewColumn, NewDeck, SortOrder};
-use jot_deck_core::repository::{card, column, deck, tag};
-use jot_deck_core::{create_file_db, run_cleanup_batch};
+use jot_deck_core::{
+    card, column, create_file_db, deck, run_cleanup_batch, tag, NewCard, NewColumn, NewDeck,
+    SortOrder,
+};
 
 fn main() {
     let args: Vec<String> = env::args().collect();

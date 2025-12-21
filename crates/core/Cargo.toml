@@ -1,0 +1,19 @@
+[package]
+name = "jot-deck-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+ulid = "1.1"
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+regex = "1.11"
+
+[[bin]]
+name = "jot-deck-cli"
+path = "bin/cli.rs"

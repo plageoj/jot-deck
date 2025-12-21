@@ -1,1 +1,26 @@
+# Rust
 /target
+
+# Node.js
+node_modules
+.pnpm-store
+
+# Build outputs
+packages/app/build
+packages/app/.svelte-kit
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
