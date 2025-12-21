@@ -10,3 +10,6 @@ pub use cleanup::run_cleanup_batch;
 pub use db::{create_file_db, create_in_memory};
 pub use error::{JotDeckError, Result};
 pub use models::*;
+
+// Re-export rusqlite types for Tauri integration
+pub use rusqlite::Connection;

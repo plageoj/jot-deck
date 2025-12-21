@@ -1,12 +1,11 @@
 use jot_deck_core::{
     create_file_db,
     repository::{card, column, deck},
-    Card, Column, Deck, NewCard, NewColumn, NewDeck, SortOrder,
+    Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder,
 };
-use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::Mutex;
-use tauri::State;
+use tauri::{Manager, State};
 
 /// アプリケーションの状態
 struct AppState {
