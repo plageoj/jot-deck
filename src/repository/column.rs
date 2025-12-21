@@ -25,8 +25,21 @@ fn parse_datetime_opt(s: &str) -> Option<DateTime<Utc>> {
         .ok()
 }
 
+/// 数値をアルファベット列名に変換する (0 -> "a", 25 -> "z", 26 -> "aa", ...)
+fn to_alphabetic(n: u32) -> String {
+    let mut result = String::new();
+    let mut num = n + 1; // 1-indexed bijective base-26
+    while num > 0 {
+        num -= 1;
+        let c = (b'a' + (num % 26) as u8) as char;
+        result.insert(0, c);
+        num /= 26;
+    }
+    result
+}
+
 /// 次の Column 名を自動生成する
-/// a-col, b-col, ..., z-col, aa-col, ab-col, ...
+/// a-col, b-col, ..., z-col, aa-col, ab-col, ..., zz-col, aaa-col, ...
 fn generate_column_name(conn: &Connection, deck_id: &str) -> Result<String> {
     let count: i32 = conn.query_row(
         "SELECT COUNT(*) FROM columns WHERE deck_id = ?1",
@@ -34,15 +47,8 @@ fn generate_column_name(conn: &Connection, deck_id: &str) -> Result<String> {
         |row| row.get(0),
     )?;
 
-    let name = if count < 26 {
-        format!("{}-col", (b'a' + count as u8) as char)
-    } else {
-        let first = (b'a' + ((count - 26) / 26) as u8) as char;
-        let second = (b'a' + ((count - 26) % 26) as u8) as char;
-        format!("{}{}-col", first, second)
-    };
-
-    Ok(name)
+    let prefix = to_alphabetic(count as u32);
+    Ok(format!("{}-col", prefix))
 }
 
 /// 次の position を取得する
@@ -471,5 +477,28 @@ mod tests {
         assert_eq!(columns[0].name, "B");
         assert_eq!(columns[1].name, "C");
         assert_eq!(columns[2].name, "A");
+    }
+
+    #[test]
+    fn test_to_alphabetic() {
+        // Single letter: a-z (0-25)
+        assert_eq!(to_alphabetic(0), "a");
+        assert_eq!(to_alphabetic(1), "b");
+        assert_eq!(to_alphabetic(25), "z");
+
+        // Two letters: aa-zz (26-701)
+        assert_eq!(to_alphabetic(26), "aa");
+        assert_eq!(to_alphabetic(27), "ab");
+        assert_eq!(to_alphabetic(51), "az");
+        assert_eq!(to_alphabetic(52), "ba");
+        assert_eq!(to_alphabetic(701), "zz");
+
+        // Three letters: aaa-zzz (702-18277)
+        assert_eq!(to_alphabetic(702), "aaa");
+        assert_eq!(to_alphabetic(703), "aab");
+        assert_eq!(to_alphabetic(18277), "zzz");
+
+        // Four letters (18278+)
+        assert_eq!(to_alphabetic(18278), "aaaa");
     }
 }
