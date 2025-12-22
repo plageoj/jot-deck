@@ -19,27 +19,28 @@
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
+  let columnRefs: HTMLDivElement[] = [];
 
   export function scrollToColumn(index: number) {
-    if (deckContainer && columns[index]) {
-      const columnElements = deckContainer.querySelectorAll(".column");
-      const columnEl = columnElements[index] as HTMLElement;
-      if (columnEl) {
-        columnEl.scrollIntoView({ behavior: "smooth", inline: "center" });
-      }
+    const columnEl = columnRefs[index];
+    if (columnEl) {
+      columnEl.scrollIntoView({ behavior: "smooth", inline: "center" });
     }
   }
 </script>
 
 <div class="deck" bind:this={deckContainer}>
   {#each columns as column, index (column.id)}
-    <ColumnComponent
-      {column}
-      cards={cardsByColumn[column.id] ?? []}
-      focused={index === focusedColumnIndex}
-      focusedCardIndex={index === focusedColumnIndex ? focusedCardIndex : -1}
-      onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
-    />
+    {@const isCurrentColumn = index === focusedColumnIndex}
+    <div bind:this={columnRefs[index]} class="column-wrapper">
+      <ColumnComponent
+        {column}
+        cards={cardsByColumn[column.id] ?? []}
+        focused={isCurrentColumn}
+        focusedCardIndex={isCurrentColumn ? focusedCardIndex : -1}
+        onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
+      />
+    </div>
   {/each}
 </div>
 
@@ -53,6 +54,11 @@
     overflow-y: hidden;
     scroll-behavior: smooth;
     scroll-snap-type: x proximity;
+  }
+
+  .column-wrapper {
+    height: 100%;
+    flex-shrink: 0;
   }
 
   .deck::-webkit-scrollbar {

@@ -1,5 +1,5 @@
-<script lang="ts" generics="T">
-  import { onMount, tick } from "svelte";
+<script lang="ts" generics="T extends { id: string }">
+  import { onMount } from "svelte";
 
   interface Props {
     items: T[];
@@ -50,7 +50,7 @@
 <div class="virtual-list" bind:this={container} onscroll={handleScroll}>
   <div class="virtual-list-inner" style="height: {totalHeight}px;">
     <div class="virtual-list-content" style="transform: translateY({offsetY}px);">
-      {#each visibleItems as item, i (startIndex + i)}
+      {#each visibleItems as item, i (item.id)}
         {@render children(item, startIndex + i)}
       {/each}
     </div>

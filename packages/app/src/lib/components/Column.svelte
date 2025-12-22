@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Column, Card } from "$lib/types";
   import CardComponent from "./Card.svelte";
-  import VirtualList from "./VirtualList.svelte";
 
   interface Props {
     column: Column;
@@ -19,10 +18,6 @@
     onAddCard,
   }: Props = $props();
 
-  const CARD_HEIGHT = 80;
-  const VIRTUAL_SCROLL_THRESHOLD = 100;
-
-  const useVirtualScroll = $derived(cards.length >= VIRTUAL_SCROLL_THRESHOLD);
 </script>
 
 <div class="column" class:focused>
@@ -39,19 +34,11 @@
     {/if}
   </div>
 
-  {#if useVirtualScroll}
-    <VirtualList items={cards} itemHeight={CARD_HEIGHT}>
-      {#snippet children(card, index)}
-        <CardComponent {card} focused={index === focusedCardIndex} />
-      {/snippet}
-    </VirtualList>
-  {:else}
-    <div class="cards">
-      {#each cards as card, index (card.id)}
-        <CardComponent {card} focused={index === focusedCardIndex} />
-      {/each}
-    </div>
-  {/if}
+  <div class="cards">
+    {#each cards as card, index (card.id)}
+      <CardComponent {card} focused={index === focusedCardIndex} />
+    {/each}
+  </div>
 </div>
 
 <style>
