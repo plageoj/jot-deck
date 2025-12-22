@@ -2,6 +2,8 @@
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import type { Deck, Column, Card } from "$lib/types";
+  import { Deck as DeckComponent } from "$lib/components";
+  import "$lib/styles/theme.css";
 
   let decks = $state<Deck[]>([]);
   let currentDeck = $state<Deck | null>(null);
@@ -112,54 +114,25 @@
   </header>
 
   {#if loading}
-    <div class="loading">Loading...</div>
+    <div class="status">Loading...</div>
   {:else if error}
-    <div class="error">{error}</div>
+    <div class="status error">{error}</div>
   {:else if !currentDeck}
-    <div class="empty">
+    <div class="status">
       <p>No decks yet. Create your first deck!</p>
       <button onclick={createDeck}>Create Deck</button>
     </div>
-  {:else}
-    <div class="deck">
-      {#each columns as column}
-        <div class="column">
-          <div class="column-header">
-            <span class="column-name">{column.name}</span>
-            <button class="add-card" onclick={() => createCard(column.id)}>+</button>
-          </div>
-          <div class="cards">
-            {#each cardsByColumn[column.id] || [] as card}
-              <div class="card">
-                <div class="card-content">
-                  {card.content || "(empty)"}
-                </div>
-                {#if card.score !== 0}
-                  <span class="card-score">{card.score}</span>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        </div>
-      {/each}
+  {:else if columns.length === 0}
+    <div class="status">
+      <p>No columns in this deck. Create your first column!</p>
+      <button onclick={createColumn}>Create Column</button>
     </div>
+  {:else}
+    <DeckComponent {columns} {cardsByColumn} onAddCard={createCard} />
   {/if}
 </main>
 
 <style>
-  :global(*) {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
-
-  :global(body) {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-      Ubuntu, Cantarell, sans-serif;
-    background-color: #1a1a2e;
-    color: #eee;
-  }
-
   .app {
     display: flex;
     flex-direction: column;
@@ -172,29 +145,37 @@
     align-items: center;
     gap: 1rem;
     padding: 0.75rem 1rem;
-    background-color: #16213e;
-    border-bottom: 1px solid #0f3460;
+    background-color: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
+    flex-shrink: 0;
   }
 
   .header h1 {
     font-size: 1.25rem;
     font-weight: 600;
-    color: #e94560;
+    color: var(--accent);
   }
 
   .header select,
   .header button {
     padding: 0.4rem 0.8rem;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--input-border);
     border-radius: 4px;
-    background-color: #1a1a2e;
-    color: #eee;
+    background-color: var(--input-bg);
+    color: var(--text);
     font-size: 0.875rem;
     cursor: pointer;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
   }
 
-  .header button:hover {
-    background-color: #0f3460;
+  .header select:focus,
+  .header button:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+  }
+
+  .header button:hover:not(:disabled) {
+    background-color: var(--bg-tertiary);
   }
 
   .header button:disabled {
@@ -202,108 +183,32 @@
     cursor: not-allowed;
   }
 
-  .loading,
-  .error,
-  .empty {
+  .status {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     flex: 1;
     gap: 1rem;
+    color: var(--text-muted);
   }
 
-  .error {
-    color: #e94560;
+  .status.error {
+    color: var(--accent);
   }
 
-  .deck {
-    display: flex;
-    gap: 1rem;
-    padding: 1rem;
-    flex: 1;
-    overflow-x: auto;
-    overflow-y: hidden;
-  }
-
-  .column {
-    display: flex;
-    flex-direction: column;
-    min-width: 280px;
-    max-width: 280px;
-    background-color: #16213e;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-
-  .column-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.75rem;
-    background-color: #0f3460;
-    font-weight: 500;
-  }
-
-  .column-name {
-    font-size: 0.875rem;
-  }
-
-  .add-card {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    border: none;
+  .status button {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--input-border);
     border-radius: 4px;
-    background-color: #1a1a2e;
-    color: #eee;
-    font-size: 1rem;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .add-card:hover {
-    background-color: #e94560;
-  }
-
-  .cards {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.5rem;
-    flex: 1;
-    overflow-y: auto;
-  }
-
-  .card {
-    padding: 0.75rem;
-    background-color: #1a1a2e;
-    border: 1px solid #0f3460;
-    border-radius: 6px;
+    background-color: var(--input-bg);
+    color: var(--text);
     font-size: 0.875rem;
-    line-height: 1.4;
-    position: relative;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
   }
 
-  .card:hover {
-    border-color: #e94560;
-  }
-
-  .card-content {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .card-score {
-    position: absolute;
-    top: 0.25rem;
-    right: 0.25rem;
-    padding: 0.125rem 0.375rem;
-    background-color: #e94560;
-    border-radius: 10px;
-    font-size: 0.75rem;
-    font-weight: 500;
+  .status button:hover {
+    background-color: var(--bg-tertiary);
   }
 </style>
