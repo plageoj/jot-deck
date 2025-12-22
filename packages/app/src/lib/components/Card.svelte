@@ -8,7 +8,6 @@
     editing?: boolean;
     onSave?: (content: string) => void;
     onCancelEdit?: () => void;
-    onSaveAndNext?: () => void;
     onStartEdit?: () => void;
   }
 
@@ -18,7 +17,6 @@
     editing = false,
     onSave,
     onCancelEdit,
-    onSaveAndNext,
     onStartEdit,
   }: Props = $props();
 
@@ -61,7 +59,6 @@
       content={card.content}
       onSave={handleSave}
       onCancel={handleCancel}
-      {onSaveAndNext}
     />
   {:else}
     <div class="card-content">

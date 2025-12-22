@@ -12,7 +12,6 @@
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
     onStartEdit?: (cardId: string) => void;
-    onSaveAndNext?: (cardId: string) => void;
   }
 
   let {
@@ -25,7 +24,6 @@
     onSaveCard,
     onCancelEdit,
     onStartEdit,
-    onSaveAndNext,
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
@@ -53,7 +51,6 @@
         {onSaveCard}
         {onCancelEdit}
         {onStartEdit}
-        {onSaveAndNext}
       />
     </div>
   {/each}

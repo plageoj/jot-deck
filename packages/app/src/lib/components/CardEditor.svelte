@@ -9,13 +9,13 @@
     content: string;
     onSave: (content: string) => void;
     onCancel: () => void;
-    onSaveAndNext?: () => void;
   }
 
-  let { content, onSave, onCancel, onSaveAndNext }: Props = $props();
+  let { content, onSave, onCancel }: Props = $props();
 
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
+  let cancelled = false;
 
   function getContent(): string {
     return view?.state.doc.toString() ?? content;
@@ -25,11 +25,9 @@
     onSave(getContent());
   }
 
-  function saveAndNext() {
-    if (onSaveAndNext) {
-      onSave(getContent());
-      onSaveAndNext();
-    }
+  function cancel() {
+    cancelled = true;
+    onCancel();
   }
 
   onMount(() => {
@@ -39,33 +37,23 @@
     });
     Vim.defineEx("wq", "wq", () => {
       save();
-      onCancel();
+      cancel();
     });
     Vim.defineEx("q", "q", () => {
-      onCancel();
+      // Discard changes and exit (don't save)
+      cancel();
+    });
+    Vim.defineEx("q!", "q!", () => {
+      // Force quit (same as :q since we don't auto-save)
+      cancel();
     });
 
     const customKeymap = keymap.of([
       {
-        key: "Escape",
-        run: () => {
-          // Let Vim handle Escape first (for mode switching)
-          // Only exit edit mode if we're in normal mode
-          return false;
-        },
-      },
-      {
         key: "Ctrl-Enter",
         run: () => {
-          saveAndNext();
-          return true;
-        },
-      },
-      {
-        key: "Shift-Enter",
-        run: () => {
           save();
-          onCancel();
+          cancel();
           return true;
         },
       },
@@ -148,9 +136,8 @@
                 return false; // Don't exit edit mode
               }
             }
-            // Auto-save on blur
-            save();
-            onCancel();
+            // Keep editing on blur - don't auto-save (Twitter-like behavior)
+            // User must explicitly save with :w, :wq, or Ctrl+Enter
           },
         }),
       ],
@@ -166,6 +153,11 @@
   });
 
   onDestroy(() => {
+    // Auto-save on destroy (when switching to another card)
+    // Don't save if explicitly cancelled with :q
+    if (view && !cancelled) {
+      save();
+    }
     view?.destroy();
   });
 </script>

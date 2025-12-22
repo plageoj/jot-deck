@@ -12,7 +12,6 @@
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
     onStartEdit?: (cardId: string) => void;
-    onSaveAndNext?: (cardId: string) => void;
   }
 
   let {
@@ -25,7 +24,6 @@
     onSaveCard,
     onCancelEdit,
     onStartEdit,
-    onSaveAndNext,
   }: Props = $props();
 </script>
 
@@ -52,7 +50,6 @@
         onSave={(content) => onSaveCard?.(card.id, content)}
         {onCancelEdit}
         onStartEdit={() => onStartEdit?.(card.id)}
-        onSaveAndNext={() => onSaveAndNext?.(card.id)}
       />
     {/each}
   </div>

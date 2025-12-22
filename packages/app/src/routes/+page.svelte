@@ -126,21 +126,6 @@
   function startEdit(cardId: string) {
     editingCardId = cardId;
   }
-
-  async function saveAndCreateNext(cardId: string) {
-    // Find the column for this card
-    let columnId: string | null = null;
-    for (const colId of Object.keys(cardsByColumn)) {
-      if (cardsByColumn[colId].some((c) => c.id === cardId)) {
-        columnId = colId;
-        break;
-      }
-    }
-    if (!columnId) return;
-
-    // Create a new card in the same column
-    await createCard(columnId);
-  }
 </script>
 
 <main class="app">
@@ -186,7 +171,6 @@
       onSaveCard={saveCard}
       onCancelEdit={cancelEdit}
       onStartEdit={startEdit}
-      onSaveAndNext={saveAndCreateNext}
     />
   {/if}
 </main>
