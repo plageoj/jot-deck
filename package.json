@@ -1,0 +1,10 @@
+{
+  "name": "jot-deck",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "dev": "pnpm --filter app dev",
+    "build": "pnpm --filter app build",
+    "tauri": "pnpm --filter app tauri"
+  }
+}
