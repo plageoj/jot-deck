@@ -4,7 +4,7 @@ use jot_deck_core::{
     Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use tauri::{Manager, State};
 
 /// アプリケーションの状態
@@ -28,17 +28,24 @@ impl From<jot_deck_core::JotDeckError> for CommandError {
 
 type CommandResult<T> = Result<T, CommandError>;
 
+/// Mutex ロックを取得するヘルパー関数（poisoning 対応）
+fn get_conn<'a>(state: &'a State<'a, AppState>) -> CommandResult<MutexGuard<'a, Connection>> {
+    state.conn.lock().map_err(|e| CommandError {
+        message: format!("Database lock poisoned: {}", e),
+    })
+}
+
 // ========== Deck Commands ==========
 
 #[tauri::command]
 fn get_all_decks(state: State<AppState>) -> CommandResult<Vec<Deck>> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     deck::get_all(&conn).map_err(Into::into)
 }
 
 #[tauri::command]
 fn get_deck(state: State<AppState>, id: String) -> CommandResult<Deck> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     deck::get_by_id(&conn, &id).map_err(Into::into)
 }
 
@@ -50,7 +57,7 @@ struct CreateDeckParams {
 
 #[tauri::command]
 fn create_deck(state: State<AppState>, params: CreateDeckParams) -> CommandResult<Deck> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     let sort_order = params
         .sort_order
         .map(|s| SortOrder::from_db_value(&s))
@@ -72,14 +79,14 @@ fn update_deck(
     name: Option<String>,
     sort_order: Option<String>,
 ) -> CommandResult<Deck> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     let sort_order = sort_order.map(|s| SortOrder::from_db_value(&s));
     deck::update(&conn, &id, name.as_deref(), sort_order).map_err(Into::into)
 }
 
 #[tauri::command]
 fn delete_deck(state: State<AppState>, id: String) -> CommandResult<()> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     deck::delete(&conn, &id).map_err(Into::into)
 }
 
@@ -87,13 +94,13 @@ fn delete_deck(state: State<AppState>, id: String) -> CommandResult<()> {
 
 #[tauri::command]
 fn get_columns_by_deck(state: State<AppState>, deck_id: String) -> CommandResult<Vec<Column>> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::get_by_deck_id(&conn, &deck_id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn get_column(state: State<AppState>, id: String) -> CommandResult<Column> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::get_by_id(&conn, &id).map_err(Into::into)
 }
 
@@ -106,7 +113,7 @@ struct CreateColumnParams {
 
 #[tauri::command]
 fn create_column(state: State<AppState>, params: CreateColumnParams) -> CommandResult<Column> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     let new_column = NewColumn {
         deck_id: params.deck_id,
         name: params.name.unwrap_or_default(),
@@ -120,31 +127,31 @@ fn create_column(state: State<AppState>, params: CreateColumnParams) -> CommandR
 
 #[tauri::command]
 fn update_column(state: State<AppState>, id: String, name: String) -> CommandResult<Column> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::update(&conn, &id, Some(&name)).map_err(Into::into)
 }
 
 #[tauri::command]
 fn move_column(state: State<AppState>, id: String, position: i32) -> CommandResult<Column> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::move_to_position(&conn, &id, position).map_err(Into::into)
 }
 
 #[tauri::command]
 fn delete_column(state: State<AppState>, id: String) -> CommandResult<()> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::soft_delete(&conn, &id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn restore_column(state: State<AppState>, id: String) -> CommandResult<Column> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::restore(&conn, &id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn get_deleted_columns(state: State<AppState>, deck_id: String) -> CommandResult<Vec<Column>> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     column::get_deleted(&conn, &deck_id).map_err(Into::into)
 }
 
@@ -152,13 +159,13 @@ fn get_deleted_columns(state: State<AppState>, deck_id: String) -> CommandResult
 
 #[tauri::command]
 fn get_cards_by_column(state: State<AppState>, column_id: String) -> CommandResult<Vec<Card>> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::get_by_column_id(&conn, &column_id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn get_card(state: State<AppState>, id: String) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::get_by_id(&conn, &id).map_err(Into::into)
 }
 
@@ -171,7 +178,7 @@ struct CreateCardParams {
 
 #[tauri::command]
 fn create_card(state: State<AppState>, params: CreateCardParams) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     let new_card = NewCard {
         column_id: params.column_id,
         content: params.content,
@@ -189,13 +196,13 @@ fn update_card_content(
     id: String,
     content: String,
 ) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::update_content(&conn, &id, &content).map_err(Into::into)
 }
 
 #[tauri::command]
 fn update_card_score(state: State<AppState>, id: String, delta: i32) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::update_score(&conn, &id, delta).map_err(Into::into)
 }
 
@@ -205,31 +212,31 @@ fn move_card_to_column(
     id: String,
     column_id: String,
 ) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::move_to_column(&conn, &id, &column_id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn move_card(state: State<AppState>, id: String, position: i32) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::move_to_position(&conn, &id, position).map_err(Into::into)
 }
 
 #[tauri::command]
 fn delete_card(state: State<AppState>, id: String) -> CommandResult<()> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::soft_delete(&conn, &id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn restore_card(state: State<AppState>, id: String) -> CommandResult<Card> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::restore(&conn, &id).map_err(Into::into)
 }
 
 #[tauri::command]
 fn get_deleted_cards(state: State<AppState>, deck_id: String) -> CommandResult<Vec<Card>> {
-    let conn = state.conn.lock().unwrap();
+    let conn = get_conn(&state)?;
     card::get_deleted_by_deck(&conn, &deck_id).map_err(Into::into)
 }
 
