@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(gh pr view:*)",
+      "Bash(pnpm update:*)",
+      "Bash(cargo outdated:*)",
+      "Bash(pnpm outdated:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(cargo test:*)"
+    ]
+  }
+}
