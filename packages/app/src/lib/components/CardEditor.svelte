@@ -109,6 +109,14 @@
         fontSize: "0.75rem",
         fontFamily: "monospace",
       },
+      ".cm-vim-panel input": {
+        backgroundColor: "transparent",
+        color: "var(--text)",
+        border: "none",
+        outline: "none",
+        fontFamily: "monospace",
+        fontSize: "0.75rem",
+      },
       ".cm-fat-cursor": {
         backgroundColor: "var(--accent) !important",
         color: "var(--bg-primary) !important",
@@ -130,7 +138,16 @@
         theme,
         EditorView.lineWrapping,
         EditorView.domEventHandlers({
-          blur: () => {
+          blur: (event, editorView) => {
+            // Check if focus moved to Vim command line panel
+            const relatedTarget = event.relatedTarget as HTMLElement | null;
+            if (relatedTarget) {
+              // Check if the new focus target is within our editor container (e.g., Vim panel)
+              const editorRoot = editorView.dom.closest(".card-editor");
+              if (editorRoot?.contains(relatedTarget)) {
+                return false; // Don't exit edit mode
+              }
+            }
             // Auto-save on blur
             save();
             onCancel();
