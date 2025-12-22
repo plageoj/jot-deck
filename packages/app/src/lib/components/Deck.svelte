@@ -7,7 +7,12 @@
     cardsByColumn: Record<string, Card[]>;
     focusedColumnIndex?: number;
     focusedCardIndex?: number;
+    editingCardId?: string | null;
     onAddCard?: (columnId: string) => void;
+    onSaveCard?: (cardId: string, content: string) => void;
+    onCancelEdit?: () => void;
+    onStartEdit?: (cardId: string) => void;
+    onSaveAndNext?: (cardId: string) => void;
   }
 
   let {
@@ -15,7 +20,12 @@
     cardsByColumn,
     focusedColumnIndex = -1,
     focusedCardIndex = -1,
+    editingCardId = null,
     onAddCard,
+    onSaveCard,
+    onCancelEdit,
+    onStartEdit,
+    onSaveAndNext,
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
@@ -38,7 +48,12 @@
         cards={cardsByColumn[column.id] ?? []}
         focused={isCurrentColumn}
         focusedCardIndex={isCurrentColumn ? focusedCardIndex : -1}
+        {editingCardId}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
+        {onSaveCard}
+        {onCancelEdit}
+        {onStartEdit}
+        {onSaveAndNext}
       />
     </div>
   {/each}
