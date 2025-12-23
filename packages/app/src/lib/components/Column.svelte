@@ -12,6 +12,7 @@
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
     onStartEdit?: (cardId: string) => void;
+    onExitEdit?: () => void;
   }
 
   let {
@@ -24,7 +25,20 @@
     onSaveCard,
     onCancelEdit,
     onStartEdit,
+    onExitEdit,
   }: Props = $props();
+
+  let cardRefs: HTMLDivElement[] = [];
+
+  // Scroll to focused card when focusedCardIndex changes
+  $effect(() => {
+    if (focusedCardIndex >= 0 && cardRefs[focusedCardIndex]) {
+      cardRefs[focusedCardIndex].scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  });
 </script>
 
 <div class="column" class:focused>
@@ -43,14 +57,17 @@
 
   <div class="cards">
     {#each cards as card, index (card.id)}
-      <CardComponent
-        {card}
-        focused={index === focusedCardIndex}
-        editing={editingCardId === card.id}
-        onSave={(content) => onSaveCard?.(card.id, content)}
-        {onCancelEdit}
-        onStartEdit={() => onStartEdit?.(card.id)}
-      />
+      <div bind:this={cardRefs[index]}>
+        <CardComponent
+          {card}
+          focused={index === focusedCardIndex}
+          editing={editingCardId === card.id}
+          onSave={(content) => onSaveCard?.(card.id, content)}
+          {onCancelEdit}
+          onStartEdit={() => onStartEdit?.(card.id)}
+          {onExitEdit}
+        />
+      </div>
     {/each}
   </div>
 </div>

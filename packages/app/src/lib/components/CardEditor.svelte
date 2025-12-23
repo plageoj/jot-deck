@@ -9,9 +9,10 @@
     content: string;
     onSave: (content: string) => void;
     onCancel: () => void;
+    onExitEdit?: () => void;
   }
 
-  let { content, onSave, onCancel }: Props = $props();
+  let { content, onSave, onCancel, onExitEdit }: Props = $props();
 
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
@@ -28,6 +29,7 @@
   function cancel() {
     cancelled = true;
     onCancel();
+    onExitEdit?.();
   }
 
   onMount(() => {
@@ -157,6 +159,7 @@
     // Don't save if explicitly cancelled with :q
     if (view && !cancelled) {
       save();
+      onExitEdit?.();
     }
     view?.destroy();
   });
