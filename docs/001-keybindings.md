@@ -161,11 +161,12 @@
 |:---|:---|
 | `/` | 検索モード（Deck 内検索、`/#tag` でタグフィルタ） |
 
-### 4.4 ゴミ箱（復元）
+### 4.4 削除スタック（ゴミ箱）
 
 | キー | 動作 |
 |:---|:---|
-| `g t` | ゴミ箱一覧を表示（削除済み Column/Card の復元が可能） |
+| `u` | 直近の削除から順に復元（削除スタックの先頭をポップ） |
+| `g t` | 削除スタック一覧を表示（任意の Column/Card を選択して復元可能） |
 
 ### 4.5 その他
 
@@ -176,7 +177,7 @@
 | `Ctrl+,` | 設定画面を開く |
 | `Ctrl+z` | Undo |
 | `Ctrl+Shift+z`, `Ctrl+y` | Redo |
-| `u` | Undo（Vim 風、削除直後は復元として機能） |
+| `u` | 削除スタックから復元（4.4 参照） |
 | `Ctrl+r` | Redo（Vim 風） |
 
 ---
@@ -238,7 +239,7 @@ CodeMirror の Vim モードがそのまま適用される。
 | `New Deck` | 新規 Deck 作成 |
 | `New Column` | 新規 Column 作成 |
 | `Delete Column` | Column 論理削除 |
-| `Trash` | ゴミ箱一覧を表示（削除済み Column/Card の復元） |
+| `Trash` | 削除スタック一覧を表示（任意の Column/Card を選択して復元） |
 | `Settings` | 設定画面を開く |
 | `AI Draft` | AI 清書を開始 |
 | `Toggle Theme` | ダーク/ライトモード切り替え |
