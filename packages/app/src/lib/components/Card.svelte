@@ -10,6 +10,7 @@
     onCancelEdit?: () => void;
     onStartEdit?: () => void;
     onExitEdit?: () => void;
+    onFocusCard?: () => void;
   }
 
   let {
@@ -20,6 +21,7 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onFocusCard,
   }: Props = $props();
 
   function handleSave(content: string) {
@@ -32,6 +34,8 @@
 
   function handleClick() {
     if (!editing) {
+      // Focus the card first, then start editing
+      onFocusCard?.();
       onStartEdit?.();
     }
   }
@@ -74,6 +78,7 @@
     position: relative;
     cursor: pointer;
     transition: border-color 0.15s ease;
+    outline: none;
   }
 
   .card:hover {

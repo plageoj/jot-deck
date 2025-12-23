@@ -13,6 +13,8 @@
     onCancelEdit?: () => void;
     onStartEdit?: (cardId: string) => void;
     onExitEdit?: () => void;
+    onFocusColumn?: (columnIndex: number) => void;
+    onFocusCard?: (columnIndex: number, cardIndex: number) => void;
   }
 
   let {
@@ -26,6 +28,8 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onFocusColumn,
+    onFocusCard,
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
@@ -54,6 +58,8 @@
         {onCancelEdit}
         {onStartEdit}
         {onExitEdit}
+        onFocusColumn={onFocusColumn ? () => onFocusColumn(index) : undefined}
+        onFocusCard={onFocusCard ? (cardIndex: number) => onFocusCard(index, cardIndex) : undefined}
       />
     </div>
   {/each}

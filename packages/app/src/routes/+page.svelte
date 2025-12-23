@@ -20,6 +20,9 @@
   let focusedCardIndex = $state(0);
   let editingCardId = $state<string | null>(null);
 
+  // Remember last focused card index per column
+  let lastFocusedCardByColumn = $state<Record<string, number>>({});
+
   // Clipboard for copy/paste
   let clipboardCard = $state<Card | null>(null);
 
@@ -398,18 +401,18 @@
 
       case "moveLeft":
         if (focusedColumnIndex > 0) {
+          saveCurrentCardIndex();
           focusedColumnIndex--;
-          const newCards = cardsByColumn[columns[focusedColumnIndex].id] ?? [];
-          focusedCardIndex = Math.min(focusedCardIndex, Math.max(0, newCards.length - 1));
+          restoreCardIndex();
           scrollToFocusedColumn();
         }
         break;
 
       case "moveRight":
         if (focusedColumnIndex < columns.length - 1) {
+          saveCurrentCardIndex();
           focusedColumnIndex++;
-          const newCards = cardsByColumn[columns[focusedColumnIndex].id] ?? [];
-          focusedCardIndex = Math.min(focusedCardIndex, Math.max(0, newCards.length - 1));
+          restoreCardIndex();
           scrollToFocusedColumn();
         }
         break;
@@ -595,10 +598,11 @@
       case "jumpToColumn":
         if (param !== undefined) {
           const targetIndex = parseInt(param, 10);
-          if (targetIndex >= 0 && targetIndex < columns.length) {
+          if (targetIndex >= 0 && targetIndex < columns.length && targetIndex !== focusedColumnIndex) {
+            saveCurrentCardIndex();
             focusedColumnIndex = targetIndex;
+            restoreCardIndex();
             const newCards = cardsByColumn[columns[focusedColumnIndex].id] ?? [];
-            focusedCardIndex = Math.min(focusedCardIndex, Math.max(0, newCards.length - 1));
             if (newCards.length === 0) {
               focusMode = "column";
             }
@@ -678,6 +682,44 @@
   function scrollToFocusedColumn() {
     deckComponent?.scrollToColumn(focusedColumnIndex);
   }
+
+  function saveCurrentCardIndex() {
+    const column = columns[focusedColumnIndex];
+    if (column) {
+      lastFocusedCardByColumn[column.id] = focusedCardIndex;
+    }
+  }
+
+  function restoreCardIndex() {
+    const column = columns[focusedColumnIndex];
+    if (!column) return;
+
+    const cards = cardsByColumn[column.id] ?? [];
+    const savedIndex = lastFocusedCardByColumn[column.id];
+
+    if (savedIndex !== undefined && savedIndex < cards.length) {
+      focusedCardIndex = savedIndex;
+    } else {
+      focusedCardIndex = Math.max(0, cards.length - 1);
+    }
+  }
+
+  function handleFocusColumn(columnIndex: number) {
+    if (focusedColumnIndex !== columnIndex) {
+      saveCurrentCardIndex();
+    }
+    focusedColumnIndex = columnIndex;
+    focusMode = "column";
+  }
+
+  function handleFocusCard(columnIndex: number, cardIndex: number) {
+    if (focusedColumnIndex !== columnIndex) {
+      saveCurrentCardIndex();
+    }
+    focusedColumnIndex = columnIndex;
+    focusedCardIndex = cardIndex;
+    focusMode = "card";
+  }
 </script>
 
 <main class="app">
@@ -719,7 +761,7 @@
       bind:this={deckComponent}
       {columns}
       {cardsByColumn}
-      focusedColumnIndex={focusMode !== "edit" ? focusedColumnIndex : -1}
+      {focusedColumnIndex}
       focusedCardIndex={focusMode === "card" ? focusedCardIndex : -1}
       {editingCardId}
       onAddCard={createCard}
@@ -727,6 +769,8 @@
       onCancelEdit={cancelEdit}
       onStartEdit={startEdit}
       onExitEdit={exitEdit}
+      onFocusColumn={handleFocusColumn}
+      onFocusCard={handleFocusCard}
     />
   {/if}
 </main>

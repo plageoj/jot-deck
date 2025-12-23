@@ -13,6 +13,8 @@
     onCancelEdit?: () => void;
     onStartEdit?: (cardId: string) => void;
     onExitEdit?: () => void;
+    onFocusColumn?: () => void;
+    onFocusCard?: (cardIndex: number) => void;
   }
 
   let {
@@ -26,7 +28,16 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onFocusColumn,
+    onFocusCard,
   }: Props = $props();
+
+  function handleColumnClick(e: MouseEvent) {
+    // Only handle clicks directly on the column or header, not on cards
+    const target = e.target as HTMLElement;
+    if (target.closest(".cards")) return;
+    onFocusColumn?.();
+  }
 
   let cardRefs: HTMLDivElement[] = [];
 
@@ -41,7 +52,7 @@
   });
 </script>
 
-<div class="column" class:focused>
+<div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} onkeydown={() => {}}>
   <div class="column-header" class:focused>
     <span class="column-name">{column.name}</span>
     {#if onAddCard}
@@ -66,6 +77,7 @@
           {onCancelEdit}
           onStartEdit={() => onStartEdit?.(card.id)}
           {onExitEdit}
+          onFocusCard={onFocusCard ? () => onFocusCard(index) : undefined}
         />
       </div>
     {/each}
@@ -80,15 +92,10 @@
     max-width: 280px;
     height: 100%;
     background-color: var(--column-bg, #16213e);
-    border-radius: 8px;
+    border-radius: 4px;
     overflow: hidden;
     flex-shrink: 0;
-    border: 2px solid transparent;
-    transition: border-color 0.15s ease;
-  }
-
-  .column.focused {
-    border-color: var(--column-border-focus, #e94560);
+    outline: none;
   }
 
   .column-header {
@@ -96,14 +103,16 @@
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem;
+    padding-left: calc(0.75rem + 4px);
     background-color: var(--column-header-bg, #0f3460);
     font-weight: 500;
-    border-bottom: 2px solid transparent;
-    transition: border-color 0.15s ease;
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .column-header.focused {
-    border-bottom-color: var(--accent, #e94560);
+    background-color: var(--column-header-bg-focus, #1a4a7a);
+    box-shadow: inset 4px 0 0 var(--accent, #e94560);
+    padding-left: 0.75rem;
   }
 
   .column-name {
