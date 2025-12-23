@@ -11,6 +11,7 @@
   let cardsByColumn = $state<Record<string, Card[]>>({});
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let editingCardId = $state<string | null>(null);
 
   onMount(async () => {
     await loadDecks();
@@ -87,9 +88,43 @@
         params: { column_id: columnId, content: "" },
       });
       cardsByColumn[columnId] = [...(cardsByColumn[columnId] || []), card];
+      // Start editing the new card immediately
+      editingCardId = card.id;
     } catch (e) {
       error = `Failed to create card: ${e}`;
     }
+  }
+
+  async function saveCard(cardId: string, content: string) {
+    try {
+      const updatedCard = await invoke<Card>("update_card_content", {
+        id: cardId,
+        content,
+      });
+      // Update the card in the local state
+      for (const columnId of Object.keys(cardsByColumn)) {
+        const cards = cardsByColumn[columnId];
+        const index = cards.findIndex((c) => c.id === cardId);
+        if (index !== -1) {
+          cardsByColumn[columnId] = [
+            ...cards.slice(0, index),
+            updatedCard,
+            ...cards.slice(index + 1),
+          ];
+          break;
+        }
+      }
+    } catch (e) {
+      error = `Failed to save card: ${e}`;
+    }
+  }
+
+  function cancelEdit() {
+    editingCardId = null;
+  }
+
+  function startEdit(cardId: string) {
+    editingCardId = cardId;
   }
 </script>
 
@@ -128,7 +163,15 @@
       <button onclick={createColumn}>Create Column</button>
     </div>
   {:else}
-    <DeckComponent {columns} {cardsByColumn} onAddCard={createCard} />
+    <DeckComponent
+      {columns}
+      {cardsByColumn}
+      {editingCardId}
+      onAddCard={createCard}
+      onSaveCard={saveCard}
+      onCancelEdit={cancelEdit}
+      onStartEdit={startEdit}
+    />
   {/if}
 </main>
 

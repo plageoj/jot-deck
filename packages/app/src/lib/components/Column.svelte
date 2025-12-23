@@ -7,7 +7,11 @@
     cards: Card[];
     focused?: boolean;
     focusedCardIndex?: number;
+    editingCardId?: string | null;
     onAddCard?: () => void;
+    onSaveCard?: (cardId: string, content: string) => void;
+    onCancelEdit?: () => void;
+    onStartEdit?: (cardId: string) => void;
   }
 
   let {
@@ -15,9 +19,12 @@
     cards,
     focused = false,
     focusedCardIndex = -1,
+    editingCardId = null,
     onAddCard,
+    onSaveCard,
+    onCancelEdit,
+    onStartEdit,
   }: Props = $props();
-
 </script>
 
 <div class="column" class:focused>
@@ -36,7 +43,14 @@
 
   <div class="cards">
     {#each cards as card, index (card.id)}
-      <CardComponent {card} focused={index === focusedCardIndex} />
+      <CardComponent
+        {card}
+        focused={index === focusedCardIndex}
+        editing={editingCardId === card.id}
+        onSave={(content) => onSaveCard?.(card.id, content)}
+        {onCancelEdit}
+        onStartEdit={() => onStartEdit?.(card.id)}
+      />
     {/each}
   </div>
 </div>

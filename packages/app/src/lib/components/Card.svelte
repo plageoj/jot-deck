@@ -1,18 +1,70 @@
 <script lang="ts">
   import type { Card } from "$lib/types";
+  import CardEditor from "./CardEditor.svelte";
 
   interface Props {
     card: Card;
     focused?: boolean;
+    editing?: boolean;
+    onSave?: (content: string) => void;
+    onCancelEdit?: () => void;
+    onStartEdit?: () => void;
   }
 
-  let { card, focused = false }: Props = $props();
+  let {
+    card,
+    focused = false,
+    editing = false,
+    onSave,
+    onCancelEdit,
+    onStartEdit,
+  }: Props = $props();
+
+  function handleSave(content: string) {
+    onSave?.(content);
+  }
+
+  function handleCancel() {
+    onCancelEdit?.();
+  }
+
+  function handleClick() {
+    if (!editing) {
+      onStartEdit?.();
+    }
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (editing) return;
+
+    // Enter or 'i' to start editing (matching Vim keybindings spec)
+    if (e.key === "Enter" || e.key === "i") {
+      e.preventDefault();
+      onStartEdit?.();
+    }
+  }
 </script>
 
-<div class="card" class:focused>
-  <div class="card-content">
-    {card.content || "(empty)"}
-  </div>
+<div
+  class="card"
+  class:focused
+  class:editing
+  role="button"
+  tabindex={focused ? 0 : -1}
+  onclick={handleClick}
+  onkeydown={handleKeydown}
+>
+  {#if editing}
+    <CardEditor
+      content={card.content}
+      onSave={handleSave}
+      onCancel={handleCancel}
+    />
+  {:else}
+    <div class="card-content">
+      {card.content || "(empty)"}
+    </div>
+  {/if}
   {#if card.score !== 0}
     <span class="card-score">{card.score}</span>
   {/if}
@@ -37,6 +89,11 @@
 
   .card.focused {
     border-color: var(--card-border-focus, #e94560);
+    box-shadow: 0 0 0 2px var(--card-focus-ring, rgba(233, 69, 96, 0.3));
+  }
+
+  .card.editing {
+    cursor: text;
     box-shadow: 0 0 0 2px var(--card-focus-ring, rgba(233, 69, 96, 0.3));
   }
 
