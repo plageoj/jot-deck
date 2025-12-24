@@ -351,7 +351,7 @@
         if (column) {
           try {
             await invoke("delete_column", { id: column.id });
-            deletedStack.push({ type: "column", id: column.id });
+            deletedStack = [...deletedStack, { type: "column", id: column.id }];
             await reloadColumns();
             focusedColumnIndex = Math.min(focusedColumnIndex, Math.max(0, columns.length - 1));
             scrollToFocusedColumn();
@@ -519,7 +519,7 @@
         if (card) {
           try {
             await invoke("delete_card", { id: card.id });
-            deletedStack.push({ type: "card", id: card.id });
+            deletedStack = [...deletedStack, { type: "card", id: card.id }];
             await loadCardsForColumns();
             const updatedCards = cardsByColumn[column.id] ?? [];
             focusedCardIndex = Math.min(focusedCardIndex, Math.max(0, updatedCards.length - 1));
