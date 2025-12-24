@@ -320,7 +320,7 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Card を復元する
+/// Card を復元する（元の位置に挿入）
 pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     let card = get_by_id(conn, id)?;
 
@@ -338,16 +338,26 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     }
 
     let now = Utc::now();
-    let new_position = get_next_position(conn, &card.column_id)?;
+    let restore_position = card.position;
 
-    conn.execute(
-        "UPDATE cards SET deleted_at = NULL, position = ?1, updated_at = ?2 WHERE id = ?3",
-        params![new_position, now.to_rfc3339(), id],
+    let tx = conn.unchecked_transaction()?;
+
+    // 復元位置以降の Card の position を +1 する
+    tx.execute(
+        "UPDATE cards SET position = position + 1, updated_at = ?1 WHERE column_id = ?2 AND position >= ?3 AND deleted_at IS NULL",
+        params![now.to_rfc3339(), &card.column_id, restore_position],
     )?;
+
+    tx.execute(
+        "UPDATE cards SET deleted_at = NULL, position = ?1, updated_at = ?2 WHERE id = ?3",
+        params![restore_position, now.to_rfc3339(), id],
+    )?;
+
+    tx.commit()?;
 
     Ok(Card {
         deleted_at: None,
-        position: new_position,
+        position: restore_position,
         updated_at: now,
         ..card
     })
@@ -472,6 +482,67 @@ mod tests {
 
         let restored = restore(&conn, &card.id).unwrap();
         assert!(restored.deleted_at.is_none());
+    }
+
+    #[test]
+    fn test_restore_to_original_position() {
+        let (conn, _, column_id) = setup();
+
+        // A, B, C の順で作成
+        let card_a = create(
+            &conn,
+            NewCard {
+                column_id: column_id.clone(),
+                content: "A".to_string(),
+            },
+        )
+        .unwrap();
+        let card_b = create(
+            &conn,
+            NewCard {
+                column_id: column_id.clone(),
+                content: "B".to_string(),
+            },
+        )
+        .unwrap();
+        let _card_c = create(
+            &conn,
+            NewCard {
+                column_id: column_id.clone(),
+                content: "C".to_string(),
+            },
+        )
+        .unwrap();
+
+        // B を削除 -> (A, C)
+        soft_delete(&conn, &card_b.id).unwrap();
+        let cards = get_by_column_id(&conn, &column_id).unwrap();
+        assert_eq!(cards.len(), 2);
+        assert_eq!(cards[0].content, "A");
+        assert_eq!(cards[1].content, "C");
+
+        // B を復元 -> (A, B, C) に戻る
+        let restored = restore(&conn, &card_b.id).unwrap();
+        assert_eq!(restored.position, 1); // 元の位置
+
+        let cards = get_by_column_id(&conn, &column_id).unwrap();
+        assert_eq!(cards.len(), 3);
+        assert_eq!(cards[0].content, "A");
+        assert_eq!(cards[1].content, "B");
+        assert_eq!(cards[2].content, "C");
+
+        // A を削除 -> (B, C)
+        soft_delete(&conn, &card_a.id).unwrap();
+        let cards = get_by_column_id(&conn, &column_id).unwrap();
+        assert_eq!(cards[0].content, "B");
+        assert_eq!(cards[1].content, "C");
+
+        // A を復元 -> (A, B, C) に戻る
+        restore(&conn, &card_a.id).unwrap();
+        let cards = get_by_column_id(&conn, &column_id).unwrap();
+        assert_eq!(cards[0].content, "A");
+        assert_eq!(cards[1].content, "B");
+        assert_eq!(cards[2].content, "C");
     }
 
     #[test]
