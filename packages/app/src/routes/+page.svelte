@@ -4,6 +4,7 @@
   import type { Deck, Column, Card } from "$lib/types";
   import { Deck as DeckComponent } from "$lib/components";
   import { type FocusMode, findAction, isValidPrefix } from "$lib/keybindings";
+  import { createDeleteStack, type DeletedItem } from "$lib/deleteStack";
   import "$lib/styles/theme.css";
 
   // Data state
@@ -31,12 +32,24 @@
   let keySequenceTimer: ReturnType<typeof setTimeout> | null = null;
   const SEQUENCE_TIMEOUT = 500;
 
-  // Undo state - stack of deleted items (LIFO)
-  interface DeletedItem {
-    type: "card" | "column";
-    id: string;
-  }
-  let deletedStack = $state<DeletedItem[]>([]);
+  // Undo state - managed by deleteStack module
+  const deleteStack = createDeleteStack({
+    onRestore: async (item) => {
+      console.log("deleteStack.onRestore:", item);
+      if (item.type === "card") {
+        await invoke("restore_card", { id: item.id });
+      } else {
+        await invoke("restore_column", { id: item.id });
+      }
+    },
+    onError: (msg) => {
+      console.error("deleteStack error:", msg);
+      error = msg;
+    },
+  });
+
+  // Reactive state for UI (tracks stack for reactivity)
+  let deletedStackLength = $state(0);
 
   // Deck component reference for scrolling
   let deckComponent = $state<DeckComponent | null>(null);
@@ -350,8 +363,11 @@
       case "deleteColumn":
         if (column) {
           try {
+            console.log("deleteColumn: deleting", column.id);
             await invoke("delete_column", { id: column.id });
-            deletedStack = [...deletedStack, { type: "column", id: column.id }];
+            deleteStack.push({ type: "column", id: column.id });
+            deletedStackLength = deleteStack.length;
+            console.log("deleteColumn: stack length is now", deletedStackLength);
             await reloadColumns();
             focusedColumnIndex = Math.min(focusedColumnIndex, Math.max(0, columns.length - 1));
             scrollToFocusedColumn();
@@ -518,8 +534,11 @@
       case "deleteCard":
         if (card) {
           try {
+            console.log("deleteCard: deleting", card.id);
             await invoke("delete_card", { id: card.id });
-            deletedStack = [...deletedStack, { type: "card", id: card.id }];
+            deleteStack.push({ type: "card", id: card.id });
+            deletedStackLength = deleteStack.length;
+            console.log("deleteCard: stack length is now", deletedStackLength);
             await loadCardsForColumns();
             const updatedCards = cardsByColumn[column.id] ?? [];
             focusedCardIndex = Math.min(focusedCardIndex, Math.max(0, updatedCards.length - 1));
@@ -662,20 +681,14 @@
   }
 
   async function undoLastDelete() {
-    const item = deletedStack.pop();
-    if (!item) return;
-
-    try {
-      if (item.type === "card") {
-        await invoke("restore_card", { id: item.id });
-      } else {
-        await invoke("restore_column", { id: item.id });
-      }
+    console.log("undoLastDelete: stack length is", deleteStack.length);
+    const success = await deleteStack.popAndRestore();
+    if (success) {
+      deletedStackLength = deleteStack.length;
       await reloadColumns();
-    } catch (e) {
-      // Restore failed, put item back on stack
-      deletedStack.push(item);
-      error = `Failed to undo: ${e}`;
+      console.log("undoLastDelete: success, stack length is now", deletedStackLength);
+    } else {
+      console.log("undoLastDelete: failed or stack was empty");
     }
   }
 
