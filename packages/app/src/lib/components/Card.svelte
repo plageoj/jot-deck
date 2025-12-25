@@ -9,6 +9,8 @@
     onSave?: (content: string) => void;
     onCancelEdit?: () => void;
     onStartEdit?: () => void;
+    onExitEdit?: () => void;
+    onFocusCard?: () => void;
   }
 
   let {
@@ -18,6 +20,8 @@
     onSave,
     onCancelEdit,
     onStartEdit,
+    onExitEdit,
+    onFocusCard,
   }: Props = $props();
 
   function handleSave(content: string) {
@@ -30,16 +34,8 @@
 
   function handleClick() {
     if (!editing) {
-      onStartEdit?.();
-    }
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (editing) return;
-
-    // Enter or 'i' to start editing (matching Vim keybindings spec)
-    if (e.key === "Enter" || e.key === "i") {
-      e.preventDefault();
+      // Focus the card first, then start editing
+      onFocusCard?.();
       onStartEdit?.();
     }
   }
@@ -52,13 +48,14 @@
   role="button"
   tabindex={focused ? 0 : -1}
   onclick={handleClick}
-  onkeydown={handleKeydown}
+  onkeydown={() => {}}
 >
   {#if editing}
     <CardEditor
       content={card.content}
       onSave={handleSave}
       onCancel={handleCancel}
+      {onExitEdit}
     />
   {:else}
     <div class="card-content">
@@ -81,6 +78,7 @@
     position: relative;
     cursor: pointer;
     transition: border-color 0.15s ease;
+    outline: none;
   }
 
   .card:hover {
