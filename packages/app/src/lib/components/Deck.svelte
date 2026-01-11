@@ -8,6 +8,7 @@
     focusedColumnIndex?: number;
     focusedCardIndex?: number;
     editingCardId?: string | null;
+    renamingColumnId?: string | null;
     onAddCard?: (columnId: string) => void;
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
@@ -15,6 +16,8 @@
     onExitEdit?: () => void;
     onFocusColumn?: (columnIndex: number) => void;
     onFocusCard?: (columnIndex: number, cardIndex: number) => void;
+    onRenameColumn?: (columnId: string, name: string) => void;
+    onCancelRename?: () => void;
   }
 
   let {
@@ -23,6 +26,7 @@
     focusedColumnIndex = -1,
     focusedCardIndex = -1,
     editingCardId = null,
+    renamingColumnId = null,
     onAddCard,
     onSaveCard,
     onCancelEdit,
@@ -30,6 +34,8 @@
     onExitEdit,
     onFocusColumn,
     onFocusCard,
+    onRenameColumn,
+    onCancelRename,
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
@@ -53,6 +59,7 @@
         focused={isCurrentColumn}
         focusedCardIndex={isCurrentColumn ? focusedCardIndex : -1}
         {editingCardId}
+        renamingColumn={renamingColumnId === column.id}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
         {onSaveCard}
         {onCancelEdit}
@@ -60,6 +67,8 @@
         {onExitEdit}
         onFocusColumn={onFocusColumn ? () => onFocusColumn(index) : undefined}
         onFocusCard={onFocusCard ? (cardIndex: number) => onFocusCard(index, cardIndex) : undefined}
+        onRenameColumn={onRenameColumn ? (name: string) => onRenameColumn(column.id, name) : undefined}
+        {onCancelRename}
       />
     </div>
   {/each}

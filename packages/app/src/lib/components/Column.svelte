@@ -8,6 +8,7 @@
     focused?: boolean;
     focusedCardIndex?: number;
     editingCardId?: string | null;
+    renamingColumn?: boolean;
     onAddCard?: () => void;
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
@@ -15,6 +16,8 @@
     onExitEdit?: () => void;
     onFocusColumn?: () => void;
     onFocusCard?: (cardIndex: number) => void;
+    onRenameColumn?: (name: string) => void;
+    onCancelRename?: () => void;
   }
 
   let {
@@ -23,6 +26,7 @@
     focused = false,
     focusedCardIndex = -1,
     editingCardId = null,
+    renamingColumn = false,
     onAddCard,
     onSaveCard,
     onCancelEdit,
@@ -30,7 +34,43 @@
     onExitEdit,
     onFocusColumn,
     onFocusCard,
+    onRenameColumn,
+    onCancelRename,
   }: Props = $props();
+
+  let renameInputRef = $state<HTMLInputElement | null>(null);
+  let renameValue = $state("");
+
+  // When renaming mode is enabled, set input value and focus
+  $effect(() => {
+    if (renamingColumn && renameInputRef) {
+      renameValue = column.name;
+      // Use tick to ensure DOM is updated
+      setTimeout(() => {
+        renameInputRef?.focus();
+        renameInputRef?.select();
+      }, 0);
+    }
+  });
+
+  function handleRenameKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onRenameColumn?.(renameValue);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onCancelRename?.();
+    }
+  }
+
+  function handleRenameBlur() {
+    // Save on blur if name changed
+    if (renameValue !== column.name) {
+      onRenameColumn?.(renameValue);
+    } else {
+      onCancelRename?.();
+    }
+  }
 
   function handleColumnClick(e: MouseEvent) {
     // Only handle clicks directly on the column or header, not on cards
@@ -54,7 +94,18 @@
 
 <div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} onkeydown={() => {}}>
   <div class="column-header" class:focused>
-    <span class="column-name">{column.name}</span>
+    {#if renamingColumn}
+      <input
+        bind:this={renameInputRef}
+        bind:value={renameValue}
+        class="column-name-input"
+        type="text"
+        onkeydown={handleRenameKeydown}
+        onblur={handleRenameBlur}
+      />
+    {:else}
+      <span class="column-name">{column.name}</span>
+    {/if}
     {#if onAddCard}
       <button
         class="add-card"
@@ -120,6 +171,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .column-name-input {
+    font-size: 0.875rem;
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    padding: 0.125rem 0.25rem;
+    border: 1px solid var(--accent, #e94560);
+    border-radius: 2px;
+    background-color: var(--input-bg, #1a1a2e);
+    color: var(--text, #eee);
+    outline: none;
+  }
+
+  .column-name-input:focus {
+    box-shadow: 0 0 0 2px var(--accent, #e94560);
   }
 
   .add-card {

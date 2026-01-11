@@ -20,6 +20,7 @@
   let focusedColumnIndex = $state(0);
   let focusedCardIndex = $state(0);
   let editingCardId = $state<string | null>(null);
+  let renamingColumnId = $state<string | null>(null);
 
   // Remember last focused card index per column
   let lastFocusedCardByColumn = $state<Record<string, number>>({});
@@ -387,6 +388,12 @@
         }
         break;
 
+      case "renameColumn":
+        if (column) {
+          renamingColumnId = column.id;
+        }
+        break;
+
       case "undo":
         await undoLastDelete();
         break;
@@ -733,6 +740,21 @@
     focusedCardIndex = cardIndex;
     focusMode = "card";
   }
+
+  async function handleRenameColumn(columnId: string, name: string) {
+    try {
+      await invoke("update_column", { id: columnId, name });
+      await reloadColumns();
+    } catch (e) {
+      error = `Failed to rename column: ${e}`;
+    } finally {
+      renamingColumnId = null;
+    }
+  }
+
+  function handleCancelRename() {
+    renamingColumnId = null;
+  }
 </script>
 
 <main class="app">
@@ -777,6 +799,7 @@
       {focusedColumnIndex}
       focusedCardIndex={focusMode === "card" ? focusedCardIndex : -1}
       {editingCardId}
+      {renamingColumnId}
       onAddCard={createCard}
       onSaveCard={saveCard}
       onCancelEdit={cancelEdit}
@@ -784,6 +807,8 @@
       onExitEdit={exitEdit}
       onFocusColumn={handleFocusColumn}
       onFocusCard={handleFocusCard}
+      onRenameColumn={handleRenameColumn}
+      onCancelRename={handleCancelRename}
     />
   {/if}
 </main>

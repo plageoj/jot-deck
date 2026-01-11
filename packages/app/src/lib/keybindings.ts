@@ -24,6 +24,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "N", action: "createColumn", modes: ["column", "card"], description: "新規カラム作成" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "カラム削除" },
   { sequence: "Delete", action: "deleteColumn", modes: ["column"], description: "カラム削除" },
+  { sequence: "r", action: "renameColumn", modes: ["column"], description: "カラム名編集" },
 
   // Card focus - Navigation
   { sequence: "j", action: "moveDown", modes: ["card"], description: "下のカードへ" },
