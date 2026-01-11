@@ -17,7 +17,6 @@
     onFocusColumn?: () => void;
     onFocusCard?: (cardIndex: number) => void;
     onRenameColumn?: (name: string) => void;
-    onCancelRename?: () => void;
   }
 
   let {
@@ -35,16 +34,17 @@
     onFocusColumn,
     onFocusCard,
     onRenameColumn,
-    onCancelRename,
   }: Props = $props();
 
   let renameInputRef = $state<HTMLInputElement | null>(null);
   let renameValue = $state("");
+  let renameHandled = $state(false);
 
   // When renaming mode is enabled, set input value and focus
   $effect(() => {
     if (renamingColumn && renameInputRef) {
       renameValue = column.name;
+      renameHandled = false;
       // Use tick to ensure DOM is updated
       setTimeout(() => {
         renameInputRef?.focus();
@@ -54,21 +54,16 @@
   });
 
   function handleRenameKeydown(e: KeyboardEvent) {
-    if (e.key === "Enter") {
+    if (e.key === "Enter" || e.key === "Escape") {
       e.preventDefault();
-      onRenameColumn?.(renameValue);
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      onCancelRename?.();
+      renameHandled = true;
+      onRenameColumn?.(e.key === "Enter" ? renameValue : column.name);
     }
   }
 
   function handleRenameBlur() {
-    // Save on blur if name changed
-    if (renameValue !== column.name) {
+    if (!renameHandled) {
       onRenameColumn?.(renameValue);
-    } else {
-      onCancelRename?.();
     }
   }
 

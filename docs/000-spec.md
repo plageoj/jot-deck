@@ -12,7 +12,7 @@
 | **Tauri bundle identifier** | `com.jot-deck.app` |
 | **GitHub リポジトリ** | `plageoj/jot-deck` |
 | **リポジトリ構成** | monorepo (pnpm workspaces) |
-| **LP URL** | https://jot-deck.com |
+| **LP URL** | <https://jot-deck.com> |
 | **LP ホスティング** | Cloudflare Pages |
 
 ### 1.2 コンセプト
@@ -254,7 +254,7 @@ Deck 全体のカードを読み取り、AIが文章として清書する。
 
 ## 10. リポジトリ構成
 
-```
+```text
 jot-deck/
 ├── crates/
 │   └── core/           # Rust コアライブラリ

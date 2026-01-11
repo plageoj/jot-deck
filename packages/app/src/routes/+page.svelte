@@ -742,17 +742,15 @@
   }
 
   async function handleRenameColumn(columnId: string, name: string) {
-    try {
-      await invoke("update_column", { id: columnId, name });
-      await reloadColumns();
-    } catch (e) {
-      error = `Failed to rename column: ${e}`;
-    } finally {
-      renamingColumnId = null;
+    const column = columns.find((c) => c.id === columnId);
+    if (column && name !== column.name) {
+      try {
+        await invoke("update_column", { id: columnId, name });
+        await reloadColumns();
+      } catch (e) {
+        error = `Failed to rename column: ${e}`;
+      }
     }
-  }
-
-  function handleCancelRename() {
     renamingColumnId = null;
   }
 </script>
@@ -808,7 +806,6 @@
       onFocusColumn={handleFocusColumn}
       onFocusCard={handleFocusCard}
       onRenameColumn={handleRenameColumn}
-      onCancelRename={handleCancelRename}
     />
   {/if}
 </main>

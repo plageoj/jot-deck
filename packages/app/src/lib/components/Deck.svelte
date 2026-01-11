@@ -17,7 +17,6 @@
     onFocusColumn?: (columnIndex: number) => void;
     onFocusCard?: (columnIndex: number, cardIndex: number) => void;
     onRenameColumn?: (columnId: string, name: string) => void;
-    onCancelRename?: () => void;
   }
 
   let {
@@ -35,7 +34,6 @@
     onFocusColumn,
     onFocusCard,
     onRenameColumn,
-    onCancelRename,
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
@@ -68,7 +66,6 @@
         onFocusColumn={onFocusColumn ? () => onFocusColumn(index) : undefined}
         onFocusCard={onFocusCard ? (cardIndex: number) => onFocusCard(index, cardIndex) : undefined}
         onRenameColumn={onRenameColumn ? (name: string) => onRenameColumn(column.id, name) : undefined}
-        {onCancelRename}
       />
     </div>
   {/each}
