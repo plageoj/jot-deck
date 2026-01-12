@@ -33,7 +33,7 @@ export class TauriBackend implements DatabaseBackend {
     name?: string,
     sortOrder?: string
   ): Promise<Deck> {
-    return invoke<Deck>("update_deck", { id, name, sortOrder });
+    return invoke<Deck>("update_deck", { id, name, sort_order: sortOrder });
   }
 
   async deleteDeck(id: string): Promise<void> {
@@ -42,7 +42,7 @@ export class TauriBackend implements DatabaseBackend {
 
   // Column operations
   async getColumnsByDeck(deckId: string): Promise<Column[]> {
-    return invoke<Column[]>("get_columns_by_deck", { deckId });
+    return invoke<Column[]>("get_columns_by_deck", { deck_id: deckId });
   }
 
   async getColumn(id: string): Promise<Column> {
@@ -70,12 +70,12 @@ export class TauriBackend implements DatabaseBackend {
   }
 
   async getDeletedColumns(deckId: string): Promise<Column[]> {
-    return invoke<Column[]>("get_deleted_columns", { deckId });
+    return invoke<Column[]>("get_deleted_columns", { deck_id: deckId });
   }
 
   // Card operations
   async getCardsByColumn(columnId: string): Promise<Card[]> {
-    return invoke<Card[]>("get_cards_by_column", { columnId });
+    return invoke<Card[]>("get_cards_by_column", { column_id: columnId });
   }
 
   async getCard(id: string): Promise<Card> {
@@ -95,7 +95,7 @@ export class TauriBackend implements DatabaseBackend {
   }
 
   async moveCardToColumn(id: string, columnId: string): Promise<Card> {
-    return invoke<Card>("move_card_to_column", { id, columnId });
+    return invoke<Card>("move_card_to_column", { id, column_id: columnId });
   }
 
   async moveCard(id: string, position: number): Promise<Card> {
@@ -111,6 +111,6 @@ export class TauriBackend implements DatabaseBackend {
   }
 
   async getDeletedCards(deckId: string): Promise<Card[]> {
-    return invoke<Card[]>("get_deleted_cards", { deckId });
+    return invoke<Card[]>("get_deleted_cards", { deck_id: deckId });
   }
 }
