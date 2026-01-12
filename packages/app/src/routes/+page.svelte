@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
   import { onMount, onDestroy } from "svelte";
   import type { Deck, Column, Card } from "$lib/types";
   import { Deck as DeckComponent } from "$lib/components";
   import { type FocusMode, findAction, isValidPrefix } from "$lib/keybindings";
   import { createDeleteStack, type DeletedItem } from "$lib/deleteStack";
+  import { getDatabase, type DatabaseBackend } from "$lib/db";
   import "$lib/styles/theme.css";
+
+  // Database backend
+  let db: DatabaseBackend;
 
   // Data state
   let decks = $state<Deck[]>([]);
@@ -33,20 +36,7 @@
   const SEQUENCE_TIMEOUT = 500;
 
   // Undo state - managed by deleteStack module
-  const deleteStack = createDeleteStack({
-    onRestore: async (item) => {
-      console.log("deleteStack.onRestore:", item);
-      if (item.type === "card") {
-        await invoke("restore_card", { id: item.id });
-      } else {
-        await invoke("restore_column", { id: item.id });
-      }
-    },
-    onError: (msg) => {
-      console.error("deleteStack error:", msg);
-      error = msg;
-    },
-  });
+  let deleteStack: ReturnType<typeof createDeleteStack>;
 
   // Reactive state for UI (tracks stack for reactivity)
   let deletedStackLength = $state(0);
@@ -56,6 +46,23 @@
 
   onMount(async () => {
     window.addEventListener("keydown", handleKeydown);
+    // Initialize database backend
+    db = await getDatabase();
+    // Initialize delete stack with database backend
+    deleteStack = createDeleteStack({
+      onRestore: async (item) => {
+        console.log("deleteStack.onRestore:", item);
+        if (item.type === "card") {
+          await db.restoreCard(item.id);
+        } else {
+          await db.restoreColumn(item.id);
+        }
+      },
+      onError: (msg) => {
+        console.error("deleteStack error:", msg);
+        error = msg;
+      },
+    });
     await loadDecks();
   });
 
@@ -70,7 +77,7 @@
     try {
       loading = true;
       error = null;
-      decks = await invoke<Deck[]>("get_all_decks");
+      decks = await db.getAllDecks();
       if (decks.length > 0) {
         await selectDeck(decks[0]);
       }
@@ -84,7 +91,7 @@
   async function selectDeck(deck: Deck) {
     currentDeck = deck;
     try {
-      columns = await invoke<Column[]>("get_columns_by_deck", { deckId: deck.id });
+      columns = await db.getColumnsByDeck(deck.id);
       await loadCardsForColumns();
     } catch (e) {
       error = `Failed to load columns: ${e}`;
@@ -95,9 +102,7 @@
     const newCardsByColumn: Record<string, Card[]> = {};
     for (const col of columns) {
       try {
-        newCardsByColumn[col.id] = await invoke<Card[]>("get_cards_by_column", {
-          columnId: col.id,
-        });
+        newCardsByColumn[col.id] = await db.getCardsByColumn(col.id);
       } catch (e) {
         console.error(`Failed to load cards for column ${col.id}:`, e);
         newCardsByColumn[col.id] = [];
@@ -108,9 +113,7 @@
 
   async function createDeck() {
     try {
-      const deck = await invoke<Deck>("create_deck", {
-        params: { name: "New Deck" },
-      });
+      const deck = await db.createDeck({ name: "New Deck" });
       decks = [deck, ...decks];
       await selectDeck(deck);
     } catch (e) {
@@ -121,9 +124,7 @@
   async function createColumn() {
     if (!currentDeck) return;
     try {
-      const col = await invoke<Column>("create_column", {
-        params: { deck_id: currentDeck.id },
-      });
+      const col = await db.createColumn({ deck_id: currentDeck.id });
       columns = [...columns, col];
       cardsByColumn[col.id] = [];
     } catch (e) {
@@ -133,9 +134,7 @@
 
   async function createCard(columnId: string) {
     try {
-      const card = await invoke<Card>("create_card", {
-        params: { column_id: columnId, content: "" },
-      });
+      const card = await db.createCard({ column_id: columnId, content: "" });
       cardsByColumn[columnId] = [...(cardsByColumn[columnId] || []), card];
       // Start editing the new card immediately
       editingCardId = card.id;
@@ -146,10 +145,7 @@
 
   async function saveCard(cardId: string, content: string) {
     try {
-      const updatedCard = await invoke<Card>("update_card_content", {
-        id: cardId,
-        content,
-      });
+      const updatedCard = await db.updateCardContent(cardId, content);
       // Update the card in the local state
       for (const columnId of Object.keys(cardsByColumn)) {
         const cards = cardsByColumn[columnId];
@@ -321,10 +317,7 @@
       case "reorderColumnLeft":
         if (focusedColumnIndex > 0 && column) {
           try {
-            await invoke("move_column", {
-              id: column.id,
-              position: focusedColumnIndex - 1,
-            });
+            await db.moveColumn(column.id, focusedColumnIndex - 1);
             await reloadColumns();
             focusedColumnIndex--;
             scrollToFocusedColumn();
@@ -337,10 +330,7 @@
       case "reorderColumnRight":
         if (focusedColumnIndex < columns.length - 1 && column) {
           try {
-            await invoke("move_column", {
-              id: column.id,
-              position: focusedColumnIndex + 1,
-            });
+            await db.moveColumn(column.id, focusedColumnIndex + 1);
             await reloadColumns();
             focusedColumnIndex++;
             scrollToFocusedColumn();
@@ -364,7 +354,7 @@
         if (column) {
           try {
             console.log("deleteColumn: deleting", column.id);
-            await invoke("delete_column", { id: column.id });
+            await db.deleteColumn(column.id);
             deleteStack.push({ type: "column", id: column.id });
             deletedStackLength = deleteStack.length;
             console.log("deleteColumn: stack length is now", deletedStackLength);
@@ -449,10 +439,7 @@
         if (focusedColumnIndex > 0 && card) {
           const targetColumn = columns[focusedColumnIndex - 1];
           try {
-            await invoke("move_card_to_column", {
-              id: card.id,
-              columnId: targetColumn.id,
-            });
+            await db.moveCardToColumn(card.id, targetColumn.id);
             await loadCardsForColumns();
             focusedColumnIndex--;
             const newCards = cardsByColumn[targetColumn.id] ?? [];
@@ -468,10 +455,7 @@
         if (focusedColumnIndex < columns.length - 1 && card) {
           const targetColumn = columns[focusedColumnIndex + 1];
           try {
-            await invoke("move_card_to_column", {
-              id: card.id,
-              columnId: targetColumn.id,
-            });
+            await db.moveCardToColumn(card.id, targetColumn.id);
             await loadCardsForColumns();
             focusedColumnIndex++;
             const newCards = cardsByColumn[targetColumn.id] ?? [];
@@ -486,10 +470,7 @@
       case "reorderCardDown":
         if (focusedCardIndex < cards.length - 1 && card) {
           try {
-            await invoke("move_card", {
-              id: card.id,
-              position: focusedCardIndex + 1,
-            });
+            await db.moveCard(card.id, focusedCardIndex + 1);
             await loadCardsForColumns();
             focusedCardIndex++;
           } catch (e) {
@@ -501,10 +482,7 @@
       case "reorderCardUp":
         if (focusedCardIndex > 0 && card) {
           try {
-            await invoke("move_card", {
-              id: card.id,
-              position: focusedCardIndex - 1,
-            });
+            await db.moveCard(card.id, focusedCardIndex - 1);
             await loadCardsForColumns();
             focusedCardIndex--;
           } catch (e) {
@@ -535,7 +513,7 @@
         if (card) {
           try {
             console.log("deleteCard: deleting", card.id);
-            await invoke("delete_card", { id: card.id });
+            await db.deleteCard(card.id);
             deleteStack.push({ type: "card", id: card.id });
             deletedStackLength = deleteStack.length;
             console.log("deleteCard: stack length is now", deletedStackLength);
@@ -560,12 +538,10 @@
       case "pasteBelow":
         if (clipboardCard && column) {
           try {
-            await invoke("create_card", {
-              params: {
-                column_id: column.id,
-                content: clipboardCard.content,
-                position: focusedCardIndex + 1,
-              },
+            await db.createCard({
+              column_id: column.id,
+              content: clipboardCard.content,
+              position: focusedCardIndex + 1,
             });
             await loadCardsForColumns();
             focusedCardIndex++;
@@ -578,12 +554,10 @@
       case "pasteAbove":
         if (clipboardCard && column) {
           try {
-            await invoke("create_card", {
-              params: {
-                column_id: column.id,
-                content: clipboardCard.content,
-                position: focusedCardIndex,
-              },
+            await db.createCard({
+              column_id: column.id,
+              content: clipboardCard.content,
+              position: focusedCardIndex,
             });
             await loadCardsForColumns();
           } catch (e) {
@@ -595,7 +569,7 @@
       case "scoreUp":
         if (card) {
           try {
-            await invoke("update_card_score", { id: card.id, delta: 1 });
+            await db.updateCardScore(card.id, 1);
             await loadCardsForColumns();
           } catch (e) {
             error = `Failed to update score: ${e}`;
@@ -606,7 +580,7 @@
       case "scoreDown":
         if (card) {
           try {
-            await invoke("update_card_score", { id: card.id, delta: -1 });
+            await db.updateCardScore(card.id, -1);
             await loadCardsForColumns();
           } catch (e) {
             error = `Failed to update score: ${e}`;
@@ -643,7 +617,7 @@
   async function reloadColumns() {
     if (!currentDeck) return;
     try {
-      columns = await invoke<Column[]>("get_columns_by_deck", { deckId: currentDeck.id });
+      columns = await db.getColumnsByDeck(currentDeck.id);
       await loadCardsForColumns();
     } catch (e) {
       error = `Failed to reload columns: ${e}`;
@@ -653,9 +627,7 @@
   async function createColumnAtPosition(position: number) {
     if (!currentDeck) return;
     try {
-      const col = await invoke<Column>("create_column", {
-        params: { deck_id: currentDeck.id, position },
-      });
+      const col = await db.createColumn({ deck_id: currentDeck.id, position });
       await reloadColumns();
       focusedColumnIndex = columns.findIndex((c) => c.id === col.id);
       if (focusedColumnIndex === -1) focusedColumnIndex = 0;
@@ -667,9 +639,7 @@
 
   async function createCardAtPosition(columnId: string, position: number) {
     try {
-      const card = await invoke<Card>("create_card", {
-        params: { column_id: columnId, content: "", position },
-      });
+      const card = await db.createCard({ column_id: columnId, content: "", position });
       await loadCardsForColumns();
       const cards = cardsByColumn[columnId] ?? [];
       focusedCardIndex = cards.findIndex((c) => c.id === card.id);
