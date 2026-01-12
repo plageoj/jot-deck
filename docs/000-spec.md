@@ -41,10 +41,11 @@ NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じ�
 | :--- | :--- |
 | **App Shell** | Tauri v2 |
 | **Backend** | Rust |
-| **Frontend** | Svelte + TypeScript |
-| **Database** | SQLite (FTS5) |
+| **Frontend** | Svelte 5 + SvelteKit + TypeScript |
+| **Database** | SQLite (FTS5) / sql.js (WASM、Web/テスト用) |
 | **ID生成** | ULID |
 | **Editor** | CodeMirror 6 (Vim モード) |
+| **E2E テスト** | Playwright |
 
 ### 2.2 クラウド（将来実装）
 
@@ -238,3 +239,4 @@ Deck 全体のカードを読み取り、AIが文章として清書する。
 * `001-keybindings.md` - キーバインド詳細仕様
 * `002-data-structure.md` - データモデル・削除ルール
 * `003-roadmap.md` - 開発ロードマップ
+* `004-e2e-testing.md` - E2E テスト・WASM SQLite 設定
