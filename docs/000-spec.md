@@ -52,6 +52,7 @@ NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じ�
 | レイヤー | 採用技術 |
 | :--- | :--- |
 | **API** | Cloudflare Workers |
+| **AI Gateway** | Cloudflare AI Gateway |
 | **Database** | Cloudflare D1 |
 | **Storage** | Cloudflare R2 |
 | **Realtime** | PartyKit |
@@ -240,3 +241,4 @@ Deck 全体のカードを読み取り、AIが文章として清書する。
 * `002-data-structure.md` - データモデル・削除ルール
 * `003-roadmap.md` - 開発ロードマップ
 * `004-e2e-testing.md` - E2E テスト・WASM SQLite 設定
+* `005-ai-integration.md` - AI 清書機能・Cloudflare AI Gateway 設計

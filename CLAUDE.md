@@ -62,10 +62,11 @@ cargo test            # Run Rust tests
 - Uses `jot-deck-core` as a dependency
 
 ### Focus Model
-The app has three focus modes that determine keybinding behavior:
+The app has four focus modes that determine keybinding behavior:
 1. **Column focus** - Navigate/reorder columns, create cards
 2. **Card focus** - Navigate/reorder/delete cards, enter edit mode
 3. **Edit focus** - CodeMirror Vim mode active for text editing
+4. **Command focus** - Command palette active
 
 ### Key Design Patterns
 - Soft deletion with `deleted_at` timestamps; physical deletion after 30 days
@@ -81,9 +82,12 @@ Read the `docs/` folder first to understand the specification:
 - `docs/001-keybindings.md` - Keybinding specification and focus model
 - `docs/002-data-structure.md` - Data models and deletion rules
 - `docs/003-roadmap.md` - Development phases
+- `docs/004-e2e-testing.md` - E2E testing and WASM SQLite setup
+- `docs/005-ai-integration.md` - AI synthesis via Cloudflare AI Gateway
 
 ### Before Creating a PR
 1. Run type checks: `pnpm --filter app check`
 2. Run tests: `pnpm --filter app test:run`
 3. Run Rust checks: `cargo check` (in crates/core and packages/app/src-tauri)
 4. Run Rust tests: `cargo test` (in crates/core)
+5. All user-facing text must be in English (power-user target audience)
