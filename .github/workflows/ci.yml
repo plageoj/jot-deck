@@ -29,14 +29,23 @@ jobs:
         run: pnpm --filter app check
 
       - name: Unit tests with coverage
-        run: pnpm --filter app test:coverage
+        run: pnpm --filter app test:coverage -- --reporter=junit --outputFile=test-report.junit.xml
 
       - name: Upload coverage to Codecov
-        if: always()
+        if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v5
         with:
           files: packages/app/coverage/lcov.info
           flags: frontend
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: packages/app/test-report.junit.xml
+          flags: frontend
+          report-type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload coverage for SonarQube
@@ -59,18 +68,29 @@ jobs:
       - name: Check
         run: cargo check -p jot-deck-core
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Install cargo-llvm-cov and cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov,cargo-nextest
 
       - name: Tests with coverage
-        run: cargo llvm-cov -p jot-deck-core --lcov --output-path lcov.info
+        run: cargo llvm-cov nextest -p jot-deck-core --profile ci --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
-        if: always()
+        if: ${{ !cancelled() }}
         uses: codecov/codecov-action@v5
         with:
           files: lcov.info
           flags: rust
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: target/nextest/ci/junit.xml
+          flags: rust
+          report-type: test_results
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload coverage for SonarQube
