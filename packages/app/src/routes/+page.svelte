@@ -34,6 +34,7 @@
   let keySequence = $state("");
   let keySequenceTimer: ReturnType<typeof setTimeout> | null = null;
   const SEQUENCE_TIMEOUT = 500;
+  const HALF_PAGE_SIZE = 5;
 
   // Undo state - managed by deleteStack module
   let deleteStack: ReturnType<typeof createDeleteStack>;
@@ -257,6 +258,21 @@
     if (event.key === "Escape") return "Escape";
     if (event.key === "Enter") return "Enter";
     if (event.key === "Delete") return "Delete";
+    if (event.key === "PageUp") return "PageUp";
+    if (event.key === "PageDown") return "PageDown";
+
+    // Handle arrow keys (with optional modifiers)
+    if (event.key.startsWith("Arrow")) {
+      let prefix = "";
+      if (event.ctrlKey) prefix += "Ctrl+";
+      if (event.shiftKey) prefix += "Shift+";
+      return prefix + event.key;
+    }
+
+    // Handle Ctrl+key combinations
+    if (event.ctrlKey && event.key.length === 1) {
+      return "Ctrl+" + event.key;
+    }
 
     // Single character keys (including uppercase via Shift)
     if (event.key.length === 1) {
@@ -429,6 +445,14 @@
 
       case "goLast":
         focusedCardIndex = cards.length - 1;
+        break;
+
+      case "scrollHalfPageUp":
+        focusedCardIndex = Math.max(0, focusedCardIndex - HALF_PAGE_SIZE);
+        break;
+
+      case "scrollHalfPageDown":
+        focusedCardIndex = Math.min(cards.length - 1, focusedCardIndex + HALF_PAGE_SIZE);
         break;
 
       case "exitToColumn":

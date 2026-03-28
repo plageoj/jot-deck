@@ -10,14 +10,20 @@ export interface KeyBinding {
 export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   // Column focus - Navigation
   { sequence: "h", action: "moveLeft", modes: ["column"], description: "左のカラムへ" },
+  { sequence: "ArrowLeft", action: "moveLeft", modes: ["column"], description: "左のカラムへ" },
   { sequence: "l", action: "moveRight", modes: ["column"], description: "右のカラムへ" },
+  { sequence: "ArrowRight", action: "moveRight", modes: ["column"], description: "右のカラムへ" },
   { sequence: "j", action: "enterCardFocusFirst", modes: ["column"], description: "Card フォーカスへ（最初）" },
+  { sequence: "ArrowDown", action: "enterCardFocusFirst", modes: ["column"], description: "Card フォーカスへ（最初）" },
   { sequence: "k", action: "enterCardFocusLast", modes: ["column"], description: "Card フォーカスへ（最後）" },
+  { sequence: "ArrowUp", action: "enterCardFocusLast", modes: ["column"], description: "Card フォーカスへ（最後）" },
   { sequence: "Enter", action: "enterCardFocusFirst", modes: ["column"], description: "Card フォーカスへ" },
 
   // Column focus - Operations
   { sequence: "H", action: "reorderColumnLeft", modes: ["column"], description: "カラムを左へ移動" },
+  { sequence: "Shift+ArrowLeft", action: "reorderColumnLeft", modes: ["column"], description: "カラムを左へ移動" },
   { sequence: "L", action: "reorderColumnRight", modes: ["column"], description: "カラムを右へ移動" },
+  { sequence: "Shift+ArrowRight", action: "reorderColumnRight", modes: ["column"], description: "カラムを右へ移動" },
   { sequence: "o", action: "createCard", modes: ["column"], description: "新規カード作成" },
   { sequence: "n", action: "createCard", modes: ["column"], description: "新規カード作成" },
   { sequence: "c", action: "createColumn", modes: ["column"], description: "新規カラム作成" },
@@ -27,18 +33,32 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Card focus - Navigation
   { sequence: "j", action: "moveDown", modes: ["card"], description: "下のカードへ" },
+  { sequence: "ArrowDown", action: "moveDown", modes: ["card"], description: "下のカードへ" },
   { sequence: "k", action: "moveUp", modes: ["card"], description: "上のカードへ" },
+  { sequence: "ArrowUp", action: "moveUp", modes: ["card"], description: "上のカードへ" },
   { sequence: "h", action: "moveLeft", modes: ["card"], description: "左のカラムへ" },
+  { sequence: "ArrowLeft", action: "moveLeft", modes: ["card"], description: "左のカラムへ" },
   { sequence: "l", action: "moveRight", modes: ["card"], description: "右のカラムへ" },
+  { sequence: "ArrowRight", action: "moveRight", modes: ["card"], description: "右のカラムへ" },
   { sequence: "gg", action: "goFirst", modes: ["card"], description: "先頭へ" },
+  { sequence: "Ctrl+ArrowUp", action: "goFirst", modes: ["card"], description: "先頭へ" },
   { sequence: "G", action: "goLast", modes: ["card"], description: "末尾へ" },
+  { sequence: "Ctrl+ArrowDown", action: "goLast", modes: ["card"], description: "末尾へ" },
+  { sequence: "Ctrl+u", action: "scrollHalfPageUp", modes: ["card"], description: "半ページ上へ" },
+  { sequence: "PageUp", action: "scrollHalfPageUp", modes: ["card"], description: "半ページ上へ" },
+  { sequence: "Ctrl+d", action: "scrollHalfPageDown", modes: ["card"], description: "半ページ下へ" },
+  { sequence: "PageDown", action: "scrollHalfPageDown", modes: ["card"], description: "半ページ下へ" },
   { sequence: "Escape", action: "exitToColumn", modes: ["card"], description: "Column フォーカスへ" },
 
   // Card focus - Move card
   { sequence: "H", action: "moveCardLeft", modes: ["card"], description: "カードを左カラムへ" },
+  { sequence: "Shift+ArrowLeft", action: "moveCardLeft", modes: ["card"], description: "カードを左カラムへ" },
   { sequence: "L", action: "moveCardRight", modes: ["card"], description: "カードを右カラムへ" },
+  { sequence: "Shift+ArrowRight", action: "moveCardRight", modes: ["card"], description: "カードを右カラムへ" },
   { sequence: "J", action: "reorderCardDown", modes: ["card"], description: "カードを下へ" },
+  { sequence: "Shift+ArrowDown", action: "reorderCardDown", modes: ["card"], description: "カードを下へ" },
   { sequence: "K", action: "reorderCardUp", modes: ["card"], description: "カードを上へ" },
+  { sequence: "Shift+ArrowUp", action: "reorderCardUp", modes: ["card"], description: "カードを上へ" },
 
   // Card focus - Edit
   { sequence: "i", action: "startEdit", modes: ["card"], description: "編集開始" },
