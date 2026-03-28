@@ -19,32 +19,32 @@
   },
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "@codemirror/commands": "^6.10.2",
-    "@codemirror/language": "^6.12.2",
+    "@codemirror/commands": "^6.10.3",
+    "@codemirror/language": "^6.12.3",
     "@codemirror/legacy-modes": "^6.5.2",
-    "@codemirror/state": "^6.5.4",
-    "@codemirror/view": "^6.39.16",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/view": "^6.40.0",
     "@replit/codemirror-vim": "^6.3.0",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "codemirror": "^6.0.2",
-    "sql.js": "^1.14.0",
+    "sql.js": "^1.14.1",
     "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.53.4",
+    "@sveltejs/kit": "^2.55.0",
     "@sveltejs/vite-plugin-svelte": "^6.2.4",
-    "@tauri-apps/cli": "^2.10.0",
+    "@tauri-apps/cli": "^2.10.1",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/svelte": "^5.3.1",
-    "@types/sql.js": "^1.4.9",
+    "@types/sql.js": "^1.4.11",
     "jsdom": "^28.1.0",
-    "svelte": "^5.53.6",
-    "svelte-check": "^4.4.4",
+    "svelte": "^5.55.0",
+    "svelte-check": "^4.4.5",
     "typescript": "~5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.0.18"
+    "vitest": "^4.1.2"
   }
 }
