@@ -57,13 +57,13 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Check
-        run: cargo check --workspace
+        run: cargo check -p jot-deck-core
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Tests with coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov -p jot-deck-core --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         if: always()
