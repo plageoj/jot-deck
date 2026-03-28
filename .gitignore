@@ -15,6 +15,10 @@ packages/app/.svelte-kit
 *.db-wal
 *.db-shm
 
+# Coverage
+coverage
+lcov.info
+
 # IDE
 .idea
 .vscode

@@ -13,6 +13,11 @@ export default defineConfig(async () => ({
     environment: "jsdom",
     globals: true,
     pool: "threads",
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["src/lib/**/*.{js,ts,svelte}"],
+    },
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
