@@ -95,6 +95,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "g8", action: "jumpToColumn:7", modes: ["column", "card"], description: "Jump to column 8" },
   { sequence: "g9", action: "jumpToColumn:8", modes: ["column", "card"], description: "Jump to column 9" },
 
+  // Common - Column palette
+  { sequence: "gn", action: "showColumnPalette", modes: ["column", "card"], description: "Switch column" },
+  { sequence: "gc", action: "showColumnPalette", modes: ["column", "card"], description: "Switch column" },
+  { sequence: "Ctrl+t", action: "showColumnPalette", modes: ["column", "card"], description: "Switch column" },
+
   // Common - Undo
   { sequence: "u", action: "undo", modes: ["column", "card"], description: "Undo" },
 ];
