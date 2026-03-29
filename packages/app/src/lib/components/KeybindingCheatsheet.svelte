@@ -141,6 +141,8 @@
 
   .cheatsheet-item dt {
     flex-shrink: 0;
+    width: 10rem;
+    text-align: right;
     white-space: nowrap;
   }
 
