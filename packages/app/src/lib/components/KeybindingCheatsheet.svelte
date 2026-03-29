@@ -47,27 +47,19 @@
       <span class="cheatsheet-hint">Press <kbd>Esc</kbd> to close</span>
     </div>
     <div class="cheatsheet-body">
-      <table class="cheatsheet-table">
-        <thead>
-          <tr>
-            <th>Key</th>
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each groupedBindings as group, index (index)}
-            <tr>
-              <td>
-                {#each group.sequences as seq, i}
-                  {#if i > 0}<span class="separator"> / </span>{/if}
-                  <kbd>{seq}</kbd>
-                {/each}
-              </td>
-              <td>{group.description}</td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
+      <dl class="cheatsheet-list">
+        {#each groupedBindings as group, index (index)}
+          <div class="cheatsheet-item">
+            <dt>
+              {#each group.sequences as seq, i}
+                {#if i > 0}<span class="separator"> / </span>{/if}
+                <kbd>{seq}</kbd>
+              {/each}
+            </dt>
+            <dd>{group.description}</dd>
+          </div>
+        {/each}
+      </dl>
     </div>
   </div>
 </div>
@@ -84,8 +76,8 @@
   }
 
   .cheatsheet-panel {
-    width: 100%;
-    max-width: 600px;
+    width: 90vw;
+    max-width: 900px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
@@ -126,35 +118,41 @@
 
   .cheatsheet-body {
     overflow-y: auto;
-    padding: 0.5rem 0;
+    padding: 0.5rem 1rem;
   }
 
-  .cheatsheet-table {
-    width: 100%;
-    border-collapse: collapse;
+  .cheatsheet-list {
+    columns: 2 250px;
+    column-gap: 1.5rem;
   }
 
-  .cheatsheet-table th {
-    text-align: left;
-    padding: 0.375rem 1rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  .cheatsheet-item {
+    break-inside: avoid;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.25rem 0.375rem;
+    border-radius: 4px;
   }
 
-  .cheatsheet-table td {
-    padding: 0.375rem 1rem;
-    font-size: 0.8125rem;
-    color: var(--text);
-  }
-
-  .cheatsheet-table tbody tr:hover {
+  .cheatsheet-item:hover {
     background-color: var(--bg-tertiary);
   }
 
-  .cheatsheet-table kbd {
+  .cheatsheet-item dt {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .cheatsheet-item dd {
+    font-size: 0.8125rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .cheatsheet-list kbd {
     display: inline-block;
     min-width: 1.5rem;
     padding: 0.125rem 0.5rem;

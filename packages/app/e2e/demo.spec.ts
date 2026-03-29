@@ -360,7 +360,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await expect(page.locator(".cheatsheet-header h2")).toContainText("Keyboard Shortcuts");
 
     // Verify keybindings are listed
-    const rows = page.locator(".cheatsheet-table tbody tr");
+    const rows = page.locator(".cheatsheet-item");
     expect(await rows.count()).toBeGreaterThan(0);
 
     // Close with Escape
@@ -375,11 +375,11 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await page.waitForTimeout(300);
 
     // "h" and "ArrowLeft" should be grouped — look for a separator
-    const separators = page.locator(".cheatsheet-table .separator");
+    const separators = page.locator(".cheatsheet-list .separator");
     expect(await separators.count()).toBeGreaterThan(0);
 
     // Verify at least one row has multiple kbd elements (grouped keys)
-    const firstGroupedRow = page.locator(".cheatsheet-table tbody tr").filter({
+    const firstGroupedRow = page.locator(".cheatsheet-item").filter({
       has: page.locator(".separator"),
     });
     expect(await firstGroupedRow.count()).toBeGreaterThan(0);
