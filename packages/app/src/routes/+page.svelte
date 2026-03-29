@@ -1,786 +1,112 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import type { Deck, Column, Card } from "$lib/types";
-  import { Deck as DeckComponent } from "$lib/components";
-  import { type FocusMode, findAction, isValidPrefix } from "$lib/keybindings";
-  import { createDeleteStack, type DeletedItem } from "$lib/deleteStack";
-  import { getDatabase, type DatabaseBackend } from "$lib/db";
+  import {
+    Deck as DeckComponent,
+    ColumnPalette,
+    CommandPalette,
+    KeybindingCheatsheet,
+  } from "$lib/components";
+  import { DeckData } from "$lib/deckData.svelte";
+  import { FocusManager } from "$lib/focusManager.svelte";
+  import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
   import "$lib/styles/theme.css";
 
-  // Database backend
-  let db: DatabaseBackend;
+  const data = new DeckData();
+  const focus = new FocusManager(data);
+  const actions = new ActionDispatcher(data, focus);
 
-  // Data state
-  let decks = $state<Deck[]>([]);
-  let currentDeck = $state<Deck | null>(null);
-  let columns = $state<Column[]>([]);
-  let cardsByColumn = $state<Record<string, Card[]>>({});
-  let loading = $state(true);
-  let error = $state<string | null>(null);
-
-  // Focus state
-  let focusMode = $state<FocusMode>("card");
-  let focusedColumnIndex = $state(0);
-  let focusedCardIndex = $state(0);
-  let editingCardId = $state<string | null>(null);
-
-  // Remember last focused card index per column
-  let lastFocusedCardByColumn = $state<Record<string, number>>({});
-
-  // Clipboard for copy/paste
-  let clipboardCard = $state<Card | null>(null);
-
-  // Key sequence state (for dd, yy, gg, g1-g9, etc.)
-  let keySequence = $state("");
-  let keySequenceTimer: ReturnType<typeof setTimeout> | null = null;
-  const SEQUENCE_TIMEOUT = 500;
-  const HALF_PAGE_SIZE = 5;
-
-  // Undo state - managed by deleteStack module
-  let deleteStack: ReturnType<typeof createDeleteStack>;
-
-  // Reactive state for UI (tracks stack for reactivity)
-  let deletedStackLength = $state(0);
-
-  // Deck component reference for scrolling
   let deckComponent = $state<DeckComponent | null>(null);
 
   onMount(async () => {
-    window.addEventListener("keydown", handleKeydown);
-    // Initialize database backend
-    db = await getDatabase();
-    // Initialize delete stack with database backend
-    deleteStack = createDeleteStack({
-      onRestore: async (item) => {
-        console.log("deleteStack.onRestore:", item);
-        if (item.type === "card") {
-          await db.restoreCard(item.id);
-        } else {
-          await db.restoreColumn(item.id);
-        }
-      },
-      onError: (msg) => {
-        console.error("deleteStack error:", msg);
-        error = msg;
-      },
-    });
-    await loadDecks();
+    focus.onScrollToColumn = (index) => deckComponent?.scrollToColumn(index);
+    window.addEventListener("keydown", actions.handleKeydown);
+    await data.init();
   });
 
   onDestroy(() => {
-    window.removeEventListener("keydown", handleKeydown);
-    if (keySequenceTimer) {
-      clearTimeout(keySequenceTimer);
-    }
+    window.removeEventListener("keydown", actions.handleKeydown);
+    actions.destroy();
   });
-
-  async function loadDecks() {
-    try {
-      loading = true;
-      error = null;
-      decks = await db.getAllDecks();
-      if (decks.length > 0) {
-        await selectDeck(decks[0]);
-      }
-    } catch (e) {
-      error = `Failed to load decks: ${e}`;
-    } finally {
-      loading = false;
-    }
-  }
-
-  async function selectDeck(deck: Deck) {
-    currentDeck = deck;
-    try {
-      columns = await db.getColumnsByDeck(deck.id);
-      await loadCardsForColumns();
-    } catch (e) {
-      error = `Failed to load columns: ${e}`;
-    }
-  }
-
-  async function loadCardsForColumns() {
-    const newCardsByColumn: Record<string, Card[]> = {};
-    for (const col of columns) {
-      try {
-        newCardsByColumn[col.id] = await db.getCardsByColumn(col.id);
-      } catch (e) {
-        console.error(`Failed to load cards for column ${col.id}:`, e);
-        newCardsByColumn[col.id] = [];
-      }
-    }
-    cardsByColumn = newCardsByColumn;
-  }
-
-  async function createDeck() {
-    try {
-      const deck = await db.createDeck({ name: "New Deck" });
-      decks = [deck, ...decks];
-      await selectDeck(deck);
-    } catch (e) {
-      error = `Failed to create deck: ${e}`;
-    }
-  }
-
-  async function createColumn() {
-    if (!currentDeck) return;
-    try {
-      const col = await db.createColumn({ deck_id: currentDeck.id });
-      columns = [...columns, col];
-      cardsByColumn[col.id] = [];
-    } catch (e) {
-      error = `Failed to create column: ${e}`;
-    }
-  }
-
-  async function createCard(columnId: string) {
-    try {
-      const card = await db.createCard({ column_id: columnId, content: "" });
-      cardsByColumn[columnId] = [...(cardsByColumn[columnId] || []), card];
-      // Start editing the new card immediately
-      editingCardId = card.id;
-    } catch (e) {
-      error = `Failed to create card: ${e}`;
-    }
-  }
-
-  async function saveCard(cardId: string, content: string) {
-    try {
-      const updatedCard = await db.updateCardContent(cardId, content);
-      // Update the card in the local state
-      for (const columnId of Object.keys(cardsByColumn)) {
-        const cards = cardsByColumn[columnId];
-        const index = cards.findIndex((c) => c.id === cardId);
-        if (index !== -1) {
-          cardsByColumn[columnId] = [
-            ...cards.slice(0, index),
-            updatedCard,
-            ...cards.slice(index + 1),
-          ];
-          break;
-        }
-      }
-    } catch (e) {
-      error = `Failed to save card: ${e}`;
-    }
-  }
-
-  function cancelEdit() {
-    editingCardId = null;
-  }
-
-  function startEdit(cardId: string) {
-    editingCardId = cardId;
-    focusMode = "edit";
-  }
-
-  function exitEdit() {
-    editingCardId = null;
-    focusMode = "card";
-  }
-
-  // ============================================
-  // Keyboard handling
-  // ============================================
-
-  function handleKeydown(event: KeyboardEvent) {
-    // Skip if in edit mode (CodeMirror handles keys)
-    if (focusMode === "edit") return;
-
-    // Skip if focus is on input fields
-    const target = event.target as HTMLElement;
-    if (
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.tagName === "SELECT" ||
-      target.isContentEditable
-    ) {
-      return;
-    }
-
-    // Skip if no columns loaded
-    if (columns.length === 0) return;
-
-    const result = processKey(event);
-    if (result.handled) {
-      event.preventDefault();
-    }
-  }
-
-  function processKey(event: KeyboardEvent): { handled: boolean } {
-    const key = normalizeKey(event);
-    if (!key) return { handled: false };
-
-    // Build new sequence
-    const newSequence = keySequence + key;
-
-    // Clear existing timer
-    if (keySequenceTimer) {
-      clearTimeout(keySequenceTimer);
-      keySequenceTimer = null;
-    }
-
-    // Check for exact match
-    const action = findAction(newSequence, focusMode);
-    if (action) {
-      keySequence = "";
-      executeAction(action);
-      return { handled: true };
-    }
-
-    // Check if it's a valid prefix (more keys expected)
-    if (isValidPrefix(newSequence, focusMode)) {
-      keySequence = newSequence;
-      keySequenceTimer = setTimeout(() => {
-        keySequence = "";
-      }, SEQUENCE_TIMEOUT);
-      return { handled: true };
-    }
-
-    // Not a valid sequence, reset and try single key
-    keySequence = "";
-    const singleAction = findAction(key, focusMode);
-    if (singleAction) {
-      executeAction(singleAction);
-      return { handled: true };
-    }
-
-    return { handled: false };
-  }
-
-  function normalizeKey(event: KeyboardEvent): string | null {
-    // Ignore modifier-only keys
-    if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) {
-      return null;
-    }
-
-    // Handle special keys
-    if (event.key === "Escape") return "Escape";
-    if (event.key === "Enter") return "Enter";
-    if (event.key === "Delete") return "Delete";
-    if (event.key === "PageUp") return "PageUp";
-    if (event.key === "PageDown") return "PageDown";
-
-    // Handle arrow keys (with optional modifiers)
-    if (event.key.startsWith("Arrow")) {
-      let prefix = "";
-      if (event.ctrlKey) prefix += "Ctrl+";
-      if (event.shiftKey) prefix += "Shift+";
-      return prefix + event.key;
-    }
-
-    // Handle Ctrl+key combinations
-    if (event.ctrlKey && event.key.length === 1) {
-      return "Ctrl+" + event.key;
-    }
-
-    // Single character keys (including uppercase via Shift)
-    if (event.key.length === 1) {
-      return event.key;
-    }
-
-    return null;
-  }
-
-  async function executeAction(action: string) {
-    // Handle parameterized actions (e.g., "jumpToColumn:0")
-    const [actionName, param] = action.split(":");
-
-    if (focusMode === "column") {
-      await executeColumnAction(actionName, param);
-    } else if (focusMode === "card") {
-      await executeCardAction(actionName, param);
-    }
-  }
-
-  // ============================================
-  // Column focus actions
-  // ============================================
-
-  async function executeColumnAction(action: string, param?: string) {
-    const column = columns[focusedColumnIndex];
-    const cards = cardsByColumn[column?.id] ?? [];
-
-    switch (action) {
-      case "moveLeft":
-        if (focusedColumnIndex > 0) {
-          focusedColumnIndex--;
-          scrollToFocusedColumn();
-        }
-        break;
-
-      case "moveRight":
-        if (focusedColumnIndex < columns.length - 1) {
-          focusedColumnIndex++;
-          scrollToFocusedColumn();
-        }
-        break;
-
-      case "enterCardFocusFirst":
-        if (cards.length > 0) {
-          focusMode = "card";
-          focusedCardIndex = 0;
-        }
-        break;
-
-      case "enterCardFocusLast":
-        if (cards.length > 0) {
-          focusMode = "card";
-          focusedCardIndex = cards.length - 1;
-        }
-        break;
-
-      case "reorderColumnLeft":
-        if (focusedColumnIndex > 0 && column) {
-          try {
-            await db.moveColumn(column.id, focusedColumnIndex - 1);
-            await reloadColumns();
-            focusedColumnIndex--;
-            scrollToFocusedColumn();
-          } catch (e) {
-            error = `Failed to move column: ${e}`;
-          }
-        }
-        break;
-
-      case "reorderColumnRight":
-        if (focusedColumnIndex < columns.length - 1 && column) {
-          try {
-            await db.moveColumn(column.id, focusedColumnIndex + 1);
-            await reloadColumns();
-            focusedColumnIndex++;
-            scrollToFocusedColumn();
-          } catch (e) {
-            error = `Failed to move column: ${e}`;
-          }
-        }
-        break;
-
-      case "createCard":
-        if (column) {
-          await createCard(column.id);
-        }
-        break;
-
-      case "createColumn":
-        await createColumnAtPosition(focusedColumnIndex + 1);
-        break;
-
-      case "deleteColumn":
-        if (column) {
-          try {
-            console.log("deleteColumn: deleting", column.id);
-            await db.deleteColumn(column.id);
-            deleteStack.push({ type: "column", id: column.id });
-            deletedStackLength = deleteStack.length;
-            console.log("deleteColumn: stack length is now", deletedStackLength);
-            await reloadColumns();
-            focusedColumnIndex = Math.min(focusedColumnIndex, Math.max(0, columns.length - 1));
-            scrollToFocusedColumn();
-          } catch (e) {
-            error = `Failed to delete column: ${e}`;
-          }
-        }
-        break;
-
-      case "jumpToColumn":
-        if (param !== undefined) {
-          const targetIndex = parseInt(param, 10);
-          if (targetIndex >= 0 && targetIndex < columns.length) {
-            focusedColumnIndex = targetIndex;
-            scrollToFocusedColumn();
-          }
-        }
-        break;
-
-      case "undo":
-        await undoLastDelete();
-        break;
-    }
-  }
-
-  // ============================================
-  // Card focus actions
-  // ============================================
-
-  async function executeCardAction(action: string, param?: string) {
-    const column = columns[focusedColumnIndex];
-    const cards = cardsByColumn[column?.id] ?? [];
-    const card = cards[focusedCardIndex];
-
-    switch (action) {
-      case "moveDown":
-        if (focusedCardIndex < cards.length - 1) {
-          focusedCardIndex++;
-        }
-        break;
-
-      case "moveUp":
-        if (focusedCardIndex > 0) {
-          focusedCardIndex--;
-        }
-        break;
-
-      case "moveLeft":
-        if (focusedColumnIndex > 0) {
-          saveCurrentCardIndex();
-          focusedColumnIndex--;
-          restoreCardIndex();
-          scrollToFocusedColumn();
-        }
-        break;
-
-      case "moveRight":
-        if (focusedColumnIndex < columns.length - 1) {
-          saveCurrentCardIndex();
-          focusedColumnIndex++;
-          restoreCardIndex();
-          scrollToFocusedColumn();
-        }
-        break;
-
-      case "goFirst":
-        focusedCardIndex = 0;
-        break;
-
-      case "goLast":
-        focusedCardIndex = cards.length - 1;
-        break;
-
-      case "scrollHalfPageUp":
-        focusedCardIndex = Math.max(0, focusedCardIndex - HALF_PAGE_SIZE);
-        break;
-
-      case "scrollHalfPageDown":
-        focusedCardIndex = Math.min(cards.length - 1, focusedCardIndex + HALF_PAGE_SIZE);
-        break;
-
-      case "exitToColumn":
-        focusMode = "column";
-        break;
-
-      case "moveCardLeft":
-        if (focusedColumnIndex > 0 && card) {
-          const targetColumn = columns[focusedColumnIndex - 1];
-          try {
-            await db.moveCardToColumn(card.id, targetColumn.id);
-            await loadCardsForColumns();
-            focusedColumnIndex--;
-            const newCards = cardsByColumn[targetColumn.id] ?? [];
-            focusedCardIndex = newCards.length - 1;
-            scrollToFocusedColumn();
-          } catch (e) {
-            error = `Failed to move card: ${e}`;
-          }
-        }
-        break;
-
-      case "moveCardRight":
-        if (focusedColumnIndex < columns.length - 1 && card) {
-          const targetColumn = columns[focusedColumnIndex + 1];
-          try {
-            await db.moveCardToColumn(card.id, targetColumn.id);
-            await loadCardsForColumns();
-            focusedColumnIndex++;
-            const newCards = cardsByColumn[targetColumn.id] ?? [];
-            focusedCardIndex = newCards.length - 1;
-            scrollToFocusedColumn();
-          } catch (e) {
-            error = `Failed to move card: ${e}`;
-          }
-        }
-        break;
-
-      case "reorderCardDown":
-        if (focusedCardIndex < cards.length - 1 && card) {
-          try {
-            await db.moveCard(card.id, focusedCardIndex + 1);
-            await loadCardsForColumns();
-            focusedCardIndex++;
-          } catch (e) {
-            error = `Failed to move card: ${e}`;
-          }
-        }
-        break;
-
-      case "reorderCardUp":
-        if (focusedCardIndex > 0 && card) {
-          try {
-            await db.moveCard(card.id, focusedCardIndex - 1);
-            await loadCardsForColumns();
-            focusedCardIndex--;
-          } catch (e) {
-            error = `Failed to move card: ${e}`;
-          }
-        }
-        break;
-
-      case "startEdit":
-        if (card) {
-          startEdit(card.id);
-        }
-        break;
-
-      case "createCardBelow":
-        if (column) {
-          await createCardAtPosition(column.id, focusedCardIndex + 1);
-        }
-        break;
-
-      case "createCardAbove":
-        if (column) {
-          await createCardAtPosition(column.id, focusedCardIndex);
-        }
-        break;
-
-      case "deleteCard":
-        if (card) {
-          try {
-            console.log("deleteCard: deleting", card.id);
-            await db.deleteCard(card.id);
-            deleteStack.push({ type: "card", id: card.id });
-            deletedStackLength = deleteStack.length;
-            console.log("deleteCard: stack length is now", deletedStackLength);
-            await loadCardsForColumns();
-            const updatedCards = cardsByColumn[column.id] ?? [];
-            focusedCardIndex = Math.min(focusedCardIndex, Math.max(0, updatedCards.length - 1));
-            if (updatedCards.length === 0) {
-              focusMode = "column";
-            }
-          } catch (e) {
-            error = `Failed to delete card: ${e}`;
-          }
-        }
-        break;
-
-      case "copyCard":
-        if (card) {
-          clipboardCard = { ...card };
-        }
-        break;
-
-      case "pasteBelow":
-        if (clipboardCard && column) {
-          try {
-            await db.createCard({
-              column_id: column.id,
-              content: clipboardCard.content,
-              position: focusedCardIndex + 1,
-            });
-            await loadCardsForColumns();
-            focusedCardIndex++;
-          } catch (e) {
-            error = `Failed to paste card: ${e}`;
-          }
-        }
-        break;
-
-      case "pasteAbove":
-        if (clipboardCard && column) {
-          try {
-            await db.createCard({
-              column_id: column.id,
-              content: clipboardCard.content,
-              position: focusedCardIndex,
-            });
-            await loadCardsForColumns();
-          } catch (e) {
-            error = `Failed to paste card: ${e}`;
-          }
-        }
-        break;
-
-      case "scoreUp":
-        if (card) {
-          try {
-            await db.updateCardScore(card.id, 1);
-            await loadCardsForColumns();
-          } catch (e) {
-            error = `Failed to update score: ${e}`;
-          }
-        }
-        break;
-
-      case "scoreDown":
-        if (card) {
-          try {
-            await db.updateCardScore(card.id, -1);
-            await loadCardsForColumns();
-          } catch (e) {
-            error = `Failed to update score: ${e}`;
-          }
-        }
-        break;
-
-      case "jumpToColumn":
-        if (param !== undefined) {
-          const targetIndex = parseInt(param, 10);
-          if (targetIndex >= 0 && targetIndex < columns.length && targetIndex !== focusedColumnIndex) {
-            saveCurrentCardIndex();
-            focusedColumnIndex = targetIndex;
-            restoreCardIndex();
-            const newCards = cardsByColumn[columns[focusedColumnIndex].id] ?? [];
-            if (newCards.length === 0) {
-              focusMode = "column";
-            }
-            scrollToFocusedColumn();
-          }
-        }
-        break;
-
-      case "undo":
-        await undoLastDelete();
-        break;
-    }
-  }
-
-  // ============================================
-  // Helper functions
-  // ============================================
-
-  async function reloadColumns() {
-    if (!currentDeck) return;
-    try {
-      columns = await db.getColumnsByDeck(currentDeck.id);
-      await loadCardsForColumns();
-    } catch (e) {
-      error = `Failed to reload columns: ${e}`;
-    }
-  }
-
-  async function createColumnAtPosition(position: number) {
-    if (!currentDeck) return;
-    try {
-      const col = await db.createColumn({ deck_id: currentDeck.id, position });
-      await reloadColumns();
-      focusedColumnIndex = columns.findIndex((c) => c.id === col.id);
-      if (focusedColumnIndex === -1) focusedColumnIndex = 0;
-      scrollToFocusedColumn();
-    } catch (e) {
-      error = `Failed to create column: ${e}`;
-    }
-  }
-
-  async function createCardAtPosition(columnId: string, position: number) {
-    try {
-      const card = await db.createCard({ column_id: columnId, content: "", position });
-      await loadCardsForColumns();
-      const cards = cardsByColumn[columnId] ?? [];
-      focusedCardIndex = cards.findIndex((c) => c.id === card.id);
-      if (focusedCardIndex === -1) focusedCardIndex = 0;
-      startEdit(card.id);
-    } catch (e) {
-      error = `Failed to create card: ${e}`;
-    }
-  }
-
-  async function undoLastDelete() {
-    console.log("undoLastDelete: stack length is", deleteStack.length);
-    const success = await deleteStack.popAndRestore();
-    if (success) {
-      deletedStackLength = deleteStack.length;
-      await reloadColumns();
-      console.log("undoLastDelete: success, stack length is now", deletedStackLength);
-    } else {
-      console.log("undoLastDelete: failed or stack was empty");
-    }
-  }
-
-  function scrollToFocusedColumn() {
-    deckComponent?.scrollToColumn(focusedColumnIndex);
-  }
-
-  function saveCurrentCardIndex() {
-    const column = columns[focusedColumnIndex];
-    if (column) {
-      lastFocusedCardByColumn[column.id] = focusedCardIndex;
-    }
-  }
-
-  function restoreCardIndex() {
-    const column = columns[focusedColumnIndex];
-    if (!column) return;
-
-    const cards = cardsByColumn[column.id] ?? [];
-    const savedIndex = lastFocusedCardByColumn[column.id];
-
-    if (savedIndex !== undefined && savedIndex < cards.length) {
-      focusedCardIndex = savedIndex;
-    } else {
-      focusedCardIndex = Math.max(0, cards.length - 1);
-    }
-  }
-
-  function handleFocusColumn(columnIndex: number) {
-    if (focusedColumnIndex !== columnIndex) {
-      saveCurrentCardIndex();
-    }
-    focusedColumnIndex = columnIndex;
-    focusMode = "column";
-  }
-
-  function handleFocusCard(columnIndex: number, cardIndex: number) {
-    if (focusedColumnIndex !== columnIndex) {
-      saveCurrentCardIndex();
-    }
-    focusedColumnIndex = columnIndex;
-    focusedCardIndex = cardIndex;
-    focusMode = "card";
-  }
 </script>
 
 <main class="app">
   <header class="header">
     <h1>Jot Deck</h1>
-    {#if decks.length > 0}
+    {#if data.decks.length > 0}
       <select
-        value={currentDeck?.id}
+        value={data.currentDeck?.id}
         onchange={(e) => {
-          const deck = decks.find((d) => d.id === e.currentTarget.value);
-          if (deck) selectDeck(deck);
+          const deck = data.decks.find((d) => d.id === e.currentTarget.value);
+          if (deck) data.selectDeck(deck);
         }}
       >
-        {#each decks as deck}
+        {#each data.decks as deck}
           <option value={deck.id}>{deck.name}</option>
         {/each}
       </select>
     {/if}
-    <button onclick={createDeck}>New Deck</button>
-    <button onclick={createColumn} disabled={!currentDeck}>New Column</button>
+    <button onclick={() => data.createDeck()}>New Deck</button>
+    <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
+      >New Column</button
+    >
   </header>
 
-  {#if loading}
+  {#if data.loading}
     <div class="status">Loading...</div>
-  {:else if error}
-    <div class="status error">{error}</div>
-  {:else if !currentDeck}
+  {:else if data.error}
+    <div class="status error">{data.error}</div>
+  {:else if !data.currentDeck}
     <div class="status">
       <p>No decks yet. Create your first deck!</p>
-      <button onclick={createDeck}>Create Deck</button>
+      <button onclick={() => data.createDeck()}>Create Deck</button>
     </div>
-  {:else if columns.length === 0}
+  {:else if data.columns.length === 0}
     <div class="status">
       <p>No columns in this deck. Create your first column!</p>
-      <button onclick={createColumn}>Create Column</button>
+      <button onclick={() => data.createColumn()}>Create Column</button>
     </div>
   {:else}
     <DeckComponent
       bind:this={deckComponent}
-      {columns}
-      {cardsByColumn}
-      {focusedColumnIndex}
-      focusedCardIndex={focusMode === "card" ? focusedCardIndex : -1}
-      {editingCardId}
-      onAddCard={createCard}
-      onSaveCard={saveCard}
-      onCancelEdit={cancelEdit}
-      onStartEdit={startEdit}
-      onExitEdit={exitEdit}
-      onFocusColumn={handleFocusColumn}
-      onFocusCard={handleFocusCard}
+      columns={data.columns}
+      cardsByColumn={data.cardsByColumn}
+      focusedColumnIndex={focus.focusedColumnIndex}
+      focusedCardIndex={focus.focusMode === "card" ? focus.focusedCardIndex : -1}
+      editingCardId={focus.editingCardId}
+      onAddCard={async (columnId) => {
+        const card = await data.createCard(columnId);
+        if (card) focus.editingCardId = card.id;
+      }}
+      onSaveCard={(cardId, content) => data.saveCard(cardId, content)}
+      onCancelEdit={() => focus.cancelEdit()}
+      onStartEdit={(cardId) => focus.startEdit(cardId)}
+      onExitEdit={() => focus.exitEdit()}
+      onFocusColumn={(i) => focus.handleFocusColumn(i)}
+      onFocusCard={(ci, cardi) => focus.handleFocusCard(ci, cardi)}
     />
   {/if}
 </main>
+
+{#if focus.showColumnPalette}
+  <ColumnPalette
+    columns={data.columns}
+    focusedColumnIndex={focus.focusedColumnIndex}
+    onSelect={(i) => actions.selectColumnFromPalette(i)}
+    onClose={() => focus.closeColumnPalette()}
+  />
+{:else if focus.focusMode === "command"}
+  <CommandPalette
+    onExecute={(action) => actions.executeCommand(action)}
+    onClose={() => focus.closeCommandPalette()}
+  />
+{/if}
+
+{#if focus.showCheatsheet}
+  <KeybindingCheatsheet
+    mode={focus.focusMode === "command" ? focus.previousFocusMode : focus.focusMode}
+    onClose={() => (focus.showCheatsheet = false)}
+  />
+{/if}
 
 <style>
   .app {
@@ -815,7 +141,9 @@
     color: var(--text);
     font-size: 0.875rem;
     cursor: pointer;
-    transition: border-color 0.15s ease, background-color 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      background-color 0.15s ease;
   }
 
   .header select:focus,

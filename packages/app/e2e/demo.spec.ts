@@ -1,4 +1,9 @@
-import { test, expect, Page } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import {
+  typeInEditor,
+  saveAndExitEditor,
+  ensureDeckAndColumn,
+} from "./e2e-helpers";
 
 /**
  * Demo E2E Test for Jot Deck
@@ -9,23 +14,6 @@ import { test, expect, Page } from "@playwright/test";
  *
  * The video will be saved to test-results/
  */
-
-// Helper to type into CodeMirror Vim editor
-// The editor starts in Vim normal mode, so we need to press 'i' to enter insert mode
-async function typeInEditor(page: Page, text: string) {
-  // Editor should be focused, press 'i' to enter insert mode
-  await page.keyboard.press("i");
-  await page.waitForTimeout(100);
-  // Type the text
-  await page.keyboard.type(text, { delay: 30 });
-  await page.waitForTimeout(100);
-}
-
-// Helper to save and exit editor with Ctrl+Enter
-async function saveAndExitEditor(page: Page) {
-  await page.keyboard.press("Control+Enter");
-  await page.waitForTimeout(300);
-}
 
 test.describe("Jot Deck Demo", () => {
   test.beforeEach(async ({ page }) => {
@@ -38,22 +26,9 @@ test.describe("Jot Deck Demo", () => {
 
   test("full demo walkthrough", async ({ page }) => {
     // ========================================
-    // Scene 1: Initial app load - create first deck if needed
+    // Scene 1-2: Create deck and first column if needed
     // ========================================
-    const noDeckMessage = page.locator("text=No decks yet");
-    if (await noDeckMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.click("text=Create Deck");
-      await page.waitForTimeout(500);
-    }
-
-    // ========================================
-    // Scene 2: Create columns if needed
-    // ========================================
-    const noColumnsMessage = page.locator("text=No columns in this deck");
-    if (await noColumnsMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.click("text=Create Column");
-      await page.waitForTimeout(500);
-    }
+    await ensureDeckAndColumn(page);
 
     // Ensure we're in column mode
     await page.keyboard.press("Escape");
@@ -263,18 +238,7 @@ test.describe("Feature Highlights", () => {
   });
 
   test("quick card creation workflow", async ({ page }) => {
-    // Setup
-    const noDeckMessage = page.locator("text=No decks yet");
-    if (await noDeckMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.click("text=Create Deck");
-    }
-
-    const noColumnsMessage = page.locator("text=No columns in this deck");
-    if (await noColumnsMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.click("text=Create Column");
-    }
-
-    await page.waitForTimeout(500);
+    await ensureDeckAndColumn(page);
 
     // Rapidly create multiple cards
     for (let i = 1; i <= 3; i++) {
@@ -292,18 +256,7 @@ test.describe("Feature Highlights", () => {
   });
 
   test("keyboard navigation demo", async ({ page }) => {
-    // Setup
-    const noDeckMessage = page.locator("text=No decks yet");
-    if (await noDeckMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.click("text=Create Deck");
-    }
-
-    const noColumnsMessage = page.locator("text=No columns in this deck");
-    if (await noColumnsMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await page.click("text=Create Column");
-    }
-
-    await page.waitForTimeout(500);
+    await ensureDeckAndColumn(page);
 
     // Create multiple columns
     await page.keyboard.press("Escape");
