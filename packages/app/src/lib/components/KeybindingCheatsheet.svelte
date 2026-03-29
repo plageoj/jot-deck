@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { type FocusMode, getKeybindingsForMode } from "$lib/keybindings";
 
   interface Props {
@@ -7,6 +8,7 @@
   }
 
   let { mode, onClose }: Props = $props();
+  let dialogRef = $state<HTMLDialogElement | null>(null);
 
   let groupedBindings = $derived.by(() => {
     const bindings = getKeybindingsForMode(mode);
@@ -25,12 +27,18 @@
     return groups;
   });
 
+  onMount(() => {
+    dialogRef?.showModal();
+  });
+
+  function handleBackdropClick(event: MouseEvent) {
+    if (event.target === dialogRef) {
+      dialogRef?.close();
+    }
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     event.stopPropagation();
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-    }
   }
 
   let modeLabel = $derived(
@@ -38,10 +46,15 @@
   );
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="cheatsheet-overlay" onkeydown={handleKeydown} onclick={onClose}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="cheatsheet-panel" onclick={(e) => e.stopPropagation()}>
+<dialog
+  bind:this={dialogRef}
+  class="cheatsheet-dialog"
+  aria-label="Keyboard shortcuts — {modeLabel} mode"
+  onclose={onClose}
+  onclick={handleBackdropClick}
+  onkeydown={handleKeydown}
+>
+  <div class="cheatsheet-panel">
     <div class="cheatsheet-header">
       <h2>Keyboard Shortcuts — {modeLabel} Mode</h2>
       <span class="cheatsheet-hint">Press <kbd>Esc</kbd> to close</span>
@@ -62,16 +75,26 @@
       </dl>
     </div>
   </div>
-</div>
+</dialog>
 
 <style>
-  .cheatsheet-overlay {
+  .cheatsheet-dialog {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
     display: flex;
     justify-content: center;
     align-items: center;
+  }
+
+  .cheatsheet-dialog::backdrop {
     background-color: rgba(0, 0, 0, 0.5);
   }
 

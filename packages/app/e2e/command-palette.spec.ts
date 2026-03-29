@@ -22,23 +22,23 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await page.waitForTimeout(300);
 
     // Verify palette is visible
-    const overlay = page.locator(".palette-overlay");
-    await expect(overlay).toBeVisible();
+    const dialog = page.locator("dialog.palette-dialog");
+    await expect(dialog).toBeVisible();
     await expect(page.locator(".palette-input")).toBeFocused();
 
-    // Verify commands are listed
-    await expect(page.locator(".palette-item")).toHaveCount(9);
+    // Verify enabled commands are listed (disabled ones are hidden)
+    await expect(page.locator(".palette-item")).toHaveCount(4);
 
     // Close with Escape
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
-    await expect(overlay).not.toBeVisible();
+    await expect(dialog).not.toBeVisible();
   });
 
   test("command palette opens with F1", async ({ page }) => {
     await page.keyboard.press("F1");
     await page.waitForTimeout(300);
-    await expect(page.locator(".palette-overlay")).toBeVisible();
+    await expect(page.locator("dialog.palette-dialog")).toBeVisible();
 
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
@@ -72,30 +72,50 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await page.keyboard.press("Control+Shift+p");
     await page.waitForTimeout(300);
 
-    // Filter to "New Column"
-    await page.keyboard.type("new col", { delay: 50 });
+    // Filter to "new" — matches "New Deck" and "New Column" (multiple results)
+    await page.keyboard.type("new", { delay: 50 });
     await page.waitForTimeout(200);
 
-    const columnCountBefore = await page.locator(".column").count();
+    const items = page.locator(".palette-item");
+    expect(await items.count()).toBe(2);
 
-    // Press Enter to execute
+    // First item should be selected by default
+    await expect(items.nth(0)).toHaveAttribute("aria-selected", "true");
+
+    // Navigate down
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(100);
+    await expect(items.nth(1)).toHaveAttribute("aria-selected", "true");
+    await expect(items.nth(0)).toHaveAttribute("aria-selected", "false");
+
+    // Navigate back up
+    await page.keyboard.press("ArrowUp");
+    await page.waitForTimeout(100);
+    await expect(items.nth(0)).toHaveAttribute("aria-selected", "true");
+
+    // Navigate down to "New Column" and execute
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(100);
+
+    const columnCountBefore = await page.locator(".column").count();
     await page.keyboard.press("Enter");
     await page.waitForTimeout(500);
 
     // Palette should be closed and a new column should be created
-    await expect(page.locator(".palette-overlay")).not.toBeVisible();
+    await expect(page.locator("dialog.palette-dialog")).not.toBeVisible();
     await expect(page.locator(".column")).toHaveCount(columnCountBefore + 1);
   });
 
   test("command palette closes when clicking backdrop", async ({ page }) => {
     await page.keyboard.press("Control+Shift+p");
     await page.waitForTimeout(300);
-    await expect(page.locator(".palette-overlay")).toBeVisible();
+    await expect(page.locator("dialog.palette-dialog")).toBeVisible();
 
-    // Click the backdrop (outside the panel)
-    await page.locator(".palette-overlay").click({ position: { x: 10, y: 10 } });
+    // Click the dialog element itself (outside the panel) to trigger backdrop close
+    const dialog = page.locator("dialog.palette-dialog");
+    await dialog.click({ position: { x: 5, y: 5 } });
     await page.waitForTimeout(300);
-    await expect(page.locator(".palette-overlay")).not.toBeVisible();
+    await expect(dialog).not.toBeVisible();
   });
 
   test("keybinding cheatsheet opens with ? and closes with Escape", async ({ page }) => {
@@ -104,7 +124,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await page.waitForTimeout(300);
 
     // Verify cheatsheet is visible
-    const overlay = page.locator(".cheatsheet-overlay");
+    const overlay = page.locator("dialog.cheatsheet-dialog");
     await expect(overlay).toBeVisible();
     await expect(page.locator(".cheatsheet-header h2")).toContainText("Keyboard Shortcuts");
 
@@ -170,8 +190,8 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await page.waitForTimeout(300);
 
     // Palette should close and cheatsheet should open
-    await expect(page.locator(".palette-overlay")).not.toBeVisible();
-    await expect(page.locator(".cheatsheet-overlay")).toBeVisible();
+    await expect(page.locator("dialog.palette-dialog")).not.toBeVisible();
+    await expect(page.locator("dialog.cheatsheet-dialog")).toBeVisible();
 
     await page.keyboard.press("Escape");
   });

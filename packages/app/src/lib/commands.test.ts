@@ -16,6 +16,9 @@ describe("COMMANDS", () => {
 describe("filterCommands", () => {
   it("should return all commands for empty query", () => {
     expect(filterCommands("")).toEqual(COMMANDS);
+  });
+
+  it("should return all commands for whitespace-only query", () => {
     expect(filterCommands("  ")).toEqual(COMMANDS);
   });
 
@@ -33,5 +36,10 @@ describe("filterCommands", () => {
 
   it("should return empty array for no matches", () => {
     expect(filterCommands("zzzzz")).toEqual([]);
+  });
+
+  it("should trim whitespace in query before filtering", () => {
+    expect(filterCommands("deck ")).toEqual(filterCommands("deck"));
+    expect(filterCommands(" col")).toEqual(filterCommands("col"));
   });
 });

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { filterCommands, type Command } from "$lib/commands";
 
   interface Props {
@@ -11,20 +12,18 @@
   let query = $state("");
   let selectedIndex = $state(0);
   let inputRef = $state<HTMLInputElement | null>(null);
-  let lastQuery = $state("");
+  let dialogRef = $state<HTMLDialogElement | null>(null);
 
   let filteredCommands = $derived(filterCommands(query));
 
-  $effect(() => {
+  onMount(() => {
+    dialogRef?.showModal();
     inputRef?.focus();
   });
 
-  // Reset selection when query changes
   $effect(() => {
-    if (query !== lastQuery) {
-      lastQuery = query;
-      selectedIndex = 0;
-    }
+    query;
+    selectedIndex = 0;
   });
 
   function handleKeydown(event: KeyboardEvent) {
@@ -32,9 +31,8 @@
 
     switch (event.key) {
       case "Escape":
-        event.preventDefault();
-        onClose();
-        break;
+        // Let the native dialog handle Escape (fires cancel/close)
+        return;
       case "ArrowDown":
         event.preventDefault();
         if (filteredCommands.length > 0) {
@@ -59,12 +57,23 @@
   function handleItemClick(command: Command) {
     onExecute(command.action);
   }
+
+  function handleBackdropClick(event: MouseEvent) {
+    if (event.target === dialogRef) {
+      dialogRef?.close();
+    }
+  }
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="palette-overlay" onkeydown={handleKeydown} onclick={onClose}>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="palette-panel" onclick={(e) => e.stopPropagation()}>
+<dialog
+  bind:this={dialogRef}
+  class="palette-dialog"
+  aria-label="Command palette"
+  onclose={onClose}
+  onclick={handleBackdropClick}
+  onkeydown={handleKeydown}
+>
+  <div class="palette-panel">
     <input
       bind:this={inputRef}
       bind:value={query}
@@ -75,12 +84,13 @@
       autocomplete="off"
     />
     {#if filteredCommands.length > 0}
-      <ul class="palette-list">
+      <ul class="palette-list" role="listbox" aria-label="Commands">
         {#each filteredCommands as command, index (command.id)}
-          <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
           <li
             class="palette-item"
             class:selected={index === selectedIndex}
+            role="option"
+            aria-selected={index === selectedIndex}
             onclick={() => handleItemClick(command)}
             onmouseenter={() => (selectedIndex = index)}
           >
@@ -95,16 +105,26 @@
       <div class="palette-empty">No matching commands</div>
     {/if}
   </div>
-</div>
+</dialog>
 
 <style>
-  .palette-overlay {
+  .palette-dialog {
     position: fixed;
     inset: 0;
-    z-index: 1000;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    border: none;
+    background: transparent;
+    padding: 0;
+    margin: 0;
     display: flex;
     justify-content: center;
     padding-top: 15vh;
+  }
+
+  .palette-dialog::backdrop {
     background-color: rgba(0, 0, 0, 0.5);
   }
 

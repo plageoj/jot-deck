@@ -201,10 +201,17 @@
     // Skip if command palette is open (palette handles its own keys)
     if (focusMode === "command") return;
 
-    // Close cheatsheet on Escape
-    if (showCheatsheet && event.key === "Escape") {
-      event.preventDefault();
-      showCheatsheet = false;
+    // Block all board shortcuts while cheatsheet is open
+    if (showCheatsheet) {
+      if (
+        event.key === "Escape" ||
+        event.key === "?" ||
+        (event.shiftKey && event.key === "/") ||
+        (event.ctrlKey && event.key === "/")
+      ) {
+        event.preventDefault();
+        showCheatsheet = false;
+      }
       return;
     }
 
@@ -667,6 +674,7 @@
   // ============================================
 
   function openCommandPalette() {
+    if (focusMode === "command") return;
     showCheatsheet = false;
     previousFocusMode = focusMode;
     focusMode = "command";
@@ -679,9 +687,6 @@
   function executeCommand(action: string) {
     closeCommandPalette();
     switch (action) {
-      case "switchDeck":
-        // TODO: open deck picker (Phase 3.5+)
-        break;
       case "newDeck":
         createDeck();
         break;
@@ -691,20 +696,8 @@
       case "deleteColumn":
         executeColumnAction("deleteColumn");
         break;
-      case "showTrash":
-        // TODO: open trash panel (Phase 3.6)
-        break;
-      case "openSettings":
-        // TODO: open settings (Phase 3.7)
-        break;
-      case "toggleTheme":
-        // TODO: toggle theme (Phase 3.7)
-        break;
       case "showShortcuts":
         showCheatsheet = true;
-        break;
-      case "aiDraft":
-        // TODO: AI draft (Phase 4)
         break;
     }
   }
