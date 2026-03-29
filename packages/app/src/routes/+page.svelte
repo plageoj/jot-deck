@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import type { Deck, Column, Card } from "$lib/types";
-  import { Deck as DeckComponent } from "$lib/components";
+  import { Deck as DeckComponent, CommandPalette, KeybindingCheatsheet } from "$lib/components";
   import { type FocusMode, findAction, isValidPrefix } from "$lib/keybindings";
   import { createDeleteStack, type DeletedItem } from "$lib/deleteStack";
   import { getDatabase, type DatabaseBackend } from "$lib/db";
@@ -23,6 +23,10 @@
   let focusedColumnIndex = $state(0);
   let focusedCardIndex = $state(0);
   let editingCardId = $state<string | null>(null);
+
+  // Command palette / cheatsheet state
+  let previousFocusMode = $state<FocusMode>("column");
+  let showCheatsheet = $state(false);
 
   // Remember last focused card index per column
   let lastFocusedCardByColumn = $state<Record<string, number>>({});
@@ -187,6 +191,23 @@
     // Skip if in edit mode (CodeMirror handles keys)
     if (focusMode === "edit") return;
 
+    // Command palette trigger: Ctrl+Shift+P or F1
+    if ((event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "p") || event.key === "F1") {
+      event.preventDefault();
+      openCommandPalette();
+      return;
+    }
+
+    // Skip if command palette is open (palette handles its own keys)
+    if (focusMode === "command") return;
+
+    // Close cheatsheet on Escape
+    if (showCheatsheet && event.key === "Escape") {
+      event.preventDefault();
+      showCheatsheet = false;
+      return;
+    }
+
     // Skip if focus is on input fields
     const target = event.target as HTMLElement;
     if (
@@ -195,6 +216,13 @@
       target.tagName === "SELECT" ||
       target.isContentEditable
     ) {
+      return;
+    }
+
+    // Cheatsheet trigger: ? or Ctrl+/
+    if (event.key === "?" || (event.shiftKey && event.key === "/") || (event.ctrlKey && event.key === "/")) {
+      event.preventDefault();
+      showCheatsheet = !showCheatsheet;
       return;
     }
 
@@ -635,6 +663,53 @@
   }
 
   // ============================================
+  // Command palette
+  // ============================================
+
+  function openCommandPalette() {
+    showCheatsheet = false;
+    previousFocusMode = focusMode;
+    focusMode = "command";
+  }
+
+  function closeCommandPalette() {
+    focusMode = previousFocusMode;
+  }
+
+  function executeCommand(action: string) {
+    closeCommandPalette();
+    switch (action) {
+      case "switchDeck":
+        // TODO: open deck picker (Phase 3.5+)
+        break;
+      case "newDeck":
+        createDeck();
+        break;
+      case "newColumn":
+        createColumn();
+        break;
+      case "deleteColumn":
+        executeColumnAction("deleteColumn");
+        break;
+      case "showTrash":
+        // TODO: open trash panel (Phase 3.6)
+        break;
+      case "openSettings":
+        // TODO: open settings (Phase 3.7)
+        break;
+      case "toggleTheme":
+        // TODO: toggle theme (Phase 3.7)
+        break;
+      case "showShortcuts":
+        showCheatsheet = true;
+        break;
+      case "aiDraft":
+        // TODO: AI draft (Phase 4)
+        break;
+    }
+  }
+
+  // ============================================
   // Helper functions
   // ============================================
 
@@ -781,6 +856,20 @@
     />
   {/if}
 </main>
+
+{#if focusMode === "command"}
+  <CommandPalette
+    onExecute={executeCommand}
+    onClose={closeCommandPalette}
+  />
+{/if}
+
+{#if showCheatsheet}
+  <KeybindingCheatsheet
+    mode={focusMode === "command" ? previousFocusMode : focusMode}
+    onClose={() => (showCheatsheet = false)}
+  />
+{/if}
 
 <style>
   .app {

@@ -1,4 +1,4 @@
-export type FocusMode = "column" | "card" | "edit";
+export type FocusMode = "column" | "card" | "edit" | "command";
 
 export interface KeyBinding {
   sequence: string;

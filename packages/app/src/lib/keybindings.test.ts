@@ -87,6 +87,11 @@ describe("getKeybindingsForMode", () => {
     expect(bindings.every((b) => b.modes.includes("card"))).toBe(true);
   });
 
+  it("should return empty array for command mode", () => {
+    const bindings = getKeybindingsForMode("command");
+    expect(bindings).toEqual([]);
+  });
+
   it("should include shared bindings in both modes", () => {
     const columnBindings = getKeybindingsForMode("column");
     const cardBindings = getKeybindingsForMode("card");
