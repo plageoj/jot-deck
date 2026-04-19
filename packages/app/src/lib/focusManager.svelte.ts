@@ -2,6 +2,8 @@ import type { FocusMode } from "$lib/keybindings";
 import type { Card } from "$lib/types";
 import type { DeckData } from "./deckData.svelte";
 
+export type PaletteType = "column" | "deck" | "tag" | "command" | null;
+
 export class FocusManager {
   private data: DeckData;
 
@@ -13,9 +15,7 @@ export class FocusManager {
 
   // Overlay state
   showCheatsheet = $state(false);
-  showColumnPalette = $state(false);
-  showDeckPalette = $state(false);
-  showTagPalette = $state(false);
+  activePalette = $state<PaletteType>(null);
   previousFocusMode = $state<FocusMode>("column");
 
   // Per-column card index memory
@@ -70,53 +70,16 @@ export class FocusManager {
     this.editingCardId = null;
   }
 
-  openCommandPalette() {
+  openPalette(type: PaletteType) {
     if (this.focusMode === "command") return;
     this.showCheatsheet = false;
     this.previousFocusMode = this.focusMode;
+    this.activePalette = type;
     this.focusMode = "command";
   }
 
-  closeCommandPalette() {
-    this.focusMode = this.previousFocusMode;
-  }
-
-  openColumnPalette() {
-    if (this.focusMode === "command") return;
-    this.showCheatsheet = false;
-    this.previousFocusMode = this.focusMode;
-    this.showColumnPalette = true;
-    this.focusMode = "command";
-  }
-
-  closeColumnPalette() {
-    this.showColumnPalette = false;
-    this.focusMode = this.previousFocusMode;
-  }
-
-  openDeckPalette() {
-    if (this.focusMode === "command") return;
-    this.showCheatsheet = false;
-    this.previousFocusMode = this.focusMode;
-    this.showDeckPalette = true;
-    this.focusMode = "command";
-  }
-
-  closeDeckPalette() {
-    this.showDeckPalette = false;
-    this.focusMode = this.previousFocusMode;
-  }
-
-  openTagPalette() {
-    if (this.focusMode === "command") return;
-    this.showCheatsheet = false;
-    this.previousFocusMode = this.focusMode;
-    this.showTagPalette = true;
-    this.focusMode = "command";
-  }
-
-  closeTagPalette() {
-    this.showTagPalette = false;
+  closePalette() {
+    this.activePalette = null;
     this.focusMode = this.previousFocusMode;
   }
 

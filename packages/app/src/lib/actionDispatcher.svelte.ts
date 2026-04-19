@@ -1,5 +1,6 @@
 import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
+import { findAction } from "./keybindings";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 
 const HALF_PAGE_SIZE = 5;
@@ -27,25 +28,19 @@ export class ActionDispatcher {
 
     if (focus.focusMode === "edit") return;
 
-    // Command palette trigger: Ctrl+Shift+P or F1
-    if (
-      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "p") ||
-      event.key === "F1"
-    ) {
-      event.preventDefault();
-      focus.openCommandPalette();
-      return;
-    }
-
-    // Deck palette trigger: Ctrl+P
-    if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === "p") {
-      event.preventDefault();
-      focus.openDeckPalette();
-      return;
-    }
-
     // Skip if a palette is open (it handles its own keys)
-    if (focus.focusMode === "command") return;
+    // Exception: palette triggers (Ctrl+P, Ctrl+Shift+P, F1) must still be processed
+    if (focus.focusMode === "command") {
+      const key = normalizeKey(event);
+      if (key) {
+        const action = findAction(key, "column");
+        if (action === "showCommandPalette" || action === "showDeckPalette") {
+          event.preventDefault();
+          this.executeAction(action);
+        }
+      }
+      return;
+    }
 
     // Block all board shortcuts while cheatsheet is open
     if (focus.showCheatsheet) {
@@ -110,13 +105,23 @@ export class ActionDispatcher {
   // ============================================
 
   async executeAction(action: string) {
+    if (action === "showCommandPalette") {
+      this.focus.openPalette("command");
+      return;
+    }
+
+    if (action === "showDeckPalette") {
+      this.focus.openPalette("deck");
+      return;
+    }
+
     if (action === "showColumnPalette") {
-      this.focus.openColumnPalette();
+      this.focus.openPalette("column");
       return;
     }
 
     if (action === "openTagFilter") {
-      this.focus.openTagPalette();
+      this.focus.openPalette("tag");
       return;
     }
 
@@ -131,6 +136,11 @@ export class ActionDispatcher {
     }
 
     const [actionName, param] = action.split(":");
+
+    if (actionName === "jumpToColumn") {
+      this.jumpToColumn(param);
+      return;
+    }
 
     if (this.focus.focusMode === "column") {
       await this.executeColumnAction(actionName, param);
@@ -230,15 +240,6 @@ export class ActionDispatcher {
         }
         break;
 
-      case "jumpToColumn":
-        if (param !== undefined) {
-          const targetIndex = parseInt(param, 10);
-          if (targetIndex >= 0 && targetIndex < data.columns.length) {
-            focus.focusedColumnIndex = targetIndex;
-            focus.scrollToFocusedColumn();
-          }
-        }
-        break;
     }
   }
 
@@ -435,27 +436,31 @@ export class ActionDispatcher {
         if (card) await data.updateCardScore(card.id, -1);
         break;
 
-      case "jumpToColumn":
-        if (param !== undefined) {
-          const targetIndex = parseInt(param, 10);
-          if (
-            targetIndex >= 0 &&
-            targetIndex < data.columns.length &&
-            targetIndex !== focus.focusedColumnIndex
-          ) {
-            focus.saveCurrentCardIndex();
-            focus.focusedColumnIndex = targetIndex;
-            focus.restoreCardIndex();
-            const newCards =
-              data.cardsByColumn[data.columns[focus.focusedColumnIndex].id] ??
-              [];
-            if (newCards.length === 0) focus.focusMode = "column";
-            focus.scrollToFocusedColumn();
-          }
-        }
-        break;
-
     }
+  }
+
+  // ============================================
+  // Shared actions
+  // ============================================
+
+  private jumpToColumn(param?: string) {
+    if (param === undefined) return;
+    const { data, focus } = this;
+    const targetIndex = parseInt(param, 10);
+    if (targetIndex < 0 || targetIndex >= data.columns.length) return;
+    if (targetIndex === focus.focusedColumnIndex) return;
+
+    if (focus.focusMode === "card") {
+      focus.saveCurrentCardIndex();
+    }
+    focus.focusedColumnIndex = targetIndex;
+    if (focus.focusMode === "card") {
+      focus.restoreCardIndex();
+      const cards =
+        data.cardsByColumn[data.columns[targetIndex].id] ?? [];
+      if (cards.length === 0) focus.focusMode = "column";
+    }
+    focus.scrollToFocusedColumn();
   }
 
   // ============================================
@@ -463,13 +468,13 @@ export class ActionDispatcher {
   // ============================================
 
   executeCommand(action: string) {
-    this.focus.closeCommandPalette();
+    this.focus.closePalette();
     switch (action) {
       case "newDeck":
         this.data.createDeck();
         break;
       case "switchDeck":
-        this.focus.openDeckPalette();
+        this.focus.openPalette("deck");
         break;
       case "renameDeck":
         this.onRenameDeck?.();
@@ -497,7 +502,7 @@ export class ActionDispatcher {
   // ============================================
 
   selectDeckFromPalette(deckId: string) {
-    this.focus.closeDeckPalette();
+    this.focus.closePalette();
     const deck = this.data.decks.find((d) => d.id === deckId);
     if (deck && deck.id !== this.data.currentDeck?.id) {
       this.data.selectDeck(deck);
@@ -514,7 +519,7 @@ export class ActionDispatcher {
   selectColumnFromPalette(columnIndex: number) {
     const { focus, data } = this;
     const wasFocusMode = focus.previousFocusMode;
-    focus.closeColumnPalette();
+    focus.closePalette();
     if (columnIndex !== focus.focusedColumnIndex) {
       focus.saveCurrentCardIndex();
       focus.focusedColumnIndex = columnIndex;

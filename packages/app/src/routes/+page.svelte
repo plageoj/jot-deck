@@ -72,7 +72,7 @@
 <main class="app">
   <header class="header">
     <h1>{data.currentDeck?.name ?? "Jot Deck"}</h1>
-    <button onclick={() => focus.openDeckPalette()} title="Manage Decks (Ctrl+P)"
+    <button onclick={() => focus.openPalette("deck")} title="Manage Decks (Ctrl+P)"
       >Manage Decks</button
     >
     <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
@@ -127,7 +127,7 @@
   {/if}
 </main>
 
-{#if focus.showDeckPalette}
+{#if focus.activePalette === "deck"}
   <DeckSwitcher
     currentDeck={data.currentDeck}
     decks={data.decks}
@@ -137,29 +137,29 @@
     onNew={() => data.createDeck()}
     onRename={handleRenameDeck}
     onDelete={handleDeleteDeck}
-    onClose={() => focus.closeDeckPalette()}
+    onClose={() => focus.closePalette()}
   />
-{:else if focus.showTagPalette}
+{:else if focus.activePalette === "tag"}
   <TagPalette
     tags={data.deckTags}
     activeTag={data.activeTagFilter}
     onSelect={(tagName) => {
-      focus.closeTagPalette();
+      focus.closePalette();
       data.filterByTag(tagName);
     }}
-    onClose={() => focus.closeTagPalette()}
+    onClose={() => focus.closePalette()}
   />
-{:else if focus.showColumnPalette}
+{:else if focus.activePalette === "column"}
   <ColumnPalette
     columns={data.columns}
     focusedColumnIndex={focus.focusedColumnIndex}
     onSelect={(i) => actions.selectColumnFromPalette(i)}
-    onClose={() => focus.closeColumnPalette()}
+    onClose={() => focus.closePalette()}
   />
 {:else if focus.focusMode === "command"}
   <CommandPalette
     onExecute={(action) => actions.executeCommand(action)}
-    onClose={() => focus.closeCommandPalette()}
+    onClose={() => focus.closePalette()}
   />
 {/if}
 
