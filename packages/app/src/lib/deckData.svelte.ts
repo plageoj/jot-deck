@@ -2,6 +2,8 @@ import { TAG_PATTERN, type Deck, type Column, type Card, type Tag } from "$lib/t
 import { createDeleteStack } from "$lib/deleteStack";
 import { getDatabase, type DatabaseBackend } from "$lib/db";
 
+const LAST_DECK_KEY = "jot-deck:last-deck-id";
+
 export class DeckData {
   private db!: DatabaseBackend;
   private deleteStack!: ReturnType<typeof createDeleteStack>;
@@ -39,8 +41,15 @@ export class DeckData {
       this.loading = true;
       this.error = null;
       this.decks = await this.db.getAllDecks();
+      if (this.decks.length === 0) {
+        await this.createOnboardingDeck();
+      }
       if (this.decks.length > 0) {
-        await this.selectDeck(this.decks[0]);
+        const lastDeckId = this.getLastDeckId();
+        const lastDeck = lastDeckId
+          ? this.decks.find((d) => d.id === lastDeckId)
+          : null;
+        await this.selectDeck(lastDeck ?? this.decks[0]);
       }
     } catch (e) {
       this.error = `Failed to load decks: ${e}`;
@@ -49,8 +58,86 @@ export class DeckData {
     }
   }
 
+  private async createOnboardingDeck() {
+    const deck = await this.db.createDeck({ name: "Getting Started" });
+    this.decks = [deck];
+
+    const col1 = await this.db.createColumn({
+      deck_id: deck.id,
+      name: "Welcome",
+    });
+    const col2 = await this.db.createColumn({
+      deck_id: deck.id,
+      name: "Navigation",
+    });
+    const col3 = await this.db.createColumn({
+      deck_id: deck.id,
+      name: "Tips",
+    });
+
+    await this.db.createCard({
+      column_id: col1.id,
+      content:
+        "Welcome to Jot Deck!\n\nA keyboard-centric note-taking app with a TweetDeck-style column layout.\n\nPress ? to see all keybindings.",
+    });
+    await this.db.createCard({
+      column_id: col1.id,
+      content:
+        "Each deck holds multiple columns, and each column holds cards.\n\nYou're looking at the \"Getting Started\" deck right now.",
+    });
+
+    await this.db.createCard({
+      column_id: col2.id,
+      content:
+        "h / l — Move between columns\nj / k — Move between cards\ni or Enter — Edit a card\nEsc — Exit edit mode",
+    });
+    await this.db.createCard({
+      column_id: col2.id,
+      content:
+        "o — New card below\nO — New card above\nc — New column\ndd — Delete card/column",
+    });
+    await this.db.createCard({
+      column_id: col2.id,
+      content:
+        "Ctrl+P — Switch deck\nCtrl+Shift+P — Command palette\ng n — Switch column\n/ — Filter by tag",
+    });
+
+    await this.db.createCard({
+      column_id: col3.id,
+      content:
+        "Use #tags in your cards to organize and filter notes.\n\nTry typing #example in a card!",
+    });
+    await this.db.createCard({
+      column_id: col3.id,
+      content:
+        "Cards support Vim-style keybindings in edit mode.\n\nPress Esc to exit edit mode, then navigate with h/j/k/l.",
+    });
+    await this.db.createCard({
+      column_id: col3.id,
+      content:
+        "f / + — Increase card score\nF / - — Decrease card score\n\nUse scores to highlight important cards.",
+    });
+  }
+
+  private getLastDeckId(): string | null {
+    try {
+      return localStorage.getItem(LAST_DECK_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  private saveLastDeckId(id: string) {
+    try {
+      localStorage.setItem(LAST_DECK_KEY, id);
+    } catch {
+      // localStorage unavailable — ignore
+    }
+  }
+
   async selectDeck(deck: Deck) {
     this.currentDeck = deck;
+    this.saveLastDeckId(deck.id);
     this.clearTagFilter();
     try {
       this.columns = await this.db.getColumnsByDeck(deck.id);
@@ -94,6 +181,41 @@ export class DeckData {
     } catch (e) {
       this.error = `Failed to create deck: ${e}`;
       return null;
+    }
+  }
+
+  async renameDeck(id: string, name: string): Promise<Deck | null> {
+    try {
+      const updated = await this.db.updateDeck(id, name);
+      this.decks = this.decks.map((d) => (d.id === id ? updated : d));
+      if (this.currentDeck?.id === id) {
+        this.currentDeck = updated;
+      }
+      return updated;
+    } catch (e) {
+      this.error = `Failed to rename deck: ${e}`;
+      return null;
+    }
+  }
+
+  async deleteDeck(id: string): Promise<boolean> {
+    try {
+      await this.db.deleteDeck(id);
+      this.decks = this.decks.filter((d) => d.id !== id);
+      if (this.currentDeck?.id === id) {
+        if (this.decks.length > 0) {
+          await this.selectDeck(this.decks[0]);
+        } else {
+          this.currentDeck = null;
+          this.columns = [];
+          this.cardsByColumn = {};
+          this.deckTags = [];
+        }
+      }
+      return true;
+    } catch (e) {
+      this.error = `Failed to delete deck: ${e}`;
+      return false;
     }
   }
 

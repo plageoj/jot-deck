@@ -2,15 +2,13 @@ import { test, expect } from "@playwright/test";
 import {
   typeInEditor,
   saveAndExitEditor,
+  waitForAppLoad,
   ensureDeckAndColumn,
 } from "./e2e-helpers";
 
 test.describe("Command Palette & Keybinding Cheatsheet", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("h1")).toContainText("Jot Deck");
-    await page.waitForTimeout(1000);
-
+    await waitForAppLoad(page);
     await ensureDeckAndColumn(page);
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
@@ -26,8 +24,8 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await expect(dialog).toBeVisible();
     await expect(page.locator(".palette-input")).toBeFocused();
 
-    // Verify enabled commands are listed (disabled ones are hidden)
-    await expect(page.locator(".palette-item")).toHaveCount(7);
+    // Verify all commands are listed
+    await expect(page.locator(".palette-item")).toHaveCount(10);
 
     // Close with Escape
     await page.keyboard.press("Escape");

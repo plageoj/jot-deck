@@ -14,6 +14,7 @@ export class FocusManager {
   // Overlay state
   showCheatsheet = $state(false);
   showColumnPalette = $state(false);
+  showDeckPalette = $state(false);
   showTagPalette = $state(false);
   previousFocusMode = $state<FocusMode>("column");
 
@@ -90,6 +91,19 @@ export class FocusManager {
 
   closeColumnPalette() {
     this.showColumnPalette = false;
+    this.focusMode = this.previousFocusMode;
+  }
+
+  openDeckPalette() {
+    if (this.focusMode === "command") return;
+    this.showCheatsheet = false;
+    this.previousFocusMode = this.focusMode;
+    this.showDeckPalette = true;
+    this.focusMode = "command";
+  }
+
+  closeDeckPalette() {
+    this.showDeckPalette = false;
     this.focusMode = this.previousFocusMode;
   }
 

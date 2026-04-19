@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   typeInEditor,
   saveAndExitEditor,
+  waitForAppLoad,
   ensureDeckAndColumn,
 } from "./e2e-helpers";
 
@@ -17,16 +18,12 @@ import {
 
 test.describe("Jot Deck Demo", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    // Wait for app to load
-    await expect(page.locator("h1")).toContainText("Jot Deck");
-    // Wait for WASM SQLite to initialize
-    await page.waitForTimeout(1000);
+    await waitForAppLoad(page);
   });
 
   test("full demo walkthrough", async ({ page }) => {
     // ========================================
-    // Scene 1-2: Create deck and first column if needed
+    // Scene 1-2: Create a fresh deck with one column
     // ========================================
     await ensureDeckAndColumn(page);
 
@@ -232,14 +229,11 @@ test.describe("Jot Deck Demo", () => {
 
 test.describe("Feature Highlights", () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto("/");
-    await expect(page.locator("h1")).toContainText("Jot Deck");
-    await page.waitForTimeout(1000);
+    await waitForAppLoad(page);
+    await ensureDeckAndColumn(page);
   });
 
   test("quick card creation workflow", async ({ page }) => {
-    await ensureDeckAndColumn(page);
-
     // Rapidly create multiple cards
     for (let i = 1; i <= 3; i++) {
       await page.keyboard.press("o");
@@ -256,8 +250,6 @@ test.describe("Feature Highlights", () => {
   });
 
   test("keyboard navigation demo", async ({ page }) => {
-    await ensureDeckAndColumn(page);
-
     // Create multiple columns
     await page.keyboard.press("Escape");
     await page.keyboard.press("c");

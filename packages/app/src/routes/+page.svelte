@@ -4,23 +4,46 @@
     Deck as DeckComponent,
     ColumnPalette,
     CommandPalette,
+    ConfirmDialog,
+    DeckSwitcher,
     KeybindingCheatsheet,
+    RenameDialog,
     TagFilterBar,
     TagPalette,
   } from "$lib/components";
   import { DeckData } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
   import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
+  import type { Deck } from "$lib/types";
   import "$lib/styles/theme.css";
 
   const data = new DeckData();
   const focus = new FocusManager(data);
   const actions = new ActionDispatcher(data, focus);
 
+  let windowTitle = $derived(
+    data.currentDeck ? `${data.currentDeck.name} - Jot Deck` : "Jot Deck",
+  );
+
+  $effect(() => {
+    document.title = windowTitle;
+    if ("__TAURI_INTERNALS__" in window) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().setTitle(windowTitle);
+      });
+    }
+  });
+
   let deckComponent = $state<DeckComponent | null>(null);
 
   onMount(async () => {
     focus.onScrollToColumn = (index) => deckComponent?.scrollToColumn(index);
+    actions.onRenameDeck = () => {
+      if (data.currentDeck) handleRenameDeck(data.currentDeck);
+    };
+    actions.onDeleteDeck = () => {
+      if (data.currentDeck) handleDeleteDeck(data.currentDeck);
+    };
     window.addEventListener("keydown", actions.handleKeydown);
     await data.init();
   });
@@ -29,25 +52,29 @@
     window.removeEventListener("keydown", actions.handleKeydown);
     actions.destroy();
   });
+
+  let renamingDeck = $state<Deck | null>(null);
+  let deletingDeck = $state<Deck | null>(null);
+
+  function handleRenameDeck(deck: Deck) {
+    renamingDeck = deck;
+  }
+
+  function handleDeleteDeck(deck: Deck) {
+    deletingDeck = deck;
+  }
+
+  let totalCardCount = $derived(
+    Object.values(data.cardsByColumn).reduce((sum, cards) => sum + cards.length, 0),
+  );
 </script>
 
 <main class="app">
   <header class="header">
-    <h1>Jot Deck</h1>
-    {#if data.decks.length > 0}
-      <select
-        value={data.currentDeck?.id}
-        onchange={(e) => {
-          const deck = data.decks.find((d) => d.id === e.currentTarget.value);
-          if (deck) data.selectDeck(deck);
-        }}
-      >
-        {#each data.decks as deck}
-          <option value={deck.id}>{deck.name}</option>
-        {/each}
-      </select>
-    {/if}
-    <button onclick={() => data.createDeck()}>New Deck</button>
+    <h1>{data.currentDeck?.name ?? "Jot Deck"}</h1>
+    <button onclick={() => focus.openDeckPalette()} title="Manage Decks (Ctrl+P)"
+      >Manage Decks</button
+    >
     <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
       >New Column</button
     >
@@ -100,7 +127,19 @@
   {/if}
 </main>
 
-{#if focus.showTagPalette}
+{#if focus.showDeckPalette}
+  <DeckSwitcher
+    currentDeck={data.currentDeck}
+    decks={data.decks}
+    columnCount={data.columns.length}
+    cardCount={totalCardCount}
+    onSelect={(deck) => actions.selectDeckFromPalette(deck.id)}
+    onNew={() => data.createDeck()}
+    onRename={handleRenameDeck}
+    onDelete={handleDeleteDeck}
+    onClose={() => focus.closeDeckPalette()}
+  />
+{:else if focus.showTagPalette}
   <TagPalette
     tags={data.deckTags}
     activeTag={data.activeTagFilter}
@@ -121,6 +160,31 @@
   <CommandPalette
     onExecute={(action) => actions.executeCommand(action)}
     onClose={() => focus.closeCommandPalette()}
+  />
+{/if}
+
+{#if renamingDeck}
+  <RenameDialog
+    title="Rename Deck"
+    value={renamingDeck.name}
+    onConfirm={(newName) => {
+      data.renameDeck(renamingDeck!.id, newName);
+      renamingDeck = null;
+    }}
+    onClose={() => (renamingDeck = null)}
+  />
+{/if}
+
+{#if deletingDeck}
+  <ConfirmDialog
+    title="Delete Deck"
+    message={`Delete "${deletingDeck.name}"? All columns and cards in this deck will be permanently removed. This cannot be undone.`}
+    confirmLabel="Delete"
+    onConfirm={() => {
+      data.deleteDeck(deletingDeck!.id);
+      deletingDeck = null;
+    }}
+    onClose={() => (deletingDeck = null)}
   />
 {/if}
 
@@ -153,9 +217,12 @@
     font-size: 1.25rem;
     font-weight: 600;
     color: var(--accent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
-  .header select,
   .header button {
     padding: 0.4rem 0.8rem;
     border: 1px solid var(--input-border);
@@ -169,7 +236,6 @@
       background-color 0.15s ease;
   }
 
-  .header select:focus,
   .header button:focus {
     outline: none;
     border-color: var(--input-border-focus);

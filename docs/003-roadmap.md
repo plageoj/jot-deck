@@ -88,24 +88,24 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * フィルタ中の検索バー風 UI 表示（`TagFilterBar`）
 * コマンドパレットに「Filter by Tag」「Clear Tag Filter」追加
 
-### 3.6 Deck 管理 UI
+### 3.6 Deck 管理 UI ✅
 
 #### 成果物
 * Deck の作成・削除・名前変更
 * `Ctrl+p` によるコマンドパレットからの Deck 切り替え（VS Code の Recent Workspaces 風）
-* プロファイルスイッチャー UI（Chrome の Profile Switcher 風）
+* Deckスイッチャー UI（Chrome の Profile Switcher 風）
 * 起動時に最後に開いていた Deck を自動で開く
 * 初回起動時のオンボーディング Deck 読み込み
 
 #### 実装済み
 * DB 層での Deck CRUD
 * コマンドパレット基盤（Phase 3.4）
-
-#### 未実装
-* Deck 切り替え UI（コマンドパレット内・プロファイルスイッチャー）
-* Deck 作成・削除・名前変更の UI
-* 最後に開いた Deck の記憶・自動復元
-* オンボーディング Deck
+* `Ctrl+P` で Deck 切り替えパレット表示（`DeckPalette`、`PaletteDialog` ベース）
+* Chrome Profile Switcher 風 `DeckSwitcher` ドロップダウン（ヘッダー内）
+* ドロップダウンからの Deck 名前変更・削除
+* コマンドパレットに「Switch Deck」「Rename Deck」「Delete Deck」追加
+* `localStorage` による最後に開いた Deck の記憶・自動復元
+* 初回起動時のオンボーディング Deck（「Getting Started」: Welcome / Navigation / Tips カラム付き）
 
 ### 3.7 削除スタック（ゴミ箱）UI
 
@@ -230,7 +230,7 @@ Automerge + PartyKit でリアルタイム同期。
 |:---|:---|:---|
 | **データ層完成** | Phase 1 | 完了 |
 | **Tauri 統合** | Phase 2 | 完了 |
-| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.5 完了） |
+| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.6 完了） |
 | **AI 機能付き** | Phase 4 | 未着手 |
 | **MVP リリース** | Phase 5 | 未着手 |
 | **同期機能リリース** | Phase 6 | 未着手 |

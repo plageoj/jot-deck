@@ -105,6 +105,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Undo
   { sequence: "u", action: "undo", modes: ["column", "card"], description: "Undo" },
+
+  // Common - Palettes (handled by ActionDispatcher.handleKeydown directly; listed for cheatsheet)
+  { sequence: "Ctrl+p", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
+  { sequence: "Ctrl+Shift+p", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },
+  { sequence: "F1", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },
 ];
 
 /**

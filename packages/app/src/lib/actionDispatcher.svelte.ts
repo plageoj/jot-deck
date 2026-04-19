@@ -9,6 +9,10 @@ export class ActionDispatcher {
   private focus: FocusManager;
   private keyProcessor = new KeySequenceProcessor();
 
+  // Callbacks for actions that require UI interaction
+  onRenameDeck: (() => void) | null = null;
+  onDeleteDeck: (() => void) | null = null;
+
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;
     this.focus = focus;
@@ -30,6 +34,13 @@ export class ActionDispatcher {
     ) {
       event.preventDefault();
       focus.openCommandPalette();
+      return;
+    }
+
+    // Deck palette trigger: Ctrl+P
+    if (event.ctrlKey && !event.shiftKey && event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      focus.openDeckPalette();
       return;
     }
 
@@ -457,6 +468,15 @@ export class ActionDispatcher {
       case "newDeck":
         this.data.createDeck();
         break;
+      case "switchDeck":
+        this.focus.openDeckPalette();
+        break;
+      case "renameDeck":
+        this.onRenameDeck?.();
+        break;
+      case "deleteDeck":
+        this.onDeleteDeck?.();
+        break;
       case "newColumn":
         this.data.createColumn();
         break;
@@ -469,6 +489,21 @@ export class ActionDispatcher {
       default:
         this.executeAction(action);
         break;
+    }
+  }
+
+  // ============================================
+  // Deck palette
+  // ============================================
+
+  selectDeckFromPalette(deckId: string) {
+    this.focus.closeDeckPalette();
+    const deck = this.data.decks.find((d) => d.id === deckId);
+    if (deck && deck.id !== this.data.currentDeck?.id) {
+      this.data.selectDeck(deck);
+      this.focus.focusedColumnIndex = 0;
+      this.focus.focusedCardIndex = 0;
+      this.focus.focusMode = "column";
     }
   }
 
