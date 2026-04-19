@@ -1,7 +1,7 @@
 use jot_deck_core::{
     create_file_db,
-    repository::{card, column, deck},
-    Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder,
+    repository::{card, column, deck, tag},
+    Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder, Tag,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, MutexGuard};
@@ -240,6 +240,34 @@ fn get_deleted_cards(state: State<AppState>, deck_id: String) -> CommandResult<V
     card::get_deleted_by_deck(&conn, &deck_id).map_err(Into::into)
 }
 
+// ========== Tag Commands ==========
+
+#[tauri::command]
+fn get_tags_by_deck(state: State<AppState>, deck_id: String) -> CommandResult<Vec<Tag>> {
+    let conn = get_conn(&state)?;
+    tag::get_tags_by_deck(&conn, &deck_id).map_err(Into::into)
+}
+
+#[tauri::command]
+fn get_cards_by_tag(
+    state: State<AppState>,
+    deck_id: String,
+    tag_name: String,
+) -> CommandResult<Vec<String>> {
+    let conn = get_conn(&state)?;
+    tag::get_cards_by_tag(&conn, &deck_id, &tag_name).map_err(Into::into)
+}
+
+#[tauri::command]
+fn get_tag_suggestions(
+    state: State<AppState>,
+    deck_id: String,
+    prefix: String,
+) -> CommandResult<Vec<Tag>> {
+    let conn = get_conn(&state)?;
+    tag::get_tag_suggestions(&conn, &deck_id, &prefix).map_err(Into::into)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -286,6 +314,10 @@ pub fn run() {
             delete_card,
             restore_card,
             get_deleted_cards,
+            // Tag commands
+            get_tags_by_deck,
+            get_cards_by_tag,
+            get_tag_suggestions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

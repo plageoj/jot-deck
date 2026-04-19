@@ -7,7 +7,7 @@
 
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import { ulid } from "ulid";
-import type { Deck, Column, Card } from "../types";
+import { TAG_PATTERN, type Deck, type Column, type Card, type Tag } from "../types";
 import type {
   DatabaseBackend,
   CreateDeckParams,
@@ -629,9 +629,13 @@ export class WasmBackend implements DatabaseBackend {
   // ========================================
 
   private extractTags(content: string): string[] {
-    const matches = content.match(/#(\w+)/g);
-    if (!matches) return [];
-    return [...new Set(matches.map((m) => m.slice(1).toLowerCase()))];
+    const re = new RegExp(TAG_PATTERN, "g");
+    const tags: string[] = [];
+    let match;
+    while ((match = re.exec(content)) !== null) {
+      tags.push(match[1]);
+    }
+    return tags;
   }
 
   private async syncCardTags(cardId: string, content: string): Promise<void> {
@@ -664,8 +668,71 @@ export class WasmBackend implements DatabaseBackend {
   }
 
   // ========================================
+  // Tag Operations (public)
+  // ========================================
+
+  async getTagsByDeck(deckId: string): Promise<Tag[]> {
+    await this.init();
+    const db = this.ensureDb();
+    const results = db.exec(
+      `SELECT DISTINCT t.id, t.name
+       FROM tags t
+       JOIN card_tags ct ON t.id = ct.tag_id
+       JOIN cards c ON ct.card_id = c.id
+       JOIN columns col ON c.column_id = col.id
+       WHERE col.deck_id = ? AND c.deleted_at IS NULL AND col.deleted_at IS NULL
+       ORDER BY t.name`,
+      [deckId]
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: SqlRow) => this.rowToTag(row));
+  }
+
+  async getCardsByTag(deckId: string, tagName: string): Promise<string[]> {
+    await this.init();
+    const db = this.ensureDb();
+    const results = db.exec(
+      `SELECT c.id
+       FROM cards c
+       JOIN card_tags ct ON c.id = ct.card_id
+       JOIN tags t ON ct.tag_id = t.id
+       JOIN columns col ON c.column_id = col.id
+       WHERE col.deck_id = ? AND t.name = ? AND c.deleted_at IS NULL AND col.deleted_at IS NULL`,
+      [deckId, tagName]
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: SqlRow) => row[0] as string);
+  }
+
+  async getTagSuggestions(deckId: string, prefix: string): Promise<Tag[]> {
+    await this.init();
+    const db = this.ensureDb();
+    const pattern = `${prefix}%`;
+    const results = db.exec(
+      `SELECT DISTINCT t.id, t.name
+       FROM tags t
+       JOIN card_tags ct ON t.id = ct.tag_id
+       JOIN cards c ON ct.card_id = c.id
+       JOIN columns col ON c.column_id = col.id
+       WHERE col.deck_id = ? AND t.name LIKE ? AND c.deleted_at IS NULL AND col.deleted_at IS NULL
+       ORDER BY t.name
+       LIMIT 10`,
+      [deckId, pattern]
+    );
+    if (results.length === 0) return [];
+    return results[0].values.map((row: SqlRow) => this.rowToTag(row));
+  }
+
+  // ========================================
   // Row Mappers
   // ========================================
+
+  private rowToTag(row: unknown[]): Tag {
+    return {
+      id: row[0] as string,
+      name: row[1] as string,
+    };
+  }
 
   private rowToDeck(row: unknown[]): Deck {
     return {

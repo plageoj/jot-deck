@@ -79,6 +79,11 @@ pub fn clear_card_tags(conn: &Connection, card_id: &str) -> Result<()> {
 /// Card の内容からタグを同期する
 /// 新しいタグを作成し、不要になったタグの関連を解除する
 pub fn sync_card_tags(conn: &Connection, card_id: &str, content: &str) -> Result<Vec<Tag>> {
+    if !content.contains('#') {
+        clear_card_tags(conn, card_id)?;
+        return Ok(Vec::new());
+    }
+
     let extracted_names = extract_tags(content);
 
     // 現在の関連タグを取得

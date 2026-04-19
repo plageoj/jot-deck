@@ -72,6 +72,13 @@ export class ActionDispatcher {
       return;
     }
 
+    // Clear tag filter with Escape when active
+    if (event.key === "Escape" && data.activeTagFilter) {
+      event.preventDefault();
+      data.clearTagFilter();
+      return;
+    }
+
     // Skip if no columns loaded
     if (data.columns.length === 0) return;
 
@@ -94,6 +101,16 @@ export class ActionDispatcher {
   async executeAction(action: string) {
     if (action === "showColumnPalette") {
       this.focus.openColumnPalette();
+      return;
+    }
+
+    if (action === "openTagFilter") {
+      this.focus.openTagPalette();
+      return;
+    }
+
+    if (action === "clearTagFilter") {
+      this.data.clearTagFilter();
       return;
     }
 
@@ -437,9 +454,6 @@ export class ActionDispatcher {
   executeCommand(action: string) {
     this.focus.closeCommandPalette();
     switch (action) {
-      case "showColumnPalette":
-        this.focus.openColumnPalette();
-        break;
       case "newDeck":
         this.data.createDeck();
         break;
@@ -451,6 +465,9 @@ export class ActionDispatcher {
         break;
       case "showShortcuts":
         this.focus.showCheatsheet = true;
+        break;
+      default:
+        this.executeAction(action);
         break;
     }
   }

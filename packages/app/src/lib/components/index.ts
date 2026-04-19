@@ -6,4 +6,7 @@ export { default as CommandPalette } from "./CommandPalette.svelte";
 export { default as Deck } from "./Deck.svelte";
 export { default as KeybindingCheatsheet } from "./KeybindingCheatsheet.svelte";
 export { default as PaletteDialog } from "./PaletteDialog.svelte";
+export { default as TagFilterBar } from "./TagFilterBar.svelte";
+export { default as TagHighlight } from "./TagHighlight.svelte";
+export { default as TagPalette } from "./TagPalette.svelte";
 export { default as VirtualList } from "./VirtualList.svelte";

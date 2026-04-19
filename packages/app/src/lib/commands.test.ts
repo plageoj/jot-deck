@@ -32,6 +32,13 @@ describe("filterCommands", () => {
     const results = filterCommands("col");
     expect(results.some((c) => c.label === "New Column")).toBe(true);
     expect(results.some((c) => c.label === "Delete Column")).toBe(true);
+    expect(results.some((c) => c.label === "Switch Column")).toBe(true);
+  });
+
+  it("should match tag-related commands", () => {
+    const results = filterCommands("tag");
+    expect(results.some((c) => c.label === "Filter by Tag")).toBe(true);
+    expect(results.some((c) => c.label === "Clear Tag Filter")).toBe(true);
   });
 
   it("should return empty array for no matches", () => {

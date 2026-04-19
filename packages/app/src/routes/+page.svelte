@@ -5,6 +5,8 @@
     ColumnPalette,
     CommandPalette,
     KeybindingCheatsheet,
+    TagFilterBar,
+    TagPalette,
   } from "$lib/components";
   import { DeckData } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
@@ -51,6 +53,13 @@
     >
   </header>
 
+  {#if data.activeTagFilter}
+    <TagFilterBar
+      tagName={data.activeTagFilter}
+      onClear={() => data.clearTagFilter()}
+    />
+  {/if}
+
   {#if data.loading}
     <div class="status">Loading...</div>
   {:else if data.error}
@@ -81,13 +90,27 @@
       onCancelEdit={() => focus.cancelEdit()}
       onStartEdit={(cardId) => focus.startEdit(cardId)}
       onExitEdit={() => focus.exitEdit()}
+      filteredCardIds={data.filteredCardIds}
+      activeTag={data.activeTagFilter}
       onFocusColumn={(i) => focus.handleFocusColumn(i)}
       onFocusCard={(ci, cardi) => focus.handleFocusCard(ci, cardi)}
+      onTagClick={(tagName) => data.filterByTag(tagName)}
+      onTagSuggestions={(prefix) => data.getTagSuggestions(prefix)}
     />
   {/if}
 </main>
 
-{#if focus.showColumnPalette}
+{#if focus.showTagPalette}
+  <TagPalette
+    tags={data.deckTags}
+    activeTag={data.activeTagFilter}
+    onSelect={(tagName) => {
+      focus.closeTagPalette();
+      data.filterByTag(tagName);
+    }}
+    onClose={() => focus.closeTagPalette()}
+  />
+{:else if focus.showColumnPalette}
   <ColumnPalette
     columns={data.columns}
     focusedColumnIndex={focus.focusedColumnIndex}

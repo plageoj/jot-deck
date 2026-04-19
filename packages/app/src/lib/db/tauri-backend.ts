@@ -6,7 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { Deck, Column, Card } from "../types";
+import type { Deck, Column, Card, Tag } from "../types";
 import type {
   DatabaseBackend,
   CreateDeckParams,
@@ -112,5 +112,18 @@ export class TauriBackend implements DatabaseBackend {
 
   async getDeletedCards(deckId: string): Promise<Card[]> {
     return invoke<Card[]>("get_deleted_cards", { deckId });
+  }
+
+  // Tag operations
+  async getTagsByDeck(deckId: string): Promise<Tag[]> {
+    return invoke<Tag[]>("get_tags_by_deck", { deckId });
+  }
+
+  async getCardsByTag(deckId: string, tagName: string): Promise<string[]> {
+    return invoke<string[]>("get_cards_by_tag", { deckId, tagName });
+  }
+
+  async getTagSuggestions(deckId: string, prefix: string): Promise<Tag[]> {
+    return invoke<Tag[]>("get_tag_suggestions", { deckId, prefix });
   }
 }

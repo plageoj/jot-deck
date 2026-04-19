@@ -5,7 +5,7 @@
  * allowing different implementations (Tauri/Rust or WASM SQLite).
  */
 
-import type { Deck, Column, Card } from "../types";
+import type { Deck, Column, Card, Tag } from "../types";
 
 export interface CreateDeckParams {
   name: string;
@@ -62,4 +62,9 @@ export interface DatabaseBackend {
   deleteCard(id: string): Promise<void>;
   restoreCard(id: string): Promise<Card>;
   getDeletedCards(deckId: string): Promise<Card[]>;
+
+  // Tag operations
+  getTagsByDeck(deckId: string): Promise<Tag[]>;
+  getCardsByTag(deckId: string, tagName: string): Promise<string[]>;
+  getTagSuggestions(deckId: string, prefix: string): Promise<Tag[]>;
 }

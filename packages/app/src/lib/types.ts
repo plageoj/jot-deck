@@ -16,6 +16,14 @@ export interface Column {
   deleted_at: string | null;
 }
 
+/** Tag regex pattern source (without flags). Keep in sync with crates/core/repository/tag.rs */
+export const TAG_PATTERN = "#([\\w\\u3040-\\u309f\\u30a0-\\u30ff\\u4e00-\\u9faf]+)";
+
+export interface Tag {
+  id: string;
+  name: string;
+}
+
 export interface Card {
   id: string;
   column_id: string;

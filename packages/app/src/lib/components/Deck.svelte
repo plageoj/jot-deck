@@ -8,6 +8,8 @@
     focusedColumnIndex?: number;
     focusedCardIndex?: number;
     editingCardId?: string | null;
+    filteredCardIds?: Set<string> | null;
+    activeTag?: string | null;
     onAddCard?: (columnId: string) => void;
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
@@ -15,6 +17,8 @@
     onExitEdit?: () => void;
     onFocusColumn?: (columnIndex: number) => void;
     onFocusCard?: (columnIndex: number, cardIndex: number) => void;
+    onTagClick?: (tagName: string) => void;
+    onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
 
   let {
@@ -23,6 +27,8 @@
     focusedColumnIndex = -1,
     focusedCardIndex = -1,
     editingCardId = null,
+    filteredCardIds = null,
+    activeTag = null,
     onAddCard,
     onSaveCard,
     onCancelEdit,
@@ -30,6 +36,8 @@
     onExitEdit,
     onFocusColumn,
     onFocusCard,
+    onTagClick,
+    onTagSuggestions,
   }: Props = $props();
 
   let deckContainer: HTMLDivElement;
@@ -53,6 +61,8 @@
         focused={isCurrentColumn}
         focusedCardIndex={isCurrentColumn ? focusedCardIndex : -1}
         {editingCardId}
+        {filteredCardIds}
+        {activeTag}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
         {onSaveCard}
         {onCancelEdit}
@@ -60,6 +70,8 @@
         {onExitEdit}
         onFocusColumn={onFocusColumn ? () => onFocusColumn(index) : undefined}
         onFocusCard={onFocusCard ? (cardIndex: number) => onFocusCard(index, cardIndex) : undefined}
+        {onTagClick}
+        {onTagSuggestions}
       />
     </div>
   {/each}

@@ -100,6 +100,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "gc", action: "showColumnPalette", modes: ["column", "card"], description: "Switch column" },
   { sequence: "Ctrl+t", action: "showColumnPalette", modes: ["column", "card"], description: "Switch column" },
 
+  // Common - Tag filter
+  { sequence: "/", action: "openTagFilter", modes: ["column", "card"], description: "Filter by tag" },
+
   // Common - Undo
   { sequence: "u", action: "undo", modes: ["column", "card"], description: "Undo" },
 ];

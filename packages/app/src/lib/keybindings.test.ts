@@ -32,6 +32,11 @@ describe("findAction", () => {
     expect(findAction("g9", "card")).toBe("jumpToColumn:8");
   });
 
+  it("should find tag filter action in both modes", () => {
+    expect(findAction("/", "column")).toBe("openTagFilter");
+    expect(findAction("/", "card")).toBe("openTagFilter");
+  });
+
   it("should find undo action in both modes", () => {
     expect(findAction("u", "column")).toBe("undo");
     expect(findAction("u", "card")).toBe("undo");

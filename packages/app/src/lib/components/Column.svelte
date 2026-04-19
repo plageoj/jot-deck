@@ -8,6 +8,8 @@
     focused?: boolean;
     focusedCardIndex?: number;
     editingCardId?: string | null;
+    filteredCardIds?: Set<string> | null;
+    activeTag?: string | null;
     onAddCard?: () => void;
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
@@ -15,6 +17,8 @@
     onExitEdit?: () => void;
     onFocusColumn?: () => void;
     onFocusCard?: (cardIndex: number) => void;
+    onTagClick?: (tagName: string) => void;
+    onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
 
   let {
@@ -23,6 +27,8 @@
     focused = false,
     focusedCardIndex = -1,
     editingCardId = null,
+    filteredCardIds = null,
+    activeTag = null,
     onAddCard,
     onSaveCard,
     onCancelEdit,
@@ -30,6 +36,8 @@
     onExitEdit,
     onFocusColumn,
     onFocusCard,
+    onTagClick,
+    onTagSuggestions,
   }: Props = $props();
 
   function handleColumnClick(e: MouseEvent) {
@@ -73,11 +81,15 @@
           {card}
           focused={index === focusedCardIndex}
           editing={editingCardId === card.id}
+          dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
+          {activeTag}
           onSave={(content) => onSaveCard?.(card.id, content)}
           {onCancelEdit}
           onStartEdit={() => onStartEdit?.(card.id)}
           {onExitEdit}
           onFocusCard={onFocusCard ? () => onFocusCard(index) : undefined}
+          {onTagClick}
+          {onTagSuggestions}
         />
       </div>
     {/each}

@@ -14,6 +14,7 @@ export class FocusManager {
   // Overlay state
   showCheatsheet = $state(false);
   showColumnPalette = $state(false);
+  showTagPalette = $state(false);
   previousFocusMode = $state<FocusMode>("column");
 
   // Per-column card index memory
@@ -89,6 +90,19 @@ export class FocusManager {
 
   closeColumnPalette() {
     this.showColumnPalette = false;
+    this.focusMode = this.previousFocusMode;
+  }
+
+  openTagPalette() {
+    if (this.focusMode === "command") return;
+    this.showCheatsheet = false;
+    this.previousFocusMode = this.focusMode;
+    this.showTagPalette = true;
+    this.focusMode = "command";
+  }
+
+  closeTagPalette() {
+    this.showTagPalette = false;
     this.focusMode = this.previousFocusMode;
   }
 

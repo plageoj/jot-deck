@@ -4,6 +4,7 @@ use ulid::Ulid;
 
 use crate::error::{JotDeckError, Result};
 use crate::models::{Card, NewCard};
+use crate::repository::tag;
 
 /// RFC3339 文字列を DateTime<Utc> にパースする
 fn parse_datetime(s: &str, col_idx: usize) -> rusqlite::Result<DateTime<Utc>> {
@@ -54,6 +55,8 @@ pub fn create(conn: &Connection, new_card: NewCard) -> Result<Card> {
         ],
     )?;
 
+    tag::sync_card_tags(conn, &id, &new_card.content)?;
+
     Ok(Card {
         id,
         column_id: new_card.column_id,
@@ -91,6 +94,8 @@ pub fn create_at_position(conn: &Connection, new_card: NewCard, position: i32) -
             now.to_rfc3339(),
         ],
     )?;
+
+    tag::sync_card_tags(&tx, &id, &new_card.content)?;
 
     tx.commit()?;
 
@@ -168,6 +173,8 @@ pub fn update_content(conn: &Connection, id: &str, content: &str) -> Result<Card
         "UPDATE cards SET content = ?1, updated_at = ?2 WHERE id = ?3",
         params![content, now.to_rfc3339(), id],
     )?;
+
+    tag::sync_card_tags(conn, id, content)?;
 
     Ok(Card {
         content: content.to_string(),

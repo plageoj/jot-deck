@@ -1,27 +1,36 @@
 <script lang="ts">
   import type { Card } from "$lib/types";
   import CardEditor from "./CardEditor.svelte";
+  import TagHighlight from "./TagHighlight.svelte";
 
   interface Props {
     card: Card;
     focused?: boolean;
     editing?: boolean;
+    dimmed?: boolean;
+    activeTag?: string | null;
     onSave?: (content: string) => void;
     onCancelEdit?: () => void;
     onStartEdit?: () => void;
     onExitEdit?: () => void;
     onFocusCard?: () => void;
+    onTagClick?: (tagName: string) => void;
+    onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
 
   let {
     card,
     focused = false,
     editing = false,
+    dimmed = false,
+    activeTag = null,
     onSave,
     onCancelEdit,
     onStartEdit,
     onExitEdit,
     onFocusCard,
+    onTagClick,
+    onTagSuggestions,
   }: Props = $props();
 
   function handleSave(content: string) {
@@ -45,6 +54,7 @@
   class="card"
   class:focused
   class:editing
+  class:dimmed
   role="button"
   tabindex={focused ? 0 : -1}
   onclick={handleClick}
@@ -56,10 +66,15 @@
       onSave={handleSave}
       onCancel={handleCancel}
       {onExitEdit}
+      {onTagSuggestions}
     />
   {:else}
     <div class="card-content">
-      {card.content || "(empty)"}
+      {#if card.content}
+        <TagHighlight content={card.content} {activeTag} {onTagClick} />
+      {:else}
+        (empty)
+      {/if}
     </div>
   {/if}
   {#if card.score !== 0}
@@ -77,7 +92,9 @@
     line-height: 1.4;
     position: relative;
     cursor: pointer;
-    transition: border-color 0.15s ease;
+    transition:
+      border-color 0.15s ease,
+      opacity 0.15s ease;
     outline: none;
   }
 
@@ -93,6 +110,10 @@
   .card.editing {
     cursor: text;
     box-shadow: 0 0 0 2px var(--card-focus-ring, rgba(233, 69, 96, 0.3));
+  }
+
+  .card.dimmed {
+    opacity: 0.25;
   }
 
   .card-content {

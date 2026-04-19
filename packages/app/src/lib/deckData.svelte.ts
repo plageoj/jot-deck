@@ -1,4 +1,4 @@
-import type { Deck, Column, Card } from "$lib/types";
+import { TAG_PATTERN, type Deck, type Column, type Card, type Tag } from "$lib/types";
 import { createDeleteStack } from "$lib/deleteStack";
 import { getDatabase, type DatabaseBackend } from "$lib/db";
 
@@ -12,6 +12,9 @@ export class DeckData {
   cardsByColumn = $state<Record<string, Card[]>>({});
   loading = $state(true);
   error = $state<string | null>(null);
+  deckTags = $state<Tag[]>([]);
+  activeTagFilter = $state<string | null>(null);
+  filteredCardIds = $state<Set<string> | null>(null);
 
   async init() {
     this.db = await getDatabase();
@@ -48,9 +51,11 @@ export class DeckData {
 
   async selectDeck(deck: Deck) {
     this.currentDeck = deck;
+    this.clearTagFilter();
     try {
       this.columns = await this.db.getColumnsByDeck(deck.id);
       await this.loadCardsForColumns();
+      await this.loadDeckTags();
     } catch (e) {
       this.error = `Failed to load columns: ${e}`;
     }
@@ -161,6 +166,7 @@ export class DeckData {
           break;
         }
       }
+      await this.loadDeckTags();
     } catch (e) {
       this.error = `Failed to save card: ${e}`;
     }
@@ -229,6 +235,49 @@ export class DeckData {
       await this.loadCardsForColumns();
     } catch (e) {
       this.error = `Failed to update score: ${e}`;
+    }
+  }
+
+  async loadDeckTags() {
+    if (!this.currentDeck) return;
+    try {
+      this.deckTags = await this.db.getTagsByDeck(this.currentDeck.id);
+    } catch (e) {
+      console.error("Failed to load deck tags:", e);
+    }
+  }
+
+  filterByTag(tagName: string) {
+    this.activeTagFilter = tagName;
+    const re = new RegExp(TAG_PATTERN, "g");
+    const matchingIds: string[] = [];
+    for (const cards of Object.values(this.cardsByColumn)) {
+      for (const card of cards) {
+        let match;
+        re.lastIndex = 0;
+        while ((match = re.exec(card.content)) !== null) {
+          if (match[1] === tagName) {
+            matchingIds.push(card.id);
+            break;
+          }
+        }
+      }
+    }
+    this.filteredCardIds = new Set(matchingIds);
+  }
+
+  clearTagFilter() {
+    this.activeTagFilter = null;
+    this.filteredCardIds = null;
+  }
+
+  async getTagSuggestions(prefix: string): Promise<Tag[]> {
+    if (!this.currentDeck) return [];
+    try {
+      return await this.db.getTagSuggestions(this.currentDeck.id, prefix);
+    } catch (e) {
+      console.error("Failed to get tag suggestions:", e);
+      return [];
     }
   }
 

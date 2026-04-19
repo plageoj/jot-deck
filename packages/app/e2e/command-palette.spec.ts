@@ -27,7 +27,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await expect(page.locator(".palette-input")).toBeFocused();
 
     // Verify enabled commands are listed (disabled ones are hidden)
-    await expect(page.locator(".palette-item")).toHaveCount(4);
+    await expect(page.locator(".palette-item")).toHaveCount(7);
 
     // Close with Escape
     await page.keyboard.press("Escape");
