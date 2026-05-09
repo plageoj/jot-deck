@@ -41,6 +41,14 @@ describe("filterCommands", () => {
     expect(results.some((c) => c.label === "Clear Tag Filter")).toBe(true);
   });
 
+  it("should include Trash command bound to showTrashPalette", () => {
+    const trash = COMMANDS.find((c) => c.id === "trash");
+    expect(trash).toBeDefined();
+    expect(trash?.label).toBe("Trash");
+    expect(trash?.action).toBe("showTrashPalette");
+    expect(trash?.shortcut).toBe("g t");
+  });
+
   it("should return empty array for no matches", () => {
     expect(filterCommands("zzzzz")).toEqual([]);
   });
