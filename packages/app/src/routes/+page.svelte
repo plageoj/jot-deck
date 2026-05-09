@@ -79,9 +79,9 @@
 
   let deckComponent = $state<DeckComponent | null>(null);
 
-  // Settings: load from localStorage once, then apply reactively whenever the
-  // store changes (theme attribute + font CSS variables on <html>).
-  settingsStore.load();
+  // Settings: hydrate from SQLite, then apply reactively whenever the store
+  // changes (theme attribute + font CSS variables on <html>). The first apply
+  // runs against defaults; the second runs once the DB load resolves.
   $effect(() => {
     applySettingsToDocument(settingsStore.state);
   });
@@ -103,7 +103,7 @@
       if (col) handleDeleteColumn(col);
     };
     window.addEventListener("keydown", actions.handleKeydown);
-    await data.init();
+    await Promise.all([data.init(), settingsStore.load()]);
   });
 
   onDestroy(() => {

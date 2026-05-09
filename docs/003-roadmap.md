@@ -144,12 +144,12 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * Codemirror の Vim mode ON/OFF 切り替え
 
 #### 実装済み
-* `SettingsStore` による設定の永続化（`localStorage`、`jot-deck:settings`）
+* `SettingsStore` による設定の永続化（将来的なオンライン同期のため SQLite に保存）
 * `data-theme` 属性ベースのランタイムテーマ切り替え（auto / dark / light）
 * フォントファミリー・サイズ・line-height を CSS カスタムプロパティで動的反映
 * `SettingsDialog` コンポーネント（`Ctrl+,` / コマンドパレット「Settings」 / ヘッダーボタンから起動）
 * Markdown 表示切替（`MarkdownContent`、`#tag` ハイライトを保ったまま `**bold**` / `*italic*` / `` `code` `` / リンクをレンダリング）
-* CodeMirror の Vim モード ON/OFF 切り替え（OFF 時は `Escape` で保存して終了）
+* CodeMirror の Vim モード ON/OFF 切り替え（OFF 時は `Ctrl+Enter` で保存して終了、`Escape` で保存せず終了）
 
 #### 未実装
 * キーバインドカスタマイズ UI（設定ダイアログ内にプレースホルダー表示。デフォルトはチートシート参照）

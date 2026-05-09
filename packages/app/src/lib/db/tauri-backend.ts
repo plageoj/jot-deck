@@ -126,4 +126,14 @@ export class TauriBackend implements DatabaseBackend {
   async getTagSuggestions(deckId: string, prefix: string): Promise<Tag[]> {
     return invoke<Tag[]>("get_tag_suggestions", { deckId, prefix });
   }
+
+  // Settings operations
+  async getSettings(key: string): Promise<string | null> {
+    const value = await invoke<string | null>("get_settings", { key });
+    return value ?? null;
+  }
+
+  async setSettings(key: string, value: string): Promise<void> {
+    return invoke("set_settings", { key, value });
+  }
 }

@@ -1,89 +1,143 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_SETTINGS,
   FONT_SIZE_MAX,
-  FONT_SIZE_MIN,
-  LINE_HEIGHT_MAX,
   LINE_HEIGHT_MIN,
-  SETTINGS_STORAGE_KEY,
+  SETTINGS_DB_KEY,
   SettingsStore,
+  deserializeSettings,
 } from "./settings.svelte";
+import type { DatabaseBackend } from "./db";
 
-describe("SettingsStore", () => {
+/**
+ * Minimal in-memory backend stub. Only the settings methods are exercised by
+ * the SettingsStore — the rest throw to fail loudly if accidentally invoked.
+ */
+function makeBackend(): {
+  backend: DatabaseBackend;
+  store: Map<string, string>;
+} {
+  const store = new Map<string, string>();
+  const reject = () => {
+    throw new Error("not implemented in stub");
+  };
+  const backend = {
+    getAllDecks: reject,
+    getDeck: reject,
+    createDeck: reject,
+    updateDeck: reject,
+    deleteDeck: reject,
+    getColumnsByDeck: reject,
+    getColumn: reject,
+    createColumn: reject,
+    updateColumn: reject,
+    moveColumn: reject,
+    deleteColumn: reject,
+    restoreColumn: reject,
+    getDeletedColumns: reject,
+    getCardsByColumn: reject,
+    getCard: reject,
+    createCard: reject,
+    updateCardContent: reject,
+    updateCardScore: reject,
+    moveCardToColumn: reject,
+    moveCard: reject,
+    deleteCard: reject,
+    restoreCard: reject,
+    getDeletedCards: reject,
+    getTagsByDeck: reject,
+    getCardsByTag: reject,
+    getTagSuggestions: reject,
+    async getSettings(key: string) {
+      return store.get(key) ?? null;
+    },
+    async setSettings(key: string, value: string) {
+      store.set(key, value);
+    },
+  } as unknown as DatabaseBackend;
+
+  return { backend, store };
+}
+
+describe("deserializeSettings", () => {
+  it("returns defaults for null", () => {
+    expect(deserializeSettings(null)).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("returns defaults for malformed JSON", () => {
+    expect(deserializeSettings("not json")).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it("clamps out-of-range numerics", () => {
+    const raw = JSON.stringify({ fontSize: 999, lineHeight: -1 });
+    const result = deserializeSettings(raw);
+    expect(result.fontSize).toBe(FONT_SIZE_MAX);
+    expect(result.lineHeight).toBe(LINE_HEIGHT_MIN);
+  });
+
+  it("falls back to auto for unknown theme values", () => {
+    expect(deserializeSettings(JSON.stringify({ theme: "neon" })).theme).toBe(
+      "auto",
+    );
+  });
+});
+
+describe("SettingsStore (DB-backed)", () => {
+  let stub: ReturnType<typeof makeBackend>;
+  let store: SettingsStore;
+
   beforeEach(() => {
-    localStorage.clear();
+    stub = makeBackend();
+    store = new SettingsStore(async () => stub.backend);
   });
 
-  afterEach(() => {
-    localStorage.clear();
-  });
-
-  it("defaults to DEFAULT_SETTINGS when storage is empty", () => {
-    const store = new SettingsStore();
-    store.load();
+  it("hydrates defaults when nothing is persisted", async () => {
+    await store.load();
     expect(store.state).toEqual(DEFAULT_SETTINGS);
+    expect(store.loaded).toBe(true);
   });
 
-  it("persists updates to localStorage", () => {
-    const store = new SettingsStore();
-    store.load();
+  it("persists updates to the backend under SETTINGS_DB_KEY", async () => {
+    await store.load();
     store.update("theme", "light");
     store.update("fontSize", 18);
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    await store.persist();
+
+    const raw = stub.store.get(SETTINGS_DB_KEY);
     expect(raw).toBeTruthy();
     const parsed = JSON.parse(raw!);
     expect(parsed.theme).toBe("light");
     expect(parsed.fontSize).toBe(18);
   });
 
-  it("rehydrates persisted settings", () => {
-    localStorage.setItem(
-      SETTINGS_STORAGE_KEY,
-      JSON.stringify({ ...DEFAULT_SETTINGS, vimEnabled: false, theme: "dark" }),
+  it("rehydrates state from the backend", async () => {
+    stub.store.set(
+      SETTINGS_DB_KEY,
+      JSON.stringify({ ...DEFAULT_SETTINGS, theme: "dark", vimEnabled: false }),
     );
-    const store = new SettingsStore();
-    store.load();
-    expect(store.state.vimEnabled).toBe(false);
+    await store.load();
     expect(store.state.theme).toBe("dark");
+    expect(store.state.vimEnabled).toBe(false);
   });
 
-  it("clamps out-of-range numeric values", () => {
-    localStorage.setItem(
-      SETTINGS_STORAGE_KEY,
-      JSON.stringify({
-        ...DEFAULT_SETTINGS,
-        fontSize: 999,
-        lineHeight: -1,
-      }),
-    );
-    const store = new SettingsStore();
-    store.load();
-    expect(store.state.fontSize).toBe(FONT_SIZE_MAX);
-    expect(store.state.lineHeight).toBe(LINE_HEIGHT_MIN);
-  });
-
-  it("falls back to defaults for invalid theme values", () => {
-    localStorage.setItem(
-      SETTINGS_STORAGE_KEY,
-      JSON.stringify({ ...DEFAULT_SETTINGS, theme: "neon" }),
-    );
-    const store = new SettingsStore();
-    store.load();
-    expect(store.state.theme).toBe("auto");
-  });
-
-  it("reset() restores defaults and persists", () => {
-    const store = new SettingsStore();
-    store.load();
+  it("reset() restores defaults and persists them", async () => {
+    await store.load();
     store.update("theme", "light");
+    await store.persist();
     store.reset();
+    await store.persist();
+
     expect(store.state).toEqual(DEFAULT_SETTINGS);
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    expect(JSON.parse(raw!).theme).toBe("auto");
+    const parsed = JSON.parse(stub.store.get(SETTINGS_DB_KEY)!);
+    expect(parsed.theme).toBe("auto");
   });
 
-  it("respects FONT_SIZE_MIN as a sane lower bound", () => {
-    expect(FONT_SIZE_MIN).toBeLessThan(FONT_SIZE_MAX);
-    expect(LINE_HEIGHT_MIN).toBeLessThan(LINE_HEIGHT_MAX);
+  it("falls back to defaults if the backend rejects", async () => {
+    const broken = new SettingsStore(async () => {
+      throw new Error("offline");
+    });
+    await broken.load();
+    expect(broken.state).toEqual(DEFAULT_SETTINGS);
+    expect(broken.loaded).toBe(true);
   });
 });

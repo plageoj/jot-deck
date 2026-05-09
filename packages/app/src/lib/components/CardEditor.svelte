@@ -97,13 +97,14 @@
         },
       },
       // Without Vim, give users a non-mode keymap to leave the editor.
+      // Escape discards the in-progress edit (matches `:q` semantics);
+      // Ctrl-Enter above is the explicit save path.
       ...(vimEnabled
         ? []
         : [
             {
               key: "Escape",
               run: () => {
-                save();
                 cancel();
                 return true;
               },

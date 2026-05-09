@@ -67,4 +67,8 @@ export interface DatabaseBackend {
   getTagsByDeck(deckId: string): Promise<Tag[]>;
   getCardsByTag(deckId: string, tagName: string): Promise<string[]>;
   getTagSuggestions(deckId: string, prefix: string): Promise<Tag[]>;
+
+  // Settings operations (key/value JSON store; null when unset)
+  getSettings(key: string): Promise<string | null>;
+  setSettings(key: string, value: string): Promise<void>;
 }

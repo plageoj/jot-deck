@@ -62,6 +62,13 @@ CREATE TABLE IF NOT EXISTS card_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_card_tags_tag_id ON card_tags(tag_id);
+
+-- Settings テーブル（アプリ全体の設定を JSON で保持。将来のクラウド同期に備えて key/value 形式）
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 "#;
 
 /// データベースを初期化する
@@ -107,5 +114,6 @@ mod tests {
         assert!(tables.contains(&"cards".to_string()));
         assert!(tables.contains(&"tags".to_string()));
         assert!(tables.contains(&"card_tags".to_string()));
+        assert!(tables.contains(&"settings".to_string()));
     }
 }
