@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import {
     Deck as DeckComponent,
     ColumnPalette,
@@ -51,6 +51,12 @@
     if (!loaded || restoredForDeckId === loaded) return;
     focus.clampToLoadedDeck();
     restoredForDeckId = loaded;
+    // Wait for the Deck component to render the new column list before
+    // asking it to scroll — otherwise scrollToColumn runs against the
+    // previous deck's DOM (or no DOM at all on first load).
+    tick().then(() => {
+      if (data.loadedDeckId === loaded) focus.scrollToFocusedColumn();
+    });
   });
 
   // Save state on focus changes once the active deck has been restored.
