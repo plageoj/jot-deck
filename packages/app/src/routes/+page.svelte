@@ -14,7 +14,7 @@
   import { DeckData } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
   import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
-  import type { Deck } from "$lib/types";
+  import type { Column, Deck } from "$lib/types";
   import "$lib/styles/theme.css";
 
   const data = new DeckData();
@@ -44,6 +44,14 @@
     actions.onDeleteDeck = () => {
       if (data.currentDeck) handleDeleteDeck(data.currentDeck);
     };
+    actions.onRenameColumn = () => {
+      const col = data.columns[focus.focusedColumnIndex];
+      if (col) handleRenameColumn(col);
+    };
+    actions.onDeleteColumn = () => {
+      const col = data.columns[focus.focusedColumnIndex];
+      if (col) handleDeleteColumn(col);
+    };
     window.addEventListener("keydown", actions.handleKeydown);
     await data.init();
   });
@@ -55,6 +63,8 @@
 
   let renamingDeck = $state<Deck | null>(null);
   let deletingDeck = $state<Deck | null>(null);
+  let renamingColumn = $state<Column | null>(null);
+  let deletingColumn = $state<Column | null>(null);
 
   function handleRenameDeck(deck: Deck) {
     renamingDeck = deck;
@@ -62,6 +72,14 @@
 
   function handleDeleteDeck(deck: Deck) {
     deletingDeck = deck;
+  }
+
+  function handleRenameColumn(column: Column) {
+    renamingColumn = column;
+  }
+
+  function handleDeleteColumn(column: Column) {
+    deletingColumn = column;
   }
 
   let totalCardCount = $derived(
@@ -152,8 +170,12 @@
 {:else if focus.activePalette === "column"}
   <ColumnPalette
     columns={data.columns}
+    cardsByColumn={data.cardsByColumn}
     focusedColumnIndex={focus.focusedColumnIndex}
     onSelect={(i) => actions.selectColumnFromPalette(i)}
+    onNew={() => data.createColumn()}
+    onRename={handleRenameColumn}
+    onDelete={handleDeleteColumn}
     onClose={() => focus.closePalette()}
   />
 {:else if focus.focusMode === "command"}
@@ -172,6 +194,38 @@
       renamingDeck = null;
     }}
     onClose={() => (renamingDeck = null)}
+  />
+{/if}
+
+{#if renamingColumn}
+  <RenameDialog
+    title="Rename Column"
+    value={renamingColumn.name}
+    onConfirm={(newName) => {
+      data.renameColumn(renamingColumn!.id, newName);
+      renamingColumn = null;
+    }}
+    onClose={() => (renamingColumn = null)}
+  />
+{/if}
+
+{#if deletingColumn}
+  <ConfirmDialog
+    title="Delete Column"
+    message={`Delete "${deletingColumn.name}"? All cards in this column will be soft-deleted. You can undo with "u".`}
+    confirmLabel="Delete"
+    onConfirm={async () => {
+      const col = deletingColumn!;
+      deletingColumn = null;
+      if (await data.deleteColumn(col.id)) {
+        focus.focusedColumnIndex = Math.min(
+          focus.focusedColumnIndex,
+          Math.max(0, data.columns.length - 1),
+        );
+        focus.scrollToFocusedColumn();
+      }
+    }}
+    onClose={() => (deletingColumn = null)}
   />
 {/if}
 

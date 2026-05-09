@@ -13,6 +13,8 @@ export class ActionDispatcher {
   // Callbacks for actions that require UI interaction
   onRenameDeck: (() => void) | null = null;
   onDeleteDeck: (() => void) | null = null;
+  onRenameColumn: (() => void) | null = null;
+  onDeleteColumn: (() => void) | null = null;
 
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;
@@ -485,8 +487,11 @@ export class ActionDispatcher {
       case "newColumn":
         this.data.createColumn();
         break;
+      case "renameColumn":
+        this.onRenameColumn?.();
+        break;
       case "deleteColumn":
-        this.executeColumnAction("deleteColumn");
+        this.onDeleteColumn?.();
         break;
       case "showShortcuts":
         this.focus.showCheatsheet = true;

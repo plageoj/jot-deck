@@ -219,6 +219,17 @@ export class DeckData {
     }
   }
 
+  async renameColumn(id: string, name: string): Promise<Column | null> {
+    try {
+      const updated = await this.db.updateColumn(id, name);
+      this.columns = this.columns.map((c) => (c.id === id ? updated : c));
+      return updated;
+    } catch (e) {
+      this.error = `Failed to rename column: ${e}`;
+      return null;
+    }
+  }
+
   async createColumn(): Promise<Column | null> {
     if (!this.currentDeck) return null;
     try {
