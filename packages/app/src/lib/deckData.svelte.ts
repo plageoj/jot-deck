@@ -440,7 +440,13 @@ export class DeckData {
         });
       }
 
-      items.sort((a, b) => b.deletedAt.localeCompare(a.deletedAt));
+      // Tiebreaker on id (ULIDs are lexicographically time-sortable) so
+      // ordering is deterministic when two items share the same deleted_at.
+      items.sort((a, b) => {
+        const cmp = b.deletedAt.localeCompare(a.deletedAt);
+        if (cmp !== 0) return cmp;
+        return b.id.localeCompare(a.id);
+      });
       return items;
     } catch (e) {
       this.error = `Failed to load trash: ${e}`;
@@ -456,6 +462,12 @@ export class DeckData {
         await this.db.restoreCard(item.id);
       }
       await this.reloadColumns();
+      await this.loadDeckTags();
+      // Re-apply the active tag filter so a restored matching card shows up
+      // (and a restored non-matching card stays hidden) without manual reload.
+      if (this.activeTagFilter) {
+        this.filterByTag(this.activeTagFilter);
+      }
       return true;
     } catch (e) {
       this.error = `Failed to restore: ${e}`;

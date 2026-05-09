@@ -12,8 +12,10 @@ const state = {
   deletedColumns: [] as Column[],
   cardsByColumn: new Map<string, Card[]>(),
   deletedCards: [] as Card[],
+  tagsByDeck: [] as { id: string; name: string }[],
   restoreCardCalls: [] as string[],
   restoreColumnCalls: [] as string[],
+  getTagsByDeckCalls: 0,
 };
 
 const mockBackend: Partial<DatabaseBackend> = {
@@ -21,7 +23,10 @@ const mockBackend: Partial<DatabaseBackend> = {
   getColumnsByDeck: async () => state.columns,
   getCardsByColumn: async (columnId: string) =>
     state.cardsByColumn.get(columnId) ?? [],
-  getTagsByDeck: async () => [],
+  getTagsByDeck: async () => {
+    state.getTagsByDeckCalls++;
+    return state.tagsByDeck;
+  },
   getDeletedColumns: async () => state.deletedColumns,
   getDeletedCards: async () => state.deletedCards,
   restoreCard: async (id: string) => {
@@ -93,8 +98,10 @@ describe("DeckData trash", () => {
     state.deletedColumns = [];
     state.cardsByColumn = new Map([["col-active", []]]);
     state.deletedCards = [];
+    state.tagsByDeck = [];
     state.restoreCardCalls = [];
     state.restoreColumnCalls = [];
+    state.getTagsByDeckCalls = 0;
 
     data = new DeckData();
     await data.init();
@@ -156,9 +163,10 @@ describe("DeckData trash", () => {
     const card = items.find((i) => i.id === "card-orphan");
 
     expect(card).toBeDefined();
-    expect(card!.type).toBe("card");
-    if (card!.type === "card") {
+    if (card?.type === "card") {
       expect(card.columnName).toBe("col-gone-name");
+    } else {
+      throw new Error("expected card-orphan to be a card-type trash item");
     }
   });
 
@@ -219,5 +227,80 @@ describe("DeckData trash", () => {
     await data.undoLastDelete();
 
     expect(state.restoreCardCalls).toEqual(["card-c", "card-b", "card-a"]);
+  });
+
+  it("breaks deleted_at ties deterministically by id (descending)", async () => {
+    // Same deletedAt — order must be stable and id-descending so undo picks
+    // the same item every time, regardless of source-table merge order.
+    const sameTs = "2026-05-02T10:00:00Z";
+    state.deletedColumns = [makeColumn("id-c", "deck-1", sameTs)];
+    state.deletedCards = [
+      makeCard("id-a", "col-active", { deletedAt: sameTs }),
+      makeCard("id-b", "col-active", { deletedAt: sameTs }),
+    ];
+
+    // Mutate input order (insert column second, swap card order) — sort
+    // should still produce the same id-desc order.
+    const items = await data.getTrashItems();
+    expect(items.map((i) => i.id)).toEqual(["id-c", "id-b", "id-a"]);
+
+    state.deletedColumns = [makeColumn("id-c", "deck-1", sameTs)];
+    state.deletedCards = [
+      makeCard("id-b", "col-active", { deletedAt: sameTs }),
+      makeCard("id-a", "col-active", { deletedAt: sameTs }),
+    ];
+    const items2 = await data.getTrashItems();
+    expect(items2.map((i) => i.id)).toEqual(["id-c", "id-b", "id-a"]);
+  });
+
+  it("refreshes deck tags after restoring an item", async () => {
+    state.deletedCards = [
+      makeCard("card-1", "col-active", { deletedAt: "2026-05-02T10:00:00Z" }),
+    ];
+
+    const callsBefore = state.getTagsByDeckCalls;
+    const [item] = await data.getTrashItems();
+    await data.restoreTrashItem(item);
+
+    expect(state.getTagsByDeckCalls).toBeGreaterThan(callsBefore);
+  });
+
+  it("re-applies an active tag filter after restoring", async () => {
+    // Active card with #todo so the filter resolves to a non-empty set.
+    state.cardsByColumn = new Map([
+      [
+        "col-active",
+        [makeCard("card-active", "col-active", { content: "#todo task" })],
+      ],
+    ]);
+    state.deletedCards = [
+      makeCard("card-deleted", "col-active", {
+        deletedAt: "2026-05-02T10:00:00Z",
+        content: "#todo old",
+      }),
+    ];
+
+    // Reload current deck so cardsByColumn picks up the new mock content.
+    await data.selectDeck(state.decks[0]);
+    data.filterByTag("todo");
+    expect(data.filteredCardIds?.has("card-active")).toBe(true);
+
+    // Simulate the deleted card returning to col-active after restore.
+    state.cardsByColumn = new Map([
+      [
+        "col-active",
+        [
+          makeCard("card-active", "col-active", { content: "#todo task" }),
+          makeCard("card-deleted", "col-active", { content: "#todo old" }),
+        ],
+      ],
+    ]);
+
+    const [item] = await data.getTrashItems();
+    await data.restoreTrashItem(item);
+
+    expect(data.activeTagFilter).toBe("todo");
+    expect(data.filteredCardIds?.has("card-active")).toBe(true);
+    expect(data.filteredCardIds?.has("card-deleted")).toBe(true);
   });
 });

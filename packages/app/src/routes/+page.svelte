@@ -67,13 +67,20 @@
   let renamingColumn = $state<Column | null>(null);
   let deletingColumn = $state<Column | null>(null);
   let trashItems = $state<TrashItem[]>([]);
+  let trashRequestId = 0;
 
   $effect(() => {
     if (focus.activePalette === "trash") {
+      const requestId = ++trashRequestId;
       data.getTrashItems().then((items) => {
-        trashItems = items;
+        // Drop late results if the palette has since closed or refetched.
+        if (requestId === trashRequestId) {
+          trashItems = items;
+        }
       });
     } else {
+      // Invalidate any in-flight request when the palette closes.
+      trashRequestId++;
       trashItems = [];
     }
   });
