@@ -280,8 +280,8 @@ describe("DeckData trash", () => {
       }),
     ];
 
-    // Reload current deck so cardsByColumn picks up the new mock content.
-    await data.selectDeck(state.decks[0]);
+    // Sync DeckData's cardsByColumn with the new mock content above.
+    await data.loadCardsForColumns();
     data.filterByTag("todo");
     expect(data.filteredCardIds?.has("card-active")).toBe(true);
 

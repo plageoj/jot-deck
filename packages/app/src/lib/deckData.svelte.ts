@@ -461,10 +461,7 @@ export class DeckData {
       } else {
         await this.db.restoreCard(item.id);
       }
-      await this.reloadColumns();
-      await this.loadDeckTags();
-      // Re-apply the active tag filter so a restored matching card shows up
-      // (and a restored non-matching card stays hidden) without manual reload.
+      await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
       if (this.activeTagFilter) {
         this.filterByTag(this.activeTagFilter);
       }

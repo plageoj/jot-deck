@@ -1,19 +1,22 @@
-<script lang="ts">
-  import { onMount } from "svelte";
-
+<script lang="ts" module>
   export interface PaletteItem {
     id: string;
     label: string;
     shortcut?: string;
     current?: boolean;
   }
+</script>
+
+<script lang="ts" generics="T extends PaletteItem">
+  import { onMount, type Snippet } from "svelte";
 
   interface Props {
-    items: PaletteItem[];
+    items: T[];
     placeholder: string;
     emptyMessage?: string;
-    onSelect: (item: PaletteItem) => void;
+    onSelect: (item: T) => void;
     onClose: () => void;
+    renderItem?: Snippet<[T]>;
   }
 
   let {
@@ -22,6 +25,7 @@
     emptyMessage = "No matching items",
     onSelect,
     onClose,
+    renderItem,
   }: Props = $props();
 
   let query = $state("");
@@ -119,11 +123,15 @@
               onclick={() => onSelect(item)}
               onmouseenter={() => (selectedIndex = index)}
             >
-              <span class="palette-label" class:current={item.current}
-                >{item.label}</span
-              >
-              {#if item.shortcut}
-                <kbd class="palette-shortcut">{item.shortcut}</kbd>
+              {#if renderItem}
+                {@render renderItem(item)}
+              {:else}
+                <span class="palette-label" class:current={item.current}
+                  >{item.label}</span
+                >
+                {#if item.shortcut}
+                  <kbd class="palette-shortcut">{item.shortcut}</kbd>
+                {/if}
               {/if}
             </button>
           </li>

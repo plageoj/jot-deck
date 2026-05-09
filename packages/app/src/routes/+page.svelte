@@ -79,7 +79,6 @@
         }
       });
     } else {
-      // Invalidate any in-flight request when the palette closes.
       trashRequestId++;
       trashItems = [];
     }
