@@ -121,19 +121,18 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * `g t` キーバインドで `TrashPalette` を表示（`PaletteDialog` ベースのモーダル UI）
 * コマンドパレットに「Trash」追加
 
-### 3.8 セッション状態の永続化
+### 3.8 セッション状態の永続化 ✅
 
 #### 成果物
 * フォーカス位置（最後にフォーカスされた Column インデックス）の保存・復元
 * カラム別カードフォーカス（各 Column で最後にフォーカスされた Card インデックス）の保存・復元
-* 保存先: Tauri ローカルストレージ
+* 保存先: ブラウザ `localStorage`（Deck ごとに `jot-deck:focus:<deckId>` キー）
 
 #### 実装済み
-* メモリ上でのフォーカス位置管理
-
-#### 未実装
-* Tauri ローカルストレージへの永続化
-* 起動時の復元処理
+* `FocusManager` の Deck ごとの永続化（`focusedColumnIndex` + `lastFocusedCardByColumn`）
+* 起動時 / Deck 切り替え時の復元（`setCurrentDeck` + `clampToLoadedDeck`）
+* 保存値が現在のカラム数 / カード数を超える場合のクランプ処理
+* Deck 削除時の永続化エントリのクリーンアップ
 
 ### 3.9 設定画面・テーマ切り替え
 
@@ -142,6 +141,7 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * フォント設定（family / size / line-height）
 * Markdown / プレーンテキスト表示切り替え
 * キーバインドカスタマイズ UI
+* Codemirror の Vim mode ON/OFF 切り替え
 
 #### 実装済み
 * CSS カスタムプロパティによるダーク/ライトテーマ定義（`theme.css`）
@@ -228,7 +228,7 @@ Automerge + PartyKit でリアルタイム同期。
 |:---|:---|:---|
 | **データ層完成** | Phase 1 | 完了 |
 | **Tauri 統合** | Phase 2 | 完了 |
-| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.7 完了） |
+| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.8 完了） |
 | **AI 機能付き** | Phase 4 | 未着手 |
 | **MVP リリース** | Phase 5 | 未着手 |
 | **同期機能リリース** | Phase 6 | 未着手 |

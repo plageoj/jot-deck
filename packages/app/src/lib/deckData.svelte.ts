@@ -7,6 +7,7 @@ import {
   type TrashItem,
 } from "$lib/types";
 import { getDatabase, type DatabaseBackend } from "$lib/db";
+import { FocusManager } from "./focusManager.svelte";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
 
@@ -22,6 +23,9 @@ export class DeckData {
   deckTags = $state<Tag[]>([]);
   activeTagFilter = $state<string | null>(null);
   filteredCardIds = $state<Set<string> | null>(null);
+  // Set after columns finish loading for currentDeck. Use this — not
+  // currentDeck — to drive logic that depends on the column list being ready.
+  loadedDeckId = $state<string | null>(null);
 
   async init() {
     this.db = await getDatabase();
@@ -129,12 +133,14 @@ export class DeckData {
 
   async selectDeck(deck: Deck) {
     this.currentDeck = deck;
+    this.loadedDeckId = null;
     this.saveLastDeckId(deck.id);
     this.clearTagFilter();
     try {
       this.columns = await this.db.getColumnsByDeck(deck.id);
       await this.loadCardsForColumns();
       await this.loadDeckTags();
+      this.loadedDeckId = deck.id;
     } catch (e) {
       this.error = `Failed to load columns: ${e}`;
     }
@@ -193,6 +199,7 @@ export class DeckData {
   async deleteDeck(id: string): Promise<boolean> {
     try {
       await this.db.deleteDeck(id);
+      FocusManager.clearStateFor(id);
       this.decks = this.decks.filter((d) => d.id !== id);
       if (this.currentDeck?.id === id) {
         if (this.decks.length > 0) {

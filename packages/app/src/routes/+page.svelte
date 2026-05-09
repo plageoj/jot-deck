@@ -35,6 +35,32 @@
     }
   });
 
+  // Persist & restore focus state per deck. Switching the deck reassigns
+  // FocusManager's persistence target (saving prior state, then loading the
+  // new deck's saved state). Clamping to actual column/card counts waits for
+  // `loadedDeckId` so it runs against the freshly loaded column list.
+  let restoredForDeckId = $state<string | null>(null);
+  $effect(() => {
+    const deckId = data.currentDeck?.id ?? null;
+    focus.setCurrentDeck(deckId);
+    restoredForDeckId = null;
+  });
+
+  $effect(() => {
+    const loaded = data.loadedDeckId;
+    if (!loaded || restoredForDeckId === loaded) return;
+    focus.clampToLoadedDeck();
+    restoredForDeckId = loaded;
+  });
+
+  // Save state on focus changes once the active deck has been restored.
+  $effect(() => {
+    void focus.focusedColumnIndex;
+    void focus.focusedCardIndex;
+    void focus.lastFocusedCardByColumn;
+    if (restoredForDeckId) focus.persistCurrent();
+  });
+
   let deckComponent = $state<DeckComponent | null>(null);
 
   onMount(async () => {

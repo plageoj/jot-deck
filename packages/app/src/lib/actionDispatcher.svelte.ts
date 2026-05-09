@@ -87,8 +87,26 @@ export class ActionDispatcher {
       return;
     }
 
-    // Skip if no columns loaded
-    if (data.columns.length === 0) return;
+    // No columns: treat keys as column-focus bindings and allow a whitelist
+    // through (palette triggers, createColumn, undo). Other column-focus keys
+    // have nothing to act on, so we ignore them.
+    if (data.columns.length === 0) {
+      const key = normalizeKey(event);
+      if (!key) return;
+      const action = findAction(key, "column");
+      if (
+        action === "showDeckPalette" ||
+        action === "showCommandPalette" ||
+        action === "undo"
+      ) {
+        event.preventDefault();
+        this.executeAction(action);
+      } else if (action === "createColumn") {
+        event.preventDefault();
+        this.executeColumnAction("createColumn");
+      }
+      return;
+    }
 
     const key = normalizeKey(event);
     if (!key) return;
@@ -515,10 +533,10 @@ export class ActionDispatcher {
     this.focus.closePalette();
     const deck = this.data.decks.find((d) => d.id === deckId);
     if (deck && deck.id !== this.data.currentDeck?.id) {
-      this.data.selectDeck(deck);
-      this.focus.focusedColumnIndex = 0;
-      this.focus.focusedCardIndex = 0;
+      // Focus indices are restored from persisted state via the
+      // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
       this.focus.focusMode = "column";
+      this.data.selectDeck(deck);
     }
   }
 
