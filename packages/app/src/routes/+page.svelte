@@ -48,12 +48,20 @@
 
   $effect(() => {
     const loaded = data.loadedDeckId;
-    if (!loaded || restoredForDeckId === loaded) return;
+    // Skip stale loads: if the user rapidly switched decks, an earlier
+    // selectDeck() may finish after the current selection, briefly setting
+    // loadedDeckId to the prior deck while currentDeck has already moved on.
+    // Clamping in that window would apply the new deck's restored indices
+    // against the prior deck's column list.
+    if (
+      !loaded ||
+      restoredForDeckId === loaded ||
+      loaded !== data.currentDeck?.id
+    ) {
+      return;
+    }
     focus.clampToLoadedDeck();
     restoredForDeckId = loaded;
-    // Wait for the Deck component to render the new column list before
-    // asking it to scroll — otherwise scrollToColumn runs against the
-    // previous deck's DOM (or no DOM at all on first load).
     tick().then(() => {
       if (data.loadedDeckId === loaded) focus.scrollToFocusedColumn();
     });
