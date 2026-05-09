@@ -113,6 +113,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "Ctrl+p", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
   { sequence: "Ctrl+Shift+P", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },
   { sequence: "F1", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },
+
+  // Common - Settings
+  { sequence: "Ctrl+,", action: "showSettings", modes: ["column", "card"], description: "Open settings" },
 ];
 
 /**

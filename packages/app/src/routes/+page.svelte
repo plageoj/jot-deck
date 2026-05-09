@@ -8,6 +8,7 @@
     DeckSwitcher,
     KeybindingCheatsheet,
     RenameDialog,
+    SettingsDialog,
     TagFilterBar,
     TagPalette,
     TrashPalette,
@@ -15,6 +16,10 @@
   import { DeckData } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
   import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
+  import {
+    applySettingsToDocument,
+    settingsStore,
+  } from "$lib/settings.svelte";
   import type { Column, Deck, TrashItem } from "$lib/types";
   import "$lib/styles/theme.css";
 
@@ -73,6 +78,13 @@
   });
 
   let deckComponent = $state<DeckComponent | null>(null);
+
+  // Settings: load from localStorage once, then apply reactively whenever the
+  // store changes (theme attribute + font CSS variables on <html>).
+  settingsStore.load();
+  $effect(() => {
+    applySettingsToDocument(settingsStore.state);
+  });
 
   onMount(async () => {
     focus.onScrollToColumn = (index) => deckComponent?.scrollToColumn(index);
@@ -150,6 +162,12 @@
     >
     <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
       >New Column</button
+    >
+    <button
+      class="header-spacer"
+      onclick={() => (focus.showSettings = true)}
+      title="Settings (Ctrl+,)"
+      aria-label="Open settings">Settings</button
     >
   </header>
 
@@ -313,6 +331,15 @@
   />
 {/if}
 
+{#if focus.showSettings}
+  <SettingsDialog
+    settings={settingsStore.state}
+    onUpdate={(key, value) => settingsStore.update(key, value)}
+    onReset={() => settingsStore.reset()}
+    onClose={() => (focus.showSettings = false)}
+  />
+{/if}
+
 <style>
   .app {
     display: flex;
@@ -339,6 +366,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     min-width: 0;
+  }
+
+  .header .header-spacer {
+    margin-left: auto;
   }
 
   .header button {

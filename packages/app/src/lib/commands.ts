@@ -17,6 +17,7 @@ export const COMMANDS: Command[] = [
   { id: "filter-tag", label: "Filter by Tag", shortcut: "/", action: "openTagFilter" },
   { id: "clear-filter", label: "Clear Tag Filter", action: "clearTagFilter" },
   { id: "trash", label: "Trash", shortcut: "g t", action: "showTrashPalette" },
+  { id: "settings", label: "Settings", shortcut: "Ctrl+,", action: "showSettings" },
   { id: "shortcuts", label: "Keyboard Shortcuts", shortcut: "?", action: "showShortcuts" },
 ];
 

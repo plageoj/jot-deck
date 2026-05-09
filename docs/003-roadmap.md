@@ -144,13 +144,15 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * Codemirror の Vim mode ON/OFF 切り替え
 
 #### 実装済み
-* CSS カスタムプロパティによるダーク/ライトテーマ定義（`theme.css`）
+* `SettingsStore` による設定の永続化（`localStorage`、`jot-deck:settings`）
+* `data-theme` 属性ベースのランタイムテーマ切り替え（auto / dark / light）
+* フォントファミリー・サイズ・line-height を CSS カスタムプロパティで動的反映
+* `SettingsDialog` コンポーネント（`Ctrl+,` / コマンドパレット「Settings」 / ヘッダーボタンから起動）
+* Markdown 表示切替（`MarkdownContent`、`#tag` ハイライトを保ったまま `**bold**` / `*italic*` / `` `code` `` / リンクをレンダリング）
+* CodeMirror の Vim モード ON/OFF 切り替え（OFF 時は `Escape` で保存して終了）
 
 #### 未実装
-* 設定 UI コンポーネント
-* ランタイムでのテーマ切り替え
-* フォント・表示設定 UI
-* キーバインドカスタマイズ UI
+* キーバインドカスタマイズ UI（設定ダイアログ内にプレースホルダー表示。デフォルトはチートシート参照）
 
 ---
 
@@ -228,7 +230,7 @@ Automerge + PartyKit でリアルタイム同期。
 |:---|:---|:---|
 | **データ層完成** | Phase 1 | 完了 |
 | **Tauri 統合** | Phase 2 | 完了 |
-| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.8 完了） |
+| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.9 完了。キーバインドカスタマイズ UI のみ未着手） |
 | **AI 機能付き** | Phase 4 | 未着手 |
 | **MVP リリース** | Phase 5 | 未着手 |
 | **同期機能リリース** | Phase 6 | 未着手 |

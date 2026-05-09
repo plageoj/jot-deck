@@ -58,6 +58,9 @@ export class ActionDispatcher {
       return;
     }
 
+    // Settings dialog manages its own input — let it handle keys.
+    if (focus.showSettings) return;
+
     // Skip if focus is on input fields
     const target = event.target as HTMLElement;
     if (
@@ -147,6 +150,11 @@ export class ActionDispatcher {
 
     if (action === "showTrashPalette") {
       this.focus.openPalette("trash");
+      return;
+    }
+
+    if (action === "showSettings") {
+      this.focus.showSettings = true;
       return;
     }
 

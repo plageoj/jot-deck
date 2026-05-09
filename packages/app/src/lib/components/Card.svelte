@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { Card } from "$lib/types";
+  import { settingsStore } from "$lib/settings.svelte";
   import CardEditor from "./CardEditor.svelte";
+  import MarkdownContent from "./MarkdownContent.svelte";
   import TagHighlight from "./TagHighlight.svelte";
 
   interface Props {
@@ -69,9 +71,17 @@
       {onTagSuggestions}
     />
   {:else}
-    <div class="card-content">
+    <div class="card-content" class:markdown={settingsStore.state.markdownEnabled}>
       {#if card.content}
-        <TagHighlight content={card.content} {activeTag} {onTagClick} />
+        {#if settingsStore.state.markdownEnabled}
+          <MarkdownContent
+            content={card.content}
+            {activeTag}
+            {onTagClick}
+          />
+        {:else}
+          <TagHighlight content={card.content} {activeTag} {onTagClick} />
+        {/if}
       {:else}
         (empty)
       {/if}
