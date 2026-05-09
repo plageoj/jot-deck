@@ -20,7 +20,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   fontSize: 14,
   lineHeight: 1.5,
   markdownEnabled: false,
-  vimEnabled: true,
+  vimEnabled: false,
 };
 
 export const FONT_FAMILY_PRESETS = [

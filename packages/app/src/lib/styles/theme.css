@@ -71,7 +71,9 @@ body {
   overflow: hidden;
 }
 
-body {
+/* Typography lives on <html> so 1rem == the user's chosen font-size and
+ * `rem`-sized components (cards, headers, palettes) scale together. */
+html {
   font-family: var(
     --app-font-family,
     -apple-system,
@@ -85,6 +87,9 @@ body {
   );
   font-size: var(--app-font-size, 14px);
   line-height: var(--app-line-height, 1.5);
+}
+
+body {
   background-color: var(--bg-primary);
   color: var(--text);
 }
