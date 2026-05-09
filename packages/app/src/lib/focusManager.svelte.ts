@@ -6,9 +6,12 @@ export type PaletteType = "column" | "deck" | "tag" | "trash" | "command" | null
 
 const FOCUS_STATE_PREFIX = "jot-deck:focus:";
 
+type PersistedFocusMode = "column" | "card";
+
 type PersistedFocusState = {
   focusedColumnIndex: number;
   lastFocusedCardByColumn: Record<string, number>;
+  focusMode: PersistedFocusMode;
 };
 
 export class FocusManager {
@@ -37,6 +40,11 @@ export class FocusManager {
 
   // Deck currently associated with persistence. Only set via setCurrentDeck.
   private currentDeckId: string | null = null;
+
+  // Pending focus mode to apply once the active deck's columns finish loading
+  // (clampToLoadedDeck). Restoring the mode before the column list is ready
+  // would let `card` mode trigger scroll effects against stale columns.
+  private pendingFocusMode: PersistedFocusMode | null = null;
 
   constructor(data: DeckData) {
     this.data = data;
@@ -135,11 +143,16 @@ export class FocusManager {
         ? { ...state.lastFocusedCardByColumn }
         : {};
       this.focusedColumnIndex = state?.focusedColumnIndex ?? 0;
+      this.pendingFocusMode = state?.focusMode ?? "column";
     } else {
       this.lastFocusedCardByColumn = {};
       this.focusedColumnIndex = 0;
+      this.pendingFocusMode = null;
     }
     this.focusedCardIndex = 0;
+    // Park focus on the column until clampToLoadedDeck runs against the
+    // freshly loaded column list. The persisted mode is applied there.
+    this.focusMode = "column";
   }
 
   /**
@@ -150,12 +163,26 @@ export class FocusManager {
     if (this.data.columns.length === 0) {
       this.focusedColumnIndex = 0;
       this.focusedCardIndex = 0;
+      this.focusMode = "column";
+      this.pendingFocusMode = null;
       return;
     }
     if (this.focusedColumnIndex >= this.data.columns.length) {
       this.focusedColumnIndex = this.data.columns.length - 1;
     }
     this.restoreCardIndex();
+
+    // Apply the persisted focus mode now that indices are valid. Card mode
+    // is only restored if the focused column actually has cards — otherwise
+    // there's nothing to focus on.
+    const column = this.data.columns[this.focusedColumnIndex];
+    const cards = column ? this.data.cardsByColumn[column.id] ?? [] : [];
+    if (this.pendingFocusMode === "card" && cards.length > 0) {
+      this.focusMode = "card";
+    } else {
+      this.focusMode = "column";
+    }
+    this.pendingFocusMode = null;
   }
 
   /** Persist current focus state to localStorage for the active deck. */
@@ -166,12 +193,17 @@ export class FocusManager {
     if (column) {
       snapshot[column.id] = this.focusedCardIndex;
     }
+    // Only persist column / card. Edit and command modes are transient and
+    // should not be restored on next launch.
+    const mode: PersistedFocusMode =
+      this.focusMode === "card" ? "card" : "column";
     try {
       localStorage.setItem(
         FOCUS_STATE_PREFIX + this.currentDeckId,
         JSON.stringify({
           focusedColumnIndex: this.focusedColumnIndex,
           lastFocusedCardByColumn: snapshot,
+          focusMode: mode,
         } satisfies PersistedFocusState),
       );
     } catch {
@@ -203,7 +235,9 @@ export class FocusManager {
         typeof parsed.lastFocusedCardByColumn === "object"
           ? parsed.lastFocusedCardByColumn
           : {};
-      return { focusedColumnIndex, lastFocusedCardByColumn };
+      const focusMode: PersistedFocusMode =
+        parsed.focusMode === "card" ? "card" : "column";
+      return { focusedColumnIndex, lastFocusedCardByColumn, focusMode };
     } catch {
       return null;
     }

@@ -533,9 +533,8 @@ export class ActionDispatcher {
     this.focus.closePalette();
     const deck = this.data.decks.find((d) => d.id === deckId);
     if (deck && deck.id !== this.data.currentDeck?.id) {
-      // Focus indices are restored from persisted state via the
+      // Focus indices and mode are restored from persisted state via the
       // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
-      this.focus.focusMode = "column";
       this.data.selectDeck(deck);
     }
   }

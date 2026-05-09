@@ -85,6 +85,75 @@ describe("FocusManager persistence", () => {
     expect(parsed.lastFocusedCardByColumn["col-a"]).toBe(5);
   });
 
+  it("persists focusMode (column/card) and reduces edit/command to column", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+
+    focus.setCurrentDeck("deck-1");
+    focus.focusMode = "card";
+    focus.persistCurrent();
+    expect(JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!).focusMode).toBe("card");
+
+    focus.focusMode = "edit";
+    focus.persistCurrent();
+    expect(JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!).focusMode).toBe("column");
+
+    focus.focusMode = "command";
+    focus.persistCurrent();
+    expect(JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!).focusMode).toBe("column");
+  });
+
+  it("clampToLoadedDeck restores card mode when the focused column has cards", async () => {
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [makeColumn("col-x", "deck-1")];
+    state.cardsByColumn = new Map([
+      ["col-x", [makeCard("c1", "col-x"), makeCard("c2", "col-x")]],
+    ]);
+
+    localStorage.setItem(
+      "jot-deck:focus:deck-1",
+      JSON.stringify({
+        focusedColumnIndex: 0,
+        lastFocusedCardByColumn: { "col-x": 1 },
+        focusMode: "card",
+      }),
+    );
+
+    const data = new DeckData();
+    await data.init();
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("deck-1");
+    // Mode is parked on `column` until clamp runs.
+    expect(focus.focusMode).toBe("column");
+    focus.clampToLoadedDeck();
+
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedCardIndex).toBe(1);
+  });
+
+  it("clampToLoadedDeck falls back to column mode when restored card column is empty", async () => {
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [makeColumn("col-empty", "deck-1")];
+    state.cardsByColumn = new Map([["col-empty", []]]);
+
+    localStorage.setItem(
+      "jot-deck:focus:deck-1",
+      JSON.stringify({
+        focusedColumnIndex: 0,
+        lastFocusedCardByColumn: {},
+        focusMode: "card",
+      }),
+    );
+
+    const data = new DeckData();
+    await data.init();
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("deck-1");
+    focus.clampToLoadedDeck();
+
+    expect(focus.focusMode).toBe("column");
+  });
+
   it("includes the current focused card index for the focused column when persisting", async () => {
     state.decks = [makeDeck("deck-1")];
     state.columns = [makeColumn("col-x", "deck-1", 0), makeColumn("col-y", "deck-1", 1)];
