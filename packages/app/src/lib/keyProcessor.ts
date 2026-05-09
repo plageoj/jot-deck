@@ -15,6 +15,10 @@ export function normalizeKey(event: KeyboardEvent): string | null {
   if (event.key === "PageUp") return "PageUp";
   if (event.key === "PageDown") return "PageDown";
 
+  if (event.key.startsWith("F") && event.key.length >= 2 && !isNaN(Number(event.key.slice(1)))) {
+    return event.key;
+  }
+
   if (event.key.startsWith("Arrow")) {
     let prefix = "";
     if (event.ctrlKey) prefix += "Ctrl+";
@@ -23,7 +27,9 @@ export function normalizeKey(event: KeyboardEvent): string | null {
   }
 
   if (event.ctrlKey && event.key.length === 1) {
-    return "Ctrl+" + event.key;
+    let prefix = "Ctrl+";
+    if (event.shiftKey) prefix += "Shift+";
+    return prefix + event.key;
   }
 
   if (event.key.length === 1) {

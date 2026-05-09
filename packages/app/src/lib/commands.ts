@@ -12,6 +12,7 @@ export const COMMANDS: Command[] = [
   { id: "delete-deck", label: "Delete Deck", action: "deleteDeck" },
   { id: "switch-column", label: "Switch Column", shortcut: "g n", action: "showColumnPalette" },
   { id: "new-column", label: "New Column", shortcut: "c", action: "newColumn" },
+  { id: "rename-column", label: "Rename Column", action: "renameColumn" },
   { id: "delete-column", label: "Delete Column", shortcut: "d d", action: "deleteColumn" },
   { id: "filter-tag", label: "Filter by Tag", shortcut: "/", action: "openTagFilter" },
   { id: "clear-filter", label: "Clear Tag Filter", action: "clearTagFilter" },
