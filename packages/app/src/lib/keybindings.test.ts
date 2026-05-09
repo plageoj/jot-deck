@@ -42,6 +42,11 @@ describe("findAction", () => {
     expect(findAction("u", "card")).toBe("undo");
   });
 
+  it("should find trash palette action in both modes", () => {
+    expect(findAction("gt", "column")).toBe("showTrashPalette");
+    expect(findAction("gt", "card")).toBe("showTrashPalette");
+  });
+
   it("should return null for unknown sequences", () => {
     expect(findAction("x", "column")).toBeNull();
     expect(findAction("xyz", "card")).toBeNull();

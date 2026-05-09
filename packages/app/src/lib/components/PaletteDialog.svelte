@@ -1,19 +1,22 @@
-<script lang="ts">
-  import { onMount } from "svelte";
-
+<script lang="ts" module>
   export interface PaletteItem {
     id: string;
     label: string;
     shortcut?: string;
     current?: boolean;
   }
+</script>
+
+<script lang="ts" generics="T extends PaletteItem">
+  import { onMount, type Snippet } from "svelte";
 
   interface Props {
-    items: PaletteItem[];
+    items: T[];
     placeholder: string;
     emptyMessage?: string;
-    onSelect: (item: PaletteItem) => void;
+    onSelect: (item: T) => void;
     onClose: () => void;
+    renderItem?: Snippet<[T]>;
   }
 
   let {
@@ -22,6 +25,7 @@
     emptyMessage = "No matching items",
     onSelect,
     onClose,
+    renderItem,
   }: Props = $props();
 
   let query = $state("");
@@ -111,15 +115,25 @@
             class:selected={index === selectedIndex}
             role="option"
             aria-selected={index === selectedIndex}
-            onclick={() => onSelect(item)}
-            onmouseenter={() => (selectedIndex = index)}
           >
-            <span class="palette-label" class:current={item.current}
-              >{item.label}</span
+            <button
+              type="button"
+              class="palette-item-button"
+              tabindex="-1"
+              onclick={() => onSelect(item)}
+              onmouseenter={() => (selectedIndex = index)}
             >
-            {#if item.shortcut}
-              <kbd class="palette-shortcut">{item.shortcut}</kbd>
-            {/if}
+              {#if renderItem}
+                {@render renderItem(item)}
+              {:else}
+                <span class="palette-label" class:current={item.current}
+                  >{item.label}</span
+                >
+                {#if item.shortcut}
+                  <kbd class="palette-shortcut">{item.shortcut}</kbd>
+                {/if}
+              {/if}
+            </button>
           </li>
         {/each}
       </ul>
@@ -185,16 +199,30 @@
   }
 
   .palette-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    transition: background-color 0.1s ease;
+    padding: 0;
   }
 
   .palette-item.selected {
     background-color: var(--bg-tertiary);
+  }
+
+  .palette-item-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+  }
+
+  .palette-item-button:focus {
+    outline: none;
   }
 
   .palette-label {

@@ -2,7 +2,7 @@ import type { FocusMode } from "$lib/keybindings";
 import type { Card } from "$lib/types";
 import type { DeckData } from "./deckData.svelte";
 
-export type PaletteType = "column" | "deck" | "tag" | "command" | null;
+export type PaletteType = "column" | "deck" | "tag" | "trash" | "command" | null;
 
 export class FocusManager {
   private data: DeckData;

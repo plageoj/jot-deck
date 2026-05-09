@@ -35,3 +35,13 @@ export interface Card {
   deleted_at: string | null;
   deleted_with_column: boolean;
 }
+
+export type TrashItem =
+  | { type: "column"; id: string; column: Column; deletedAt: string }
+  | {
+      type: "card";
+      id: string;
+      card: Card;
+      columnName: string;
+      deletedAt: string;
+    };

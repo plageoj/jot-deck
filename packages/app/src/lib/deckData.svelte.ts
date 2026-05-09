@@ -1,12 +1,17 @@
-import { TAG_PATTERN, type Deck, type Column, type Card, type Tag } from "$lib/types";
-import { createDeleteStack } from "$lib/deleteStack";
+import {
+  TAG_PATTERN,
+  type Deck,
+  type Column,
+  type Card,
+  type Tag,
+  type TrashItem,
+} from "$lib/types";
 import { getDatabase, type DatabaseBackend } from "$lib/db";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
 
 export class DeckData {
   private db!: DatabaseBackend;
-  private deleteStack!: ReturnType<typeof createDeleteStack>;
 
   decks = $state<Deck[]>([]);
   currentDeck = $state<Deck | null>(null);
@@ -20,19 +25,6 @@ export class DeckData {
 
   async init() {
     this.db = await getDatabase();
-    this.deleteStack = createDeleteStack({
-      onRestore: async (item) => {
-        if (item.type === "card") {
-          await this.db.restoreCard(item.id);
-        } else {
-          await this.db.restoreColumn(item.id);
-        }
-      },
-      onError: (msg) => {
-        console.error("deleteStack error:", msg);
-        this.error = msg;
-      },
-    });
     await this.loadDecks();
   }
 
@@ -308,7 +300,6 @@ export class DeckData {
   async deleteColumn(columnId: string): Promise<boolean> {
     try {
       await this.db.deleteColumn(columnId);
-      this.deleteStack.push({ type: "column", id: columnId });
       await this.reloadColumns();
       return true;
     } catch (e) {
@@ -320,7 +311,6 @@ export class DeckData {
   async deleteCard(cardId: string): Promise<boolean> {
     try {
       await this.db.deleteCard(cardId);
-      this.deleteStack.push({ type: "card", id: cardId });
       await this.loadCardsForColumns();
       return true;
     } catch (e) {
@@ -414,11 +404,77 @@ export class DeckData {
     }
   }
 
-  async undoLastDelete(): Promise<boolean> {
-    const success = await this.deleteStack.popAndRestore();
-    if (success) {
-      await this.reloadColumns();
+  async getTrashItems(): Promise<TrashItem[]> {
+    if (!this.currentDeck) return [];
+    try {
+      const [deletedColumns, deletedCards] = await Promise.all([
+        this.db.getDeletedColumns(this.currentDeck.id),
+        this.db.getDeletedCards(this.currentDeck.id),
+      ]);
+
+      const items: TrashItem[] = [];
+
+      for (const column of deletedColumns) {
+        items.push({
+          type: "column",
+          id: column.id,
+          column,
+          deletedAt: column.deleted_at ?? "",
+        });
+      }
+
+      // Build column name lookup for active and deleted columns so we can
+      // label cards regardless of whether their column is also deleted.
+      const columnNames = new Map<string, string>();
+      for (const col of this.columns) columnNames.set(col.id, col.name);
+      for (const col of deletedColumns) columnNames.set(col.id, col.name);
+
+      for (const card of deletedCards) {
+        if (card.deleted_with_column) continue;
+        items.push({
+          type: "card",
+          id: card.id,
+          card,
+          columnName: columnNames.get(card.column_id) ?? "",
+          deletedAt: card.deleted_at ?? "",
+        });
+      }
+
+      // Tiebreaker on id (ULIDs are lexicographically time-sortable) so
+      // ordering is deterministic when two items share the same deleted_at.
+      items.sort((a, b) => {
+        const cmp = b.deletedAt.localeCompare(a.deletedAt);
+        if (cmp !== 0) return cmp;
+        return b.id.localeCompare(a.id);
+      });
+      return items;
+    } catch (e) {
+      this.error = `Failed to load trash: ${e}`;
+      return [];
     }
-    return success;
+  }
+
+  async restoreTrashItem(item: TrashItem): Promise<boolean> {
+    try {
+      if (item.type === "column") {
+        await this.db.restoreColumn(item.id);
+      } else {
+        await this.db.restoreCard(item.id);
+      }
+      await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
+      if (this.activeTagFilter) {
+        this.filterByTag(this.activeTagFilter);
+      }
+      return true;
+    } catch (e) {
+      this.error = `Failed to restore: ${e}`;
+      return false;
+    }
+  }
+
+  async undoLastDelete(): Promise<boolean> {
+    const items = await this.getTrashItems();
+    if (items.length === 0) return false;
+    return this.restoreTrashItem(items[0]);
   }
 }

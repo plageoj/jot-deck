@@ -196,16 +196,22 @@
               class:selected={i === selectedIndex}
               role="option"
               aria-selected={i === selectedIndex}
-              onclick={() => onSelect(index)}
-              onmouseenter={() => (selectedIndex = i)}
             >
-              <span class="column-item-name">{col.name}</span>
-              <span class="column-item-meta">
-                {cardCount} {cardCount === 1 ? "card" : "cards"}
-                {#if shortcutFor(index)}
-                  <kbd class="shortcut-hint">{shortcutFor(index)}</kbd>
-                {/if}
-              </span>
+              <button
+                type="button"
+                class="column-item-button"
+                tabindex="-1"
+                onclick={() => onSelect(index)}
+                onmouseenter={() => (selectedIndex = i)}
+              >
+                <span class="column-item-name">{col.name}</span>
+                <span class="column-item-meta">
+                  {cardCount} {cardCount === 1 ? "card" : "cards"}
+                  {#if shortcutFor(index)}
+                    <kbd class="shortcut-hint">{shortcutFor(index)}</kbd>
+                  {/if}
+                </span>
+              </button>
             </li>
           {/each}
         </ul>
@@ -370,16 +376,30 @@
   }
 
   .column-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    transition: background-color 0.1s ease;
+    padding: 0;
   }
 
   .column-item.selected {
     background-color: var(--bg-tertiary);
+  }
+
+  .column-item-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+  }
+
+  .column-item-button:focus {
+    outline: none;
   }
 
   .column-item-name {
