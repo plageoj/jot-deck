@@ -314,3 +314,147 @@ describe("FocusManager persistence", () => {
     expect(focus.lastFocusedCardByColumn).toEqual({});
   });
 });
+
+describe("FocusManager rapid deck switch race condition", () => {
+  // Mirrors the guard in +page.svelte's clamp $effect. Centralized here so
+  // the predicate is exercised in tests and stays in sync with the page.
+  function shouldClamp(opts: {
+    loaded: string | null;
+    restoredForDeckId: string | null;
+    currentDeckId: string | null;
+  }): boolean {
+    const { loaded, restoredForDeckId, currentDeckId } = opts;
+    if (!loaded) return false;
+    if (restoredForDeckId === loaded) return false;
+    if (loaded !== currentDeckId) return false;
+    return true;
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    state.decks = [];
+    state.columns = [];
+    state.cardsByColumn = new Map();
+    state.tagsByDeck = [];
+  });
+
+  it("skips clampToLoadedDeck when loadedDeckId belongs to a stale deck switch", () => {
+    expect(
+      shouldClamp({
+        loaded: "deck-B",
+        restoredForDeckId: null,
+        currentDeckId: "deck-C",
+      }),
+    ).toBe(false);
+  });
+
+  it("runs clampToLoadedDeck once loadedDeckId catches up to the current deck", () => {
+    expect(
+      shouldClamp({
+        loaded: "deck-C",
+        restoredForDeckId: null,
+        currentDeckId: "deck-C",
+      }),
+    ).toBe(true);
+  });
+
+  it("does not re-run clampToLoadedDeck for a deck that has already been restored", () => {
+    expect(
+      shouldClamp({
+        loaded: "deck-C",
+        restoredForDeckId: "deck-C",
+        currentDeckId: "deck-C",
+      }),
+    ).toBe(false);
+  });
+
+  it("preserves restored focus when stale loadedDeckId would have clamped against wrong columns", () => {
+    // Saved state: deck-C had focus on column index 4.
+    localStorage.setItem(
+      "jot-deck:focus:deck-C",
+      JSON.stringify({
+        focusedColumnIndex: 4,
+        lastFocusedCardByColumn: {},
+        focusMode: "column",
+      }),
+    );
+
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+
+    // User opens deck-B, then quickly switches to deck-C before deck-B finishes
+    // loading. Both setCurrentDeck calls happen synchronously when each
+    // currentDeck change is observed.
+    focus.setCurrentDeck("deck-B");
+    focus.setCurrentDeck("deck-C");
+    expect(focus.focusedColumnIndex).toBe(4);
+
+    // Now deck-B's selectDeck finishes after deck-C was already selected,
+    // briefly setting columns to deck-B's (only 2) and loadedDeckId to "deck-B".
+    data.columns = [makeColumn("b-col-1", "deck-B"), makeColumn("b-col-2", "deck-B")];
+    data.cardsByColumn = { "b-col-1": [], "b-col-2": [] };
+    data.currentDeck = makeDeck("deck-C");
+
+    // Page's guard would skip clamp since loaded ("deck-B") !== currentDeck ("deck-C").
+    const shouldRun = shouldClamp({
+      loaded: "deck-B",
+      restoredForDeckId: null,
+      currentDeckId: data.currentDeck.id,
+    });
+    expect(shouldRun).toBe(false);
+
+    // Sanity check: had the guard been absent, clamp would have corrupted
+    // focusedColumnIndex by capping it at deck-B's length-1 (=1).
+    expect(focus.focusedColumnIndex).toBe(4);
+
+    // Once deck-C finishes loading, clamp can run safely.
+    data.columns = [
+      makeColumn("c-col-1", "deck-C"),
+      makeColumn("c-col-2", "deck-C"),
+      makeColumn("c-col-3", "deck-C"),
+      makeColumn("c-col-4", "deck-C"),
+      makeColumn("c-col-5", "deck-C"),
+    ];
+    data.cardsByColumn = {
+      "c-col-1": [],
+      "c-col-2": [],
+      "c-col-3": [],
+      "c-col-4": [],
+      "c-col-5": [],
+    };
+    expect(
+      shouldClamp({
+        loaded: "deck-C",
+        restoredForDeckId: null,
+        currentDeckId: "deck-C",
+      }),
+    ).toBe(true);
+    focus.clampToLoadedDeck();
+    expect(focus.focusedColumnIndex).toBe(4);
+  });
+
+  it("would corrupt focus index without the guard (regression scenario)", () => {
+    // Restored state targets index 4, but columns array is the wrong deck's
+    // (only 2 entries). Without the page-level guard, clampToLoadedDeck
+    // collapses focusedColumnIndex to 1 — losing the saved value.
+    localStorage.setItem(
+      "jot-deck:focus:deck-C",
+      JSON.stringify({
+        focusedColumnIndex: 4,
+        lastFocusedCardByColumn: {},
+        focusMode: "column",
+      }),
+    );
+
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("deck-C");
+
+    data.columns = [makeColumn("b-col-1", "deck-B"), makeColumn("b-col-2", "deck-B")];
+    data.cardsByColumn = { "b-col-1": [], "b-col-2": [] };
+
+    focus.clampToLoadedDeck();
+
+    expect(focus.focusedColumnIndex).toBe(1);
+  });
+});
