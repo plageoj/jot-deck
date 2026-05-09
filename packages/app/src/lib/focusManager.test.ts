@@ -316,19 +316,7 @@ describe("FocusManager persistence", () => {
 });
 
 describe("FocusManager rapid deck switch race condition", () => {
-  // Mirrors the guard in +page.svelte's clamp $effect. Centralized here so
-  // the predicate is exercised in tests and stays in sync with the page.
-  function shouldClamp(opts: {
-    loaded: string | null;
-    restoredForDeckId: string | null;
-    currentDeckId: string | null;
-  }): boolean {
-    const { loaded, restoredForDeckId, currentDeckId } = opts;
-    if (!loaded) return false;
-    if (restoredForDeckId === loaded) return false;
-    if (loaded !== currentDeckId) return false;
-    return true;
-  }
+  const shouldClamp = FocusManager.shouldClampForLoadedDeck;
 
   beforeEach(() => {
     localStorage.clear();

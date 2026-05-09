@@ -220,6 +220,26 @@ export class FocusManager {
     }
   }
 
+  /**
+   * Whether `clampToLoadedDeck()` should run for the just-loaded deck.
+   *
+   * Returns false if no deck has loaded, the load is already restored, or the
+   * load belongs to a stale deck switch (rapid A→B→C where B's selectDeck
+   * resolves after C is selected — clamping in that window would apply C's
+   * restored indices against B's column list).
+   */
+  static shouldClampForLoadedDeck(opts: {
+    loaded: string | null;
+    restoredForDeckId: string | null;
+    currentDeckId: string | null;
+  }): boolean {
+    const { loaded, restoredForDeckId, currentDeckId } = opts;
+    if (!loaded) return false;
+    if (restoredForDeckId === loaded) return false;
+    if (loaded !== currentDeckId) return false;
+    return true;
+  }
+
   private loadState(deckId: string): PersistedFocusState | null {
     try {
       const raw = localStorage.getItem(FOCUS_STATE_PREFIX + deckId);

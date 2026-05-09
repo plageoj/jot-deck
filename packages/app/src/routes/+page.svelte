@@ -48,15 +48,12 @@
 
   $effect(() => {
     const loaded = data.loadedDeckId;
-    // Skip stale loads: if the user rapidly switched decks, an earlier
-    // selectDeck() may finish after the current selection, briefly setting
-    // loadedDeckId to the prior deck while currentDeck has already moved on.
-    // Clamping in that window would apply the new deck's restored indices
-    // against the prior deck's column list.
     if (
-      !loaded ||
-      restoredForDeckId === loaded ||
-      loaded !== data.currentDeck?.id
+      !FocusManager.shouldClampForLoadedDeck({
+        loaded,
+        restoredForDeckId,
+        currentDeckId: data.currentDeck?.id ?? null,
+      })
     ) {
       return;
     }
