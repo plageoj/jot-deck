@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Card, Column, Deck } from "$lib/types";
 import type { DatabaseBackend } from "$lib/db";
+import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 
 const state = {
   decks: [] as Deck[],
@@ -22,43 +23,9 @@ vi.mock("$lib/db", () => ({
 }));
 
 const { DeckData } = await import("./deckData.svelte");
-const { FocusManager } = await import("./focusManager.svelte");
+const { FocusManager, FOCUS_STATE_PREFIX } = await import("./focusManager.svelte");
 
-function makeDeck(id: string): Deck {
-  return {
-    id,
-    name: id,
-    sort_order: "created_desc",
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-  };
-}
-
-function makeColumn(id: string, deckId: string, position = 0): Column {
-  return {
-    id,
-    deck_id: deckId,
-    name: `${id}-name`,
-    position,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    deleted_at: null,
-  };
-}
-
-function makeCard(id: string, columnId: string): Card {
-  return {
-    id,
-    column_id: columnId,
-    content: `${id} content`,
-    score: 0,
-    position: 0,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    deleted_at: null,
-    deleted_with_column: false,
-  };
-}
+const focusKey = (deckId: string) => FOCUS_STATE_PREFIX + deckId;
 
 describe("FocusManager persistence", () => {
   beforeEach(() => {
@@ -78,7 +45,7 @@ describe("FocusManager persistence", () => {
     focus.lastFocusedCardByColumn["col-a"] = 5;
     focus.persistCurrent();
 
-    const raw = localStorage.getItem("jot-deck:focus:deck-1");
+    const raw = localStorage.getItem(focusKey("deck-1"));
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.focusedColumnIndex).toBe(2);
@@ -92,15 +59,15 @@ describe("FocusManager persistence", () => {
     focus.setCurrentDeck("deck-1");
     focus.focusMode = "card";
     focus.persistCurrent();
-    expect(JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!).focusMode).toBe("card");
+    expect(JSON.parse(localStorage.getItem(focusKey("deck-1"))!).focusMode).toBe("card");
 
     focus.focusMode = "edit";
     focus.persistCurrent();
-    expect(JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!).focusMode).toBe("column");
+    expect(JSON.parse(localStorage.getItem(focusKey("deck-1"))!).focusMode).toBe("column");
 
     focus.focusMode = "command";
     focus.persistCurrent();
-    expect(JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!).focusMode).toBe("column");
+    expect(JSON.parse(localStorage.getItem(focusKey("deck-1"))!).focusMode).toBe("column");
   });
 
   it("clampToLoadedDeck restores card mode when the focused column has cards", async () => {
@@ -111,7 +78,7 @@ describe("FocusManager persistence", () => {
     ]);
 
     localStorage.setItem(
-      "jot-deck:focus:deck-1",
+      focusKey("deck-1"),
       JSON.stringify({
         focusedColumnIndex: 0,
         lastFocusedCardByColumn: { "col-x": 1 },
@@ -137,7 +104,7 @@ describe("FocusManager persistence", () => {
     state.cardsByColumn = new Map([["col-empty", []]]);
 
     localStorage.setItem(
-      "jot-deck:focus:deck-1",
+      focusKey("deck-1"),
       JSON.stringify({
         focusedColumnIndex: 0,
         lastFocusedCardByColumn: {},
@@ -156,7 +123,7 @@ describe("FocusManager persistence", () => {
 
   it("includes the current focused card index for the focused column when persisting", async () => {
     state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-x", "deck-1", 0), makeColumn("col-y", "deck-1", 1)];
+    state.columns = [makeColumn("col-x", "deck-1", { position: 0 }), makeColumn("col-y", "deck-1", { position: 1 })];
     state.cardsByColumn = new Map([
       ["col-x", [makeCard("c1", "col-x"), makeCard("c2", "col-x")]],
       ["col-y", [makeCard("c3", "col-y"), makeCard("c4", "col-y"), makeCard("c5", "col-y")]],
@@ -171,7 +138,7 @@ describe("FocusManager persistence", () => {
     focus.focusedCardIndex = 2; // c5
     focus.persistCurrent();
 
-    const parsed = JSON.parse(localStorage.getItem("jot-deck:focus:deck-1")!);
+    const parsed = JSON.parse(localStorage.getItem(focusKey("deck-1"))!);
     expect(parsed.focusedColumnIndex).toBe(1);
     expect(parsed.lastFocusedCardByColumn["col-y"]).toBe(2);
   });
@@ -187,7 +154,7 @@ describe("FocusManager persistence", () => {
 
     // Pre-seed state for deck-B.
     localStorage.setItem(
-      "jot-deck:focus:deck-B",
+      focusKey("deck-B"),
       JSON.stringify({
         focusedColumnIndex: 1,
         lastFocusedCardByColumn: { "col-2": 4 },
@@ -220,14 +187,14 @@ describe("FocusManager persistence", () => {
 
   it("clampToLoadedDeck applies saved card index for the restored column", async () => {
     state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-x", "deck-1", 0), makeColumn("col-y", "deck-1", 1)];
+    state.columns = [makeColumn("col-x", "deck-1", { position: 0 }), makeColumn("col-y", "deck-1", { position: 1 })];
     state.cardsByColumn = new Map([
       ["col-x", [makeCard("c1", "col-x")]],
       ["col-y", [makeCard("c2", "col-y"), makeCard("c3", "col-y"), makeCard("c4", "col-y")]],
     ]);
 
     localStorage.setItem(
-      "jot-deck:focus:deck-1",
+      focusKey("deck-1"),
       JSON.stringify({
         focusedColumnIndex: 1,
         lastFocusedCardByColumn: { "col-y": 2 },
@@ -246,11 +213,11 @@ describe("FocusManager persistence", () => {
 
   it("clampToLoadedDeck clamps focusedColumnIndex to available columns", async () => {
     state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-only", "deck-1", 0)];
+    state.columns = [makeColumn("col-only", "deck-1", { position: 0 })];
     state.cardsByColumn = new Map([["col-only", [makeCard("c1", "col-only")]]]);
 
     localStorage.setItem(
-      "jot-deck:focus:deck-1",
+      focusKey("deck-1"),
       JSON.stringify({
         focusedColumnIndex: 9, // out of range
         lastFocusedCardByColumn: {},
@@ -274,7 +241,7 @@ describe("FocusManager persistence", () => {
     ]);
 
     localStorage.setItem(
-      "jot-deck:focus:deck-1",
+      focusKey("deck-1"),
       JSON.stringify({
         focusedColumnIndex: 0,
         lastFocusedCardByColumn: { "col-x": 99 },
@@ -293,18 +260,18 @@ describe("FocusManager persistence", () => {
 
   it("clearStateFor removes persisted focus state for a deck", () => {
     localStorage.setItem(
-      "jot-deck:focus:doomed",
+      focusKey("doomed"),
       JSON.stringify({ focusedColumnIndex: 4, lastFocusedCardByColumn: {} }),
     );
-    expect(localStorage.getItem("jot-deck:focus:doomed")).not.toBeNull();
+    expect(localStorage.getItem(focusKey("doomed"))).not.toBeNull();
 
     FocusManager.clearStateFor("doomed");
 
-    expect(localStorage.getItem("jot-deck:focus:doomed")).toBeNull();
+    expect(localStorage.getItem(focusKey("doomed"))).toBeNull();
   });
 
   it("ignores corrupted saved state", () => {
-    localStorage.setItem("jot-deck:focus:bad", "{ not json");
+    localStorage.setItem(focusKey("bad"), "{ not json");
     const data = new DeckData();
     const focus = new FocusManager(data);
 
@@ -359,7 +326,7 @@ describe("FocusManager rapid deck switch race condition", () => {
   it("preserves restored focus when stale loadedDeckId would have clamped against wrong columns", () => {
     // Saved state: deck-C had focus on column index 4.
     localStorage.setItem(
-      "jot-deck:focus:deck-C",
+      focusKey("deck-C"),
       JSON.stringify({
         focusedColumnIndex: 4,
         lastFocusedCardByColumn: {},
@@ -426,7 +393,7 @@ describe("FocusManager rapid deck switch race condition", () => {
     // (only 2 entries). Without the page-level guard, clampToLoadedDeck
     // collapses focusedColumnIndex to 1 — losing the saved value.
     localStorage.setItem(
-      "jot-deck:focus:deck-C",
+      focusKey("deck-C"),
       JSON.stringify({
         focusedColumnIndex: 4,
         lastFocusedCardByColumn: {},
@@ -444,5 +411,344 @@ describe("FocusManager rapid deck switch race condition", () => {
     focus.clampToLoadedDeck();
 
     expect(focus.focusedColumnIndex).toBe(1);
+  });
+
+  it("shouldClampForLoadedDeck returns false when no deck has loaded yet", () => {
+    expect(
+      FocusManager.shouldClampForLoadedDeck({
+        loaded: null,
+        restoredForDeckId: null,
+        currentDeckId: "deck-A",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("FocusManager focus helpers", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    state.decks = [];
+    state.columns = [];
+    state.cardsByColumn = new Map();
+    state.tagsByDeck = [];
+  });
+
+  it("saveCurrentCardIndex stores focusedCardIndex under the focused column", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1"), makeColumn("col-y", "deck-1")];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 1;
+    focus.focusedCardIndex = 4;
+    focus.saveCurrentCardIndex();
+
+    expect(focus.lastFocusedCardByColumn["col-y"]).toBe(4);
+    expect(focus.lastFocusedCardByColumn["col-x"]).toBeUndefined();
+  });
+
+  it("saveCurrentCardIndex is a no-op when focusedColumnIndex is out of range", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1")];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 5;
+    focus.focusedCardIndex = 2;
+    focus.saveCurrentCardIndex();
+
+    expect(focus.lastFocusedCardByColumn).toEqual({});
+  });
+
+  it("restoreCardIndex applies a saved index when it fits the card list", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1")];
+    data.cardsByColumn = {
+      "col-x": [makeCard("c1", "col-x"), makeCard("c2", "col-x"), makeCard("c3", "col-x")],
+    };
+    const focus = new FocusManager(data);
+
+    focus.lastFocusedCardByColumn["col-x"] = 2;
+    focus.focusedColumnIndex = 0;
+    focus.restoreCardIndex();
+
+    expect(focus.focusedCardIndex).toBe(2);
+  });
+
+  it("restoreCardIndex falls back to the last card when no saved index exists", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1")];
+    data.cardsByColumn = {
+      "col-x": [makeCard("c1", "col-x"), makeCard("c2", "col-x")],
+    };
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.restoreCardIndex();
+
+    expect(focus.focusedCardIndex).toBe(1);
+  });
+
+  it("restoreCardIndex falls back to 0 when the column has no cards", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1")];
+    data.cardsByColumn = { "col-x": [] };
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 7;
+    focus.restoreCardIndex();
+
+    expect(focus.focusedCardIndex).toBe(0);
+  });
+
+  it("restoreCardIndex is a no-op when focusedColumnIndex is out of range", () => {
+    const data = new DeckData();
+    data.columns = [];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 3;
+    focus.restoreCardIndex();
+
+    expect(focus.focusedCardIndex).toBe(3);
+  });
+
+  it("startEdit sets the editing card id and switches to edit mode", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+
+    focus.startEdit("card-7");
+
+    expect(focus.editingCardId).toBe("card-7");
+    expect(focus.focusMode).toBe("edit");
+  });
+
+  it("exitEdit clears editing id and returns to card mode", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.startEdit("card-7");
+
+    focus.exitEdit();
+
+    expect(focus.editingCardId).toBeNull();
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("cancelEdit clears editingCardId without changing focus mode", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.startEdit("card-7");
+    expect(focus.focusMode).toBe("edit");
+
+    focus.cancelEdit();
+
+    expect(focus.editingCardId).toBeNull();
+    expect(focus.focusMode).toBe("edit");
+  });
+
+  it("openPalette captures previousFocusMode and switches to command mode", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.focusMode = "card";
+
+    focus.openPalette("deck");
+
+    expect(focus.activePalette).toBe("deck");
+    expect(focus.focusMode).toBe("command");
+    expect(focus.previousFocusMode).toBe("card");
+  });
+
+  it("openPalette is a no-op when already in command mode", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.focusMode = "card";
+    focus.openPalette("deck");
+    expect(focus.activePalette).toBe("deck");
+
+    // Second call from within command mode should not overwrite the palette.
+    focus.openPalette("trash");
+
+    expect(focus.activePalette).toBe("deck");
+  });
+
+  it("openPalette closes the cheatsheet when opening a palette", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.showCheatsheet = true;
+    focus.focusMode = "column";
+
+    focus.openPalette("command");
+
+    expect(focus.showCheatsheet).toBe(false);
+  });
+
+  it("closePalette restores previousFocusMode and clears the palette", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.focusMode = "card";
+    focus.openPalette("command");
+
+    focus.closePalette();
+
+    expect(focus.activePalette).toBeNull();
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("handleFocusColumn saves the current card index when switching columns", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1"), makeColumn("col-y", "deck-1")];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 3;
+    focus.handleFocusColumn(1);
+
+    expect(focus.lastFocusedCardByColumn["col-x"]).toBe(3);
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(focus.focusMode).toBe("column");
+  });
+
+  it("handleFocusColumn does not save when the column is unchanged", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1")];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 5;
+    focus.handleFocusColumn(0);
+
+    expect(focus.lastFocusedCardByColumn["col-x"]).toBeUndefined();
+    expect(focus.focusMode).toBe("column");
+  });
+
+  it("handleFocusCard updates indices and saves when crossing columns", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1"), makeColumn("col-y", "deck-1")];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 2;
+    focus.handleFocusCard(1, 4);
+
+    expect(focus.lastFocusedCardByColumn["col-x"]).toBe(2);
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(focus.focusedCardIndex).toBe(4);
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("handleFocusCard does not save when staying in the same column", () => {
+    const data = new DeckData();
+    data.columns = [makeColumn("col-x", "deck-1")];
+    const focus = new FocusManager(data);
+
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 0;
+    focus.handleFocusCard(0, 3);
+
+    expect(focus.lastFocusedCardByColumn["col-x"]).toBeUndefined();
+    expect(focus.focusedCardIndex).toBe(3);
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("scrollToFocusedColumn invokes the registered callback with focusedColumnIndex", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    const calls: number[] = [];
+    focus.onScrollToColumn = (i) => calls.push(i);
+
+    focus.focusedColumnIndex = 3;
+    focus.scrollToFocusedColumn();
+
+    expect(calls).toEqual([3]);
+  });
+
+  it("scrollToFocusedColumn is a no-op when no callback is registered", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+
+    expect(() => focus.scrollToFocusedColumn()).not.toThrow();
+  });
+
+  it("setCurrentDeck is a no-op when called with the already-active deck", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("deck-1");
+    focus.focusedColumnIndex = 4;
+
+    focus.setCurrentDeck("deck-1");
+
+    // No reset to defaults — state is preserved.
+    expect(focus.focusedColumnIndex).toBe(4);
+  });
+
+  it("setCurrentDeck(null) clears state and skips persistence loading", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("deck-1");
+    focus.focusedColumnIndex = 5;
+    focus.lastFocusedCardByColumn["col"] = 9;
+
+    focus.setCurrentDeck(null);
+
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(0);
+    expect(focus.lastFocusedCardByColumn).toEqual({});
+  });
+
+  it("persistCurrent does nothing when no current deck is set", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.focusedColumnIndex = 2;
+
+    focus.persistCurrent();
+
+    expect(localStorage.length).toBe(0);
+  });
+
+  it("clampToLoadedDeck resets focus when the deck has no columns", () => {
+    const data = new DeckData();
+    data.columns = [];
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("deck-1");
+    focus.focusedColumnIndex = 5;
+    focus.focusedCardIndex = 7;
+
+    focus.clampToLoadedDeck();
+
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(0);
+    expect(focus.focusMode).toBe("column");
+  });
+
+  it("loadState ignores entries with negative focusedColumnIndex and non-object cards", () => {
+    localStorage.setItem(
+      focusKey("bad-shape"),
+      JSON.stringify({
+        focusedColumnIndex: -3,
+        lastFocusedCardByColumn: "not-an-object",
+        focusMode: "card",
+      }),
+    );
+
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    focus.setCurrentDeck("bad-shape");
+
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.lastFocusedCardByColumn).toEqual({});
+  });
+
+  it("setCurrentDeck persists previous deck state on switch", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+
+    focus.setCurrentDeck("first");
+    focus.focusedColumnIndex = 3;
+    focus.lastFocusedCardByColumn["col"] = 8;
+
+    focus.setCurrentDeck("second");
+
+    const persisted = JSON.parse(localStorage.getItem(focusKey("first"))!);
+    expect(persisted.focusedColumnIndex).toBe(3);
+    expect(persisted.lastFocusedCardByColumn["col"]).toBe(8);
   });
 });

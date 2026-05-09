@@ -4,7 +4,7 @@ import type { DeckData } from "./deckData.svelte";
 
 export type PaletteType = "column" | "deck" | "tag" | "trash" | "command" | null;
 
-const FOCUS_STATE_PREFIX = "jot-deck:focus:";
+export const FOCUS_STATE_PREFIX = "jot-deck:focus:";
 
 type PersistedFocusMode = "column" | "card";
 
