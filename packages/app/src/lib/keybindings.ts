@@ -106,6 +106,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   // Common - Undo
   { sequence: "u", action: "undo", modes: ["column", "card"], description: "Undo" },
 
+  // Common - Trash
+  { sequence: "gt", action: "showTrashPalette", modes: ["column", "card"], description: "Open trash" },
+
   // Common - Palettes
   { sequence: "Ctrl+p", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
   { sequence: "Ctrl+Shift+P", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },

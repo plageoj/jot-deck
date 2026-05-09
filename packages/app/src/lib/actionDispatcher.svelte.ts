@@ -127,6 +127,11 @@ export class ActionDispatcher {
       return;
     }
 
+    if (action === "showTrashPalette") {
+      this.focus.openPalette("trash");
+      return;
+    }
+
     if (action === "clearTagFilter") {
       this.data.clearTagFilter();
       return;

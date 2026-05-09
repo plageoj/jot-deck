@@ -111,15 +111,21 @@
             class:selected={index === selectedIndex}
             role="option"
             aria-selected={index === selectedIndex}
-            onclick={() => onSelect(item)}
-            onmouseenter={() => (selectedIndex = index)}
           >
-            <span class="palette-label" class:current={item.current}
-              >{item.label}</span
+            <button
+              type="button"
+              class="palette-item-button"
+              tabindex="-1"
+              onclick={() => onSelect(item)}
+              onmouseenter={() => (selectedIndex = index)}
             >
-            {#if item.shortcut}
-              <kbd class="palette-shortcut">{item.shortcut}</kbd>
-            {/if}
+              <span class="palette-label" class:current={item.current}
+                >{item.label}</span
+              >
+              {#if item.shortcut}
+                <kbd class="palette-shortcut">{item.shortcut}</kbd>
+              {/if}
+            </button>
           </li>
         {/each}
       </ul>
@@ -185,16 +191,30 @@
   }
 
   .palette-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    transition: background-color 0.1s ease;
+    padding: 0;
   }
 
   .palette-item.selected {
     background-color: var(--bg-tertiary);
+  }
+
+  .palette-item-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+  }
+
+  .palette-item-button:focus {
+    outline: none;
   }
 
   .palette-label {

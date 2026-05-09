@@ -184,10 +184,16 @@
               class:selected={index === selectedIndex}
               role="option"
               aria-selected={index === selectedIndex}
-              onclick={() => onSelect(deck)}
-              onmouseenter={() => (selectedIndex = index)}
             >
-              <span class="deck-item-name">{deck.name}</span>
+              <button
+                type="button"
+                class="deck-item-button"
+                tabindex="-1"
+                onclick={() => onSelect(deck)}
+                onmouseenter={() => (selectedIndex = index)}
+              >
+                <span class="deck-item-name">{deck.name}</span>
+              </button>
             </li>
           {/each}
         </ul>
@@ -340,15 +346,29 @@
   }
 
   .deck-item {
-    display: flex;
-    align-items: center;
-    padding: 0.5rem 1rem;
-    cursor: pointer;
-    transition: background-color 0.1s ease;
+    padding: 0;
   }
 
   .deck-item.selected {
     background-color: var(--bg-tertiary);
+  }
+
+  .deck-item-button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 0.5rem 1rem;
+    border: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s ease;
+  }
+
+  .deck-item-button:focus {
+    outline: none;
   }
 
   .deck-item-name {

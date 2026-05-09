@@ -10,11 +10,12 @@
     RenameDialog,
     TagFilterBar,
     TagPalette,
+    TrashPalette,
   } from "$lib/components";
   import { DeckData } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
   import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
-  import type { Column, Deck } from "$lib/types";
+  import type { Column, Deck, TrashItem } from "$lib/types";
   import "$lib/styles/theme.css";
 
   const data = new DeckData();
@@ -65,6 +66,17 @@
   let deletingDeck = $state<Deck | null>(null);
   let renamingColumn = $state<Column | null>(null);
   let deletingColumn = $state<Column | null>(null);
+  let trashItems = $state<TrashItem[]>([]);
+
+  $effect(() => {
+    if (focus.activePalette === "trash") {
+      data.getTrashItems().then((items) => {
+        trashItems = items;
+      });
+    } else {
+      trashItems = [];
+    }
+  });
 
   function handleRenameDeck(deck: Deck) {
     renamingDeck = deck;
@@ -164,6 +176,15 @@
     onSelect={(tagName) => {
       focus.closePalette();
       data.filterByTag(tagName);
+    }}
+    onClose={() => focus.closePalette()}
+  />
+{:else if focus.activePalette === "trash"}
+  <TrashPalette
+    items={trashItems}
+    onRestore={async (item) => {
+      focus.closePalette();
+      await data.restoreTrashItem(item);
     }}
     onClose={() => focus.closePalette()}
   />

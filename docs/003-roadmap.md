@@ -107,21 +107,19 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * `localStorage` による最後に開いた Deck の記憶・自動復元
 * 初回起動時のオンボーディング Deck（「Getting Started」: Welcome / Navigation / Tips カラム付き）
 
-### 3.7 削除スタック（ゴミ箱）UI
+### 3.7 削除スタック（ゴミ箱）UI ✅
 
 #### 成果物
-* 削除操作の永続化（SQLite に削除スタックとして保存）
+* 削除操作の永続化（`deleted_at` から SQLite で導出されるためアプリ再起動後も保持）
 * `u` で直近の削除から順に復元
 * `g t` で削除スタック一覧表示、任意の項目を選択して復元
 
 #### 実装済み
-* インメモリ削除スタック（`deleteStack.ts`）
-* `u` キーによる直近削除の復元
 * DB 層の `restoreCard()` / `restoreColumn()` / `getDeletedCards()` / `getDeletedColumns()`
-
-#### 未実装
-* `g t` キーバインドと削除スタック一覧 UI
-* 削除スタックの SQLite 永続化（現在はインメモリのみ）
+* `deleted_at` から導出する Deck 単位の削除スタック（`DeckData.getTrashItems()`）— アプリ再起動後も保持
+* `u` キーによる直近削除の復元（DB ベース）
+* `g t` キーバインドで `TrashPalette` を表示（`PaletteDialog` ベースのモーダル UI）
+* コマンドパレットに「Trash」追加
 
 ### 3.8 セッション状態の永続化
 
@@ -230,7 +228,7 @@ Automerge + PartyKit でリアルタイム同期。
 |:---|:---|:---|
 | **データ層完成** | Phase 1 | 完了 |
 | **Tauri 統合** | Phase 2 | 完了 |
-| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.6 完了） |
+| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.7 完了） |
 | **AI 機能付き** | Phase 4 | 未着手 |
 | **MVP リリース** | Phase 5 | 未着手 |
 | **同期機能リリース** | Phase 6 | 未着手 |
