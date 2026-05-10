@@ -184,6 +184,14 @@ describe("ActionDispatcher with no columns loaded", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it("opens settings via Ctrl+, even when no columns exist", () => {
+    const event = makeKeyEvent({ key: ",", ctrl: true });
+    dispatcher.handleKeydown(event);
+
+    expect(focus.showSettings).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("opens the command palette via Ctrl+Shift+P when no columns exist", () => {
     const event = makeKeyEvent({ key: "P", ctrl: true, shift: true });
     dispatcher.handleKeydown(event);
@@ -356,6 +364,33 @@ describe("ActionDispatcher.executeAction palette routing", () => {
   it("routes showTrashPalette to focus.openPalette('trash')", async () => {
     await dispatcher.executeAction("showTrashPalette");
     expect(focus.activePalette).toBe("trash");
+  });
+
+  it("routes showSettings to focus.showSettings = true (no palette)", async () => {
+    await dispatcher.executeAction("showSettings");
+    expect(focus.showSettings).toBe(true);
+    expect(focus.activePalette).toBeNull();
+    expect(focus.focusMode).not.toBe("command");
+  });
+
+  it("Ctrl+, in card mode opens settings via the global keydown handler", () => {
+    focus.focusMode = "card";
+    const event = makeKeyEvent({ key: ",", ctrl: true });
+    dispatcher.handleKeydown(event);
+
+    expect(focus.showSettings).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("handleKeydown is a no-op while the settings dialog is open", () => {
+    focus.showSettings = true;
+    // Even a normally-bound key should not fire while settings owns input.
+    const event = makeKeyEvent({ key: "c" });
+    dispatcher.handleKeydown(event);
+
+    expect(state.createColumnCalls).toEqual([]);
+    expect(focus.activePalette).toBeNull();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("clearTagFilter clears the active filter on data", async () => {

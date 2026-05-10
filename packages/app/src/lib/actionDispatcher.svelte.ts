@@ -100,6 +100,7 @@ export class ActionDispatcher {
       if (
         action === "showDeckPalette" ||
         action === "showCommandPalette" ||
+        action === "showSettings" ||
         action === "undo"
       ) {
         event.preventDefault();

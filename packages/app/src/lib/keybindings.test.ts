@@ -47,6 +47,11 @@ describe("findAction", () => {
     expect(findAction("gt", "card")).toBe("showTrashPalette");
   });
 
+  it("should find settings action in both modes via Ctrl+,", () => {
+    expect(findAction("Ctrl+,", "column")).toBe("showSettings");
+    expect(findAction("Ctrl+,", "card")).toBe("showSettings");
+  });
+
   it("should return null for unknown sequences", () => {
     expect(findAction("x", "column")).toBeNull();
     expect(findAction("xyz", "card")).toBeNull();

@@ -593,6 +593,19 @@ describe("FocusManager focus helpers", () => {
     expect(focus.focusMode).toBe("card");
   });
 
+  it("showSettings defaults to false and is independent from showCheatsheet", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+
+    expect(focus.showSettings).toBe(false);
+
+    focus.showSettings = true;
+    expect(focus.showSettings).toBe(true);
+    // Toggling settings shouldn't reach into other overlay state.
+    expect(focus.showCheatsheet).toBe(false);
+    expect(focus.activePalette).toBeNull();
+  });
+
   it("handleFocusColumn saves the current card index when switching columns", () => {
     const data = new DeckData();
     data.columns = [makeColumn("col-x", "deck-1"), makeColumn("col-y", "deck-1")];
