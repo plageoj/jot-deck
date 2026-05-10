@@ -82,6 +82,11 @@
     background-color: var(--tag-bg-hover, rgba(108, 180, 238, 0.25));
   }
 
+  .tag:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
   .tag-active {
     color: var(--tag-active-color, #fff);
     background-color: var(--tag-active-bg, rgba(108, 180, 238, 0.4));

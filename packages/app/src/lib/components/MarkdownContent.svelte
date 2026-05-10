@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { parseInlineMarkdown } from "$lib/markdown";
+  import { parseInlineMarkdown, type MarkdownSegment } from "$lib/markdown";
 
   interface Props {
     content: string;
@@ -21,25 +21,31 @@
   }
 </script>
 
-{#each segments as segment, i (i)}
-  {#if segment.kind === "text"}{segment.text}{:else if segment.kind === "bold"}<strong
-      >{segment.text}</strong
-    >{:else if segment.kind === "italic"}<em>{segment.text}</em
-    >{:else if segment.kind === "code"}<code>{segment.text}</code
-    >{:else if segment.kind === "link"}<a
-      class="md-link"
-      href={segment.href}
-      target="_blank"
-      rel="noopener noreferrer"
-      onclick={handleLinkClick}>{segment.text}</a
-    >{:else if segment.kind === "tag"}<button
-      type="button"
-      class="tag"
-      class:tag-active={activeTag === segment.tagName}
-      onclick={(e) => handleTagClick(e, segment.tagName)}
-      >{segment.text}</button
-    >{/if}
-{/each}
+{#snippet renderSegments(segs: MarkdownSegment[])}
+  {#each segs as segment, i (i)}
+    {#if segment.kind === "text"}{segment.text}{:else if segment.kind === "bold"}<strong
+        >{@render renderSegments(segment.children)}</strong
+      >{:else if segment.kind === "italic"}<em
+        >{@render renderSegments(segment.children)}</em
+      >{:else if segment.kind === "code"}<code>{segment.text}</code
+      >{:else if segment.kind === "link"}<a
+        class="md-link"
+        href={segment.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onclick={handleLinkClick}
+        >{@render renderSegments(segment.children)}</a
+      >{:else if segment.kind === "tag"}<button
+        type="button"
+        class="tag"
+        class:tag-active={activeTag === segment.tagName}
+        onclick={(e) => handleTagClick(e, segment.tagName)}
+        >{segment.text}</button
+      >{/if}
+  {/each}
+{/snippet}
+
+{@render renderSegments(segments)}
 
 <style>
   .tag {
@@ -56,6 +62,11 @@
 
   .tag:hover {
     background-color: var(--tag-bg-hover, rgba(108, 180, 238, 0.25));
+  }
+
+  .tag:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
 
   .tag-active {

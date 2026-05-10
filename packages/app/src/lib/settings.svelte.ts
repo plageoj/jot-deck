@@ -125,7 +125,13 @@ export class SettingsStore {
   persist(): Promise<void> {
     const snapshot = JSON.stringify(this.state);
     this.writeChain = this.writeChain
-      .catch(() => {})
+      .catch((err) => {
+        // Surface the previous failure so it isn't lost when chained writes
+        // recover. We don't rethrow because subsequent writes should still
+        // attempt persistence — a transient DB hiccup shouldn't permanently
+        // disable saves for the rest of the session.
+        console.warn("[settings] persistence failed:", err);
+      })
       .then(async () => {
         const backend = await this.getBackend();
         await backend.setSettings(SETTINGS_DB_KEY, snapshot);

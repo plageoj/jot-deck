@@ -41,15 +41,62 @@
     onUpdate("theme", value);
   }
 
-  let presetFamily = $derived(
-    FONT_FAMILY_PRESETS.find((p) => p.value === settings.fontFamily)?.value ??
-      "custom",
+  const CUSTOM_FONT_OPTION = "__custom__";
+
+  let savedFontIsCustom = $derived(
+    !FONT_FAMILY_PRESETS.some((p) => p.value === settings.fontFamily),
   );
+
+  // User-toggled custom mode. Independent of `savedFontIsCustom` so the
+  // dropdown can switch into custom mode (and reveal the text input)
+  // before any value has been saved. Seeded from the persisted state on
+  // mount and re-synced if the persisted value becomes custom.
+  let customMode = $state(false);
+
+  $effect(() => {
+    if (savedFontIsCustom) customMode = true;
+  });
+
+  let selectedFontOption = $derived(
+    customMode ? CUSTOM_FONT_OPTION : settings.fontFamily,
+  );
+
+  // Mirror of the current font-family in custom mode. Decoupled from
+  // settings.fontFamily so the user can type a partial value without it
+  // being applied keystroke by keystroke.
+  let customFontDraft = $state("");
+
+  $effect(() => {
+    if (savedFontIsCustom) customFontDraft = settings.fontFamily;
+  });
 
   function selectFontFamily(event: Event) {
     const value = (event.target as HTMLSelectElement).value;
-    if (value === "custom") return;
+    if (value === CUSTOM_FONT_OPTION) {
+      // Switch to custom: seed the input with the current value so the
+      // user can edit. Don't change the applied font yet — that happens
+      // on Enter / blur once the user finishes typing.
+      customMode = true;
+      if (!customFontDraft) customFontDraft = settings.fontFamily;
+      return;
+    }
+    customMode = false;
     onUpdate("fontFamily", value);
+  }
+
+  function applyCustomFont() {
+    const trimmed = customFontDraft.trim();
+    if (!trimmed) return;
+    if (trimmed === settings.fontFamily) return;
+    onUpdate("fontFamily", trimmed);
+  }
+
+  function handleCustomFontKeydown(event: KeyboardEvent) {
+    event.stopPropagation();
+    if (event.key === "Enter") {
+      event.preventDefault();
+      applyCustomFont();
+    }
   }
 </script>
 
@@ -103,16 +150,34 @@
           <select
             id="settings-font-family"
             class="select"
-            value={presetFamily}
+            value={selectedFontOption}
             onchange={selectFontFamily}
           >
             {#each FONT_FAMILY_PRESETS as preset (preset.value)}
               <option value={preset.value}>{preset.label}</option>
             {/each}
-            {#if presetFamily === "custom"}
-              <option value="custom">Custom</option>
-            {/if}
+            <option value={CUSTOM_FONT_OPTION}>Custom…</option>
           </select>
+          {#if customMode}
+            <input
+              type="text"
+              class="text-input"
+              spellcheck="false"
+              autocomplete="off"
+              placeholder='e.g. "JetBrains Mono", monospace'
+              bind:value={customFontDraft}
+              onblur={applyCustomFont}
+              onkeydown={handleCustomFontKeydown}
+            />
+            <span class="hint"
+              >CSS font-family value. Press Enter or click outside to apply.
+              The font must be installed locally or loaded via @import.</span
+            >
+          {/if}
+          <span class="hint"
+            >Applies to deck content (columns &amp; cards). Header, palettes,
+            and dialogs keep the system font.</span
+          >
         </div>
 
         <div class="row">
@@ -205,7 +270,11 @@
       <button type="button" class="btn btn-ghost" onclick={onReset}>
         Reset to defaults
       </button>
-      <span class="hint">Defaults: {DEFAULT_SETTINGS.fontSize}px / line-height {DEFAULT_SETTINGS.lineHeight}</span>
+      <span class="hint"
+        >Defaults: <span class="value">{DEFAULT_SETTINGS.fontSize}px</span> /
+        line-height
+        <span class="value">{DEFAULT_SETTINGS.lineHeight}</span></span
+      >
     </footer>
   </div>
 </dialog>
@@ -384,6 +453,21 @@
   }
 
   .select:focus {
+    outline: none;
+    border-color: var(--input-border-focus);
+  }
+
+  .text-input {
+    padding: 0.375rem 0.5rem;
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    background-color: var(--input-bg);
+    color: var(--text);
+    font-size: 0.8125rem;
+    font-family: inherit;
+  }
+
+  .text-input:focus {
     outline: none;
     border-color: var(--input-border-focus);
   }
