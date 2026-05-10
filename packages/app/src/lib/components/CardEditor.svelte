@@ -13,6 +13,7 @@
     type CompletionResult,
   } from "@codemirror/autocomplete";
   import { TAG_PATTERN } from "$lib/types";
+  import { settingsStore } from "$lib/settings.svelte";
 
   interface Props {
     content: string;
@@ -65,22 +66,26 @@
   }
 
   onMount(() => {
-    // Define custom Ex commands for Vim
-    Vim.defineEx("w", "w", () => {
-      save();
-    });
-    Vim.defineEx("wq", "wq", () => {
-      save();
-      cancel();
-    });
-    Vim.defineEx("q", "q", () => {
-      // Discard changes and exit (don't save)
-      cancel();
-    });
-    Vim.defineEx("q!", "q!", () => {
-      // Force quit (same as :q since we don't auto-save)
-      cancel();
-    });
+    const vimEnabled = settingsStore.state.vimEnabled;
+
+    if (vimEnabled) {
+      // Define custom Ex commands for Vim
+      Vim.defineEx("w", "w", () => {
+        save();
+      });
+      Vim.defineEx("wq", "wq", () => {
+        save();
+        cancel();
+      });
+      Vim.defineEx("q", "q", () => {
+        // Discard changes and exit (don't save)
+        cancel();
+      });
+      Vim.defineEx("q!", "q!", () => {
+        // Force quit (same as :q since we don't auto-save)
+        cancel();
+      });
+    }
 
     const customKeymap = keymap.of([
       {
@@ -91,6 +96,20 @@
           return true;
         },
       },
+      // Without Vim, give users a non-mode keymap to leave the editor.
+      // Escape discards the in-progress edit (matches `:q` semantics);
+      // Ctrl-Enter above is the explicit save path.
+      ...(vimEnabled
+        ? []
+        : [
+            {
+              key: "Escape",
+              run: () => {
+                cancel();
+                return true;
+              },
+            },
+          ]),
     ]);
 
     const completionKeymap = keymap.of([
@@ -187,7 +206,7 @@
     const state = EditorState.create({
       doc: content,
       extensions: [
-        vim(),
+        ...(vimEnabled ? [vim()] : []),
         customKeymap,
         completionKeymap,
         history(),

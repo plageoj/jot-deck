@@ -40,6 +40,9 @@ importers:
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
+      marked:
+        specifier: ^18.0.3
+        version: 18.0.3
       sql.js:
         specifier: ^1.14.1
         version: 1.14.1
@@ -1662,6 +1665,11 @@ packages:
 
   markdown-table@3.0.4:
     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
+
+  marked@18.0.3:
+    resolution: {integrity: sha512-7VT90JOkDeaRWpfjOReRGPEKn0ecdARBkDGL+tT1wZY0efPPqkUxLUSmzy/C7TIylQYJC9STISEsCHrqb/7VIA==}
+    engines: {node: '>= 20'}
+    hasBin: true
 
   mdast-util-definitions@6.0.0:
     resolution: {integrity: sha512-scTllyX6pnYNZH/AIp/0ePz6s4cZtARxImwoPJ7kS42n+MnVsI4XbnG6d4ibehRIldYMWM2LD7ImQblVhUejVQ==}
@@ -3902,6 +3910,8 @@ snapshots:
       semver: 7.8.0
 
   markdown-table@3.0.4: {}
+
+  marked@18.0.3: {}
 
   mdast-util-definitions@6.0.0:
     dependencies:

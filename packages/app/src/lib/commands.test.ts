@@ -49,6 +49,14 @@ describe("filterCommands", () => {
     expect(trash?.shortcut).toBe("g t");
   });
 
+  it("should include Settings command bound to showSettings with Ctrl+, shortcut", () => {
+    const settings = COMMANDS.find((c) => c.id === "settings");
+    expect(settings).toBeDefined();
+    expect(settings?.label).toBe("Settings");
+    expect(settings?.action).toBe("showSettings");
+    expect(settings?.shortcut).toBe("Ctrl+,");
+  });
+
   it("should return empty array for no matches", () => {
     expect(filterCommands("zzzzz")).toEqual([]);
   });

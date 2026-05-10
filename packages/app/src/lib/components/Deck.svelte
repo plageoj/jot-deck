@@ -87,6 +87,20 @@
     overflow-y: hidden;
     scroll-behavior: smooth;
     scroll-snap-type: x proximity;
+    /* Apply the user's content font here so columns/cards/CodeMirror
+     * inherit it while header, palettes, and dialogs keep the system
+     * font. CodeMirror is configured with fontFamily: "inherit". */
+    font-family: var(
+      --app-font-family,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      Roboto,
+      Oxygen,
+      Ubuntu,
+      Cantarell,
+      sans-serif
+    );
   }
 
   .column-wrapper {

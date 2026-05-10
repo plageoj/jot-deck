@@ -1,5 +1,6 @@
-:root {
-  /* Base colors */
+/* ----- Dark theme (default) ----- */
+:root,
+:root[data-theme="dark"] {
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
   --bg-tertiary: #0f3460;
@@ -8,12 +9,12 @@
   --accent: #e94560;
   --accent-hover: #ff6b6b;
 
-  /* Component-specific */
   --header-bg: var(--bg-secondary);
   --header-border: var(--bg-tertiary);
 
   --column-bg: var(--bg-secondary);
   --column-header-bg: var(--bg-tertiary);
+  --column-header-bg-focus: #1a4a7a;
   --column-border-focus: var(--accent);
 
   --card-bg: var(--bg-primary);
@@ -31,16 +32,32 @@
   --input-border-focus: var(--accent);
 }
 
-/* Light mode support (for future) */
+/* ----- Light theme ----- */
+:root[data-theme="light"] {
+  --bg-primary: #f5f5f5;
+  --bg-secondary: #e8e8e8;
+  --bg-tertiary: #d0d0d0;
+  --text: #222;
+  --text-muted: #666;
+  --accent: #e94560;
+  --accent-hover: #ff6b6b;
+
+  --column-header-bg-focus: #d8c0c4;
+  --card-focus-ring: rgba(233, 69, 96, 0.2);
+}
+
+/* ----- Auto: follow OS preference ----- */
 @media (prefers-color-scheme: light) {
-  :root.auto-theme {
+  :root[data-theme="auto"] {
     --bg-primary: #f5f5f5;
     --bg-secondary: #e8e8e8;
     --bg-tertiary: #d0d0d0;
     --text: #222;
     --text-muted: #666;
     --accent: #e94560;
+    --accent-hover: #ff6b6b;
 
+    --column-header-bg-focus: #d8c0c4;
     --card-focus-ring: rgba(233, 69, 96, 0.2);
   }
 }
@@ -57,12 +74,24 @@ body {
   overflow: hidden;
 }
 
-body {
+/* Font size + line height live on <html> so 1rem == the user's chosen
+ * font-size and `rem`-sized components (cards, headers, palettes) scale
+ * together as a readability/accessibility preference.
+ *
+ * The font *family* is intentionally NOT applied here — chrome (header,
+ * palettes, dialogs) keeps a clean system font regardless of what the
+ * user picks for note content. The picked family is applied to the deck
+ * container instead (see Deck.svelte). */
+html {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, sans-serif;
+  font-size: var(--app-font-size, 14px);
+  line-height: var(--app-line-height, 1.5);
+}
+
+body {
   background-color: var(--bg-primary);
   color: var(--text);
-  line-height: 1.5;
 }
 
 /* Global scrollbar styling */

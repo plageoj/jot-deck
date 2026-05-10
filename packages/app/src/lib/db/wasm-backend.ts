@@ -113,6 +113,14 @@ export class WasmBackend implements DatabaseBackend {
       )
     `);
 
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+
     // Create indexes
     this.db.run("CREATE INDEX IF NOT EXISTS idx_columns_deck_id ON columns(deck_id)");
     this.db.run("CREATE INDEX IF NOT EXISTS idx_columns_deleted_at ON columns(deleted_at)");
@@ -721,6 +729,29 @@ export class WasmBackend implements DatabaseBackend {
     );
     if (results.length === 0) return [];
     return results[0].values.map((row: SqlRow) => this.rowToTag(row));
+  }
+
+  // ========================================
+  // Settings Operations
+  // ========================================
+
+  async getSettings(key: string): Promise<string | null> {
+    await this.init();
+    const db = this.ensureDb();
+    const results = db.exec("SELECT value FROM settings WHERE key = ?", [key]);
+    if (results.length === 0 || results[0].values.length === 0) return null;
+    return results[0].values[0][0] as string;
+  }
+
+  async setSettings(key: string, value: string): Promise<void> {
+    await this.init();
+    const db = this.ensureDb();
+    const now = this.now();
+    db.run(
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      [key, value, now]
+    );
   }
 
   // ========================================

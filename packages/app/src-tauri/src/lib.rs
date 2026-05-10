@@ -1,6 +1,6 @@
 use jot_deck_core::{
     create_file_db,
-    repository::{card, column, deck, tag},
+    repository::{card, column, deck, setting, tag},
     Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder, Tag,
 };
 use serde::{Deserialize, Serialize};
@@ -258,6 +258,20 @@ fn get_cards_by_tag(
     tag::get_cards_by_tag(&conn, &deck_id, &tag_name).map_err(Into::into)
 }
 
+// ========== Settings Commands ==========
+
+#[tauri::command]
+fn get_settings(state: State<AppState>, key: String) -> CommandResult<Option<String>> {
+    let conn = get_conn(&state)?;
+    setting::get(&conn, &key).map_err(Into::into)
+}
+
+#[tauri::command]
+fn set_settings(state: State<AppState>, key: String, value: String) -> CommandResult<()> {
+    let conn = get_conn(&state)?;
+    setting::set(&conn, &key, &value).map_err(Into::into)
+}
+
 #[tauri::command]
 fn get_tag_suggestions(
     state: State<AppState>,
@@ -318,6 +332,9 @@ pub fn run() {
             get_tags_by_deck,
             get_cards_by_tag,
             get_tag_suggestions,
+            // Settings commands
+            get_settings,
+            set_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
