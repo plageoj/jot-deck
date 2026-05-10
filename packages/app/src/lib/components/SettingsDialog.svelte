@@ -49,12 +49,13 @@
 
   // User-toggled custom mode. Independent of `savedFontIsCustom` so the
   // dropdown can switch into custom mode (and reveal the text input)
-  // before any value has been saved. Seeded from the persisted state on
-  // mount and re-synced if the persisted value becomes custom.
+  // before any value has been saved. Mirrors the persisted state when it
+  // changes — so a reset (or any external switch back to a preset) also
+  // collapses the custom-input UI.
   let customMode = $state(false);
 
   $effect(() => {
-    if (savedFontIsCustom) customMode = true;
+    customMode = savedFontIsCustom;
   });
 
   let selectedFontOption = $derived(
