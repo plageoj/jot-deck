@@ -27,7 +27,25 @@ Jot Deck は、キーボード操作特化型のローカルファースト・�
 
 ## インストール
 
-> 現在開発中です。リリース時にインストール方法を公開します。
+[GitHub Releases](https://github.com/plageoj/jot-deck/releases) から OS に合ったインストーラをダウンロードしてください。
+
+| OS | フォーマット |
+|:---|:---|
+| Windows | `.msi` |
+| macOS | `.dmg`（Apple Silicon / Intel ユニバーサル） |
+| Linux | `.AppImage` |
+
+インストール後、新しいバージョンがリリースされるとアプリ起動時に通知が表示されます。承諾するとダウンロード→再起動して更新が適用されます。
+
+### Preview チャンネル
+
+次期バージョンを先行して試したい場合は、[`preview` リリース](https://github.com/plageoj/jot-deck/releases/tag/preview) から Preview 版をインストールできます。Preview は **Production とは別のアプリ**（別 identifier・別データディレクトリ）としてインストールされるため、本番のデータを壊さずに新機能を検証できます。
+
+なお、Production / Preview 間のデータ移行は提供していません。Preview で使ったデータを Production で利用したい場合は手動でのコピーが必要です。
+
+### Code signing について
+
+現状、コード署名は導入していません。Windows では SmartScreen、macOS では Gatekeeper の警告が表示されますが、信頼して実行してください。
 
 ## 開発
 
