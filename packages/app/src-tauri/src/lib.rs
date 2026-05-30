@@ -286,6 +286,8 @@ fn get_tag_suggestions(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             // データベースのパスを設定
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");

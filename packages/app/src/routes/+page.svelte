@@ -12,6 +12,7 @@
     TagFilterBar,
     TagPalette,
     TrashPalette,
+    UpdateBanner,
   } from "$lib/components";
   import { DeckData } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
@@ -20,6 +21,7 @@
     applySettingsToDocument,
     settingsStore,
   } from "$lib/settings.svelte";
+  import { updaterStore } from "$lib/updater.svelte";
   import type { Column, Deck, TrashItem } from "$lib/types";
   import "$lib/styles/theme.css";
 
@@ -104,6 +106,8 @@
     };
     window.addEventListener("keydown", actions.handleKeydown);
     await Promise.all([data.init(), settingsStore.load()]);
+    // Non-blocking — failures surface in the banner, never throw out of mount.
+    void updaterStore.check();
   });
 
   onDestroy(() => {
@@ -155,6 +159,7 @@
 </script>
 
 <main class="app">
+  <UpdateBanner />
   <header class="header">
     <h1>{data.currentDeck?.name ?? "Jot Deck"}</h1>
     <button onclick={() => focus.openPalette("deck")} title="Manage Decks (Ctrl+P)"

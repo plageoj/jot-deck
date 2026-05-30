@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Jot Deck Preview",
+  "identifier": "com.jot-deck.app.preview",
+  "app": {
+    "windows": [
+      {
+        "title": "Jot Deck Preview"
+      }
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/plageoj/jot-deck/releases/download/preview/latest-preview.json"
+      ]
+    }
+  }
+}

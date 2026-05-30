@@ -9,6 +9,7 @@
     "tauri": "pnpm --filter app tauri",
     "web:dev": "pnpm --filter @jot-deck/web dev",
     "web:build": "pnpm --filter @jot-deck/web build",
-    "web:preview": "pnpm --filter @jot-deck/web preview"
+    "web:preview": "pnpm --filter @jot-deck/web preview",
+    "sync-version": "node scripts/sync-version.mjs"
   }
 }

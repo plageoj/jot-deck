@@ -1,0 +1,121 @@
+name: Release (Preview)
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - '.github/ISSUE_TEMPLATE/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-preview
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Reset preview release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Delete existing preview release & tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete preview --repo "${{ github.repository }}" --yes --cleanup-tag || true
+
+      - id: version
+        name: Compute preview version
+        run: |
+          BASE=$(node -p "require('./packages/app/package.json').version.replace(/-.*/, '')")
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "version=${BASE}-preview.${SHA}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--config src-tauri/tauri.conf.preview.json --target universal-apple-darwin'
+          - platform: ubuntu-latest
+            args: '--config src-tauri/tauri.conf.preview.json'
+          - platform: windows-latest
+            args: '--config src-tauri/tauri.conf.preview.json'
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/app/src-tauri -> target
+            crates/core -> target
+
+      - run: pnpm install
+
+      - name: Bump version for preview
+        shell: bash
+        run: node scripts/sync-version.mjs --preview ${{ github.sha }}
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: packages/app
+          tagName: preview
+          releaseName: 'Jot Deck Preview (${{ needs.prepare.outputs.version }})'
+          releaseBody: 'Rolling preview build from commit ${{ github.sha }}. Production data is unaffected — preview installs as a separate app.'
+          releaseDraft: false
+          prerelease: true
+          includeUpdaterJson: true
+          updaterJsonKeepUniversal: true
+          args: ${{ matrix.args }}
+
+  publish-manifest:
+    name: Rename updater manifest
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rename latest.json → latest-preview.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p tmp && cd tmp
+          gh release download preview \
+            --repo "${{ github.repository }}" \
+            --pattern 'latest.json'
+          mv latest.json latest-preview.json
+          gh release upload preview latest-preview.json \
+            --repo "${{ github.repository }}" \
+            --clobber
+          gh release delete-asset preview latest.json \
+            --repo "${{ github.repository }}" --yes

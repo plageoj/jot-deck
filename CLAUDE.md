@@ -84,6 +84,7 @@ Read the `docs/` folder first to understand the specification:
 - `docs/003-roadmap.md` - Development phases
 - `docs/004-e2e-testing.md` - E2E testing and WASM SQLite setup
 - `docs/005-ai-integration.md` - AI synthesis via Cloudflare AI Gateway
+- `docs/006-release.md` - Release strategy (Production / Preview channels, Tauri updater)
 
 ### Before Creating a PR
 1. Run type checks: `pnpm --filter app check`
