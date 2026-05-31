@@ -17,18 +17,12 @@ concurrency:
 
 jobs:
   prepare:
-    name: Reset preview release
+    name: Compute preview version
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
-
-      - name: Delete existing preview release & tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release delete preview --repo "${{ github.repository }}" --yes --cleanup-tag || true
 
       - id: version
         name: Compute preview version
@@ -42,6 +36,9 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
+      # Serialize matrix uploads so tauri-action's read-modify-write of
+      # latest.json on the same release tag can't race across platforms.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
@@ -100,13 +97,18 @@ jobs:
           args: ${{ matrix.args }}
 
   publish-manifest:
-    name: Rename updater manifest
-    needs: build
+    name: Promote updater manifest & clean stale assets
+    needs: [prepare, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Rename latest.json → latest-preview.json
+      - name: Promote latest.json → latest-preview.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --clobber atomically overwrites the prior latest-preview.json,
+        # so installed Preview clients see a valid manifest at every moment.
+        # If this job is skipped due to a partial build failure, the prior
+        # latest-preview.json (pointing at the prior build's bundles) stays
+        # intact and clients keep working until the next green run.
         run: |
           set -euo pipefail
           mkdir -p tmp && cd tmp
@@ -119,3 +121,25 @@ jobs:
             --clobber
           gh release delete-asset preview latest.json \
             --repo "${{ github.repository }}" --yes
+
+      - name: Delete stale bundles from prior preview builds
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP_VERSION: ${{ needs.prepare.outputs.version }}
+        # Bundle filenames embed the version, so anything not matching the
+        # version we just published is leftover from a prior preview push.
+        # Keep latest-preview.json regardless.
+        run: |
+          set -euo pipefail
+          gh release view preview \
+            --repo "${{ github.repository }}" \
+            --json assets --jq '.assets[].name' \
+          | while IFS= read -r asset; do
+              case "$asset" in
+                latest-preview.json) continue ;;
+                *"$KEEP_VERSION"*) continue ;;
+              esac
+              echo "Deleting stale asset: $asset"
+              gh release delete-asset preview "$asset" \
+                --repo "${{ github.repository }}" --yes
+            done
