@@ -15,4 +15,5 @@ export { default as TagFilterBar } from "./TagFilterBar.svelte";
 export { default as TagHighlight } from "./TagHighlight.svelte";
 export { default as TagPalette } from "./TagPalette.svelte";
 export { default as TrashPalette } from "./TrashPalette.svelte";
+export { default as UpdateBanner } from "./UpdateBanner.svelte";
 export { default as VirtualList } from "./VirtualList.svelte";
