@@ -50,6 +50,16 @@ jobs:
 
       - run: pnpm install
 
+      - name: Sync version from tag
+        shell: bash
+        # Strip the leading 'v' from the tag (e.g. v0.2.0 → 0.2.0) and write it
+        # into package.json / tauri.conf.json / Cargo.toml so the built binary
+        # and updater manifest report the same version as the release tag —
+        # without requiring a pre-tag commit to bump the files.
+        env:
+          REF: ${{ github.ref_name }}
+        run: node scripts/sync-version.mjs "${REF#v}"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
