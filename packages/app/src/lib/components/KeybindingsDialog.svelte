@@ -108,10 +108,7 @@
     const layered: ActionGroup[] = baseGroups.map((g) => ({
       ...g,
       rows: g.rows.map((r) => {
-        const overridden = Object.prototype.hasOwnProperty.call(
-          overrides,
-          r.signature,
-        );
+        const overridden = Object.hasOwn(overrides, r.signature);
         return {
           ...r,
           overridden,

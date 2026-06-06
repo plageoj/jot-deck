@@ -57,7 +57,7 @@ function coerceKeybindingOverrides(value: unknown): KeybindingOverrides {
   return result;
 }
 
-const VALID_MODES: FocusMode[] = ["column", "card", "edit", "command"];
+const VALID_MODES = new Set<FocusMode>(["column", "card", "edit", "command"]);
 
 /**
  * Defensively coerce a raw value into a list of well-formed KeyBindings. Each
@@ -73,9 +73,7 @@ function coerceCustomKeybindings(value: unknown): KeyBinding[] {
     if (typeof b.sequence !== "string" || !b.sequence) continue;
     if (typeof b.action !== "string" || !b.action) continue;
     if (!Array.isArray(b.modes)) continue;
-    const modes = b.modes.filter(
-      (m): m is FocusMode => VALID_MODES.includes(m as FocusMode),
-    );
+    const modes = b.modes.filter((m) => VALID_MODES.has(m));
     if (modes.length === 0) continue;
     result.push({
       sequence: b.sequence,
@@ -240,7 +238,7 @@ export class SettingsStore {
     const next = { ...this.state.keybindingOverrides };
     let changed = false;
     for (const sig of signatures) {
-      if (Object.prototype.hasOwnProperty.call(next, sig)) {
+      if (Object.hasOwn(next, sig)) {
         delete next[sig];
         changed = true;
       }

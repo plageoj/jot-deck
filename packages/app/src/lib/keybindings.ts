@@ -134,7 +134,7 @@ export type KeybindingOverrides = Record<string, string | null>;
  * key.
  */
 export function signatureOf(binding: KeyBinding): string {
-  const modes = [...binding.modes].sort().join(",");
+  const modes = [...binding.modes].sort((a, b) => a.localeCompare(b)).join(",");
   return `${binding.action} ${modes} ${binding.sequence}`;
 }
 
@@ -160,7 +160,7 @@ function resolveWithSignatures(
   const resolved: ResolvedBinding[] = [];
   for (const binding of DEFAULT_KEYBINDINGS) {
     const signature = signatureOf(binding);
-    if (Object.prototype.hasOwnProperty.call(overrides, signature)) {
+    if (Object.hasOwn(overrides, signature)) {
       const seq = overrides[signature];
       if (seq === null || seq === "") continue; // disabled
       resolved.push({ ...binding, sequence: seq, signature });
