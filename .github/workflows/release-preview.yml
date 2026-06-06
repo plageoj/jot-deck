@@ -21,15 +21,36 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      preview_num: ${{ steps.version.outputs.preview_num }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Need full history to count commits since the base-version file
+          # was last touched. The repo is small enough that the cost is negligible.
+          fetch-depth: 0
 
       - id: version
         name: Compute preview version
         run: |
-          BASE=$(node -p "require('./packages/app/package.json').version.replace(/-.*/, '')")
-          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          echo "version=${BASE}-preview.${SHA}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          BASE_FILE=packages/app/preview-base-version.txt
+          BASE=$(tr -d '[:space:]' < "$BASE_FILE")
+          if [[ ! "$BASE" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$BASE_FILE must contain bare MAJOR.MINOR.PATCH (got '$BASE')"
+            exit 1
+          fi
+          BASE_COMMIT=$(git log -1 --format=%H -- "$BASE_FILE")
+          if [ -z "$BASE_COMMIT" ]; then
+            echo "::error::no git history for $BASE_FILE"
+            exit 1
+          fi
+          NUM=$(git rev-list --count "${BASE_COMMIT}..HEAD")
+          if [ "$NUM" -gt 65535 ]; then
+            echo "::error::preview build number $NUM exceeds MSI limit (65535). Bump $BASE_FILE."
+            exit 1
+          fi
+          echo "version=${BASE}-preview.${NUM}" >> "$GITHUB_OUTPUT"
+          echo "preview_num=${NUM}" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build (${{ matrix.platform }})
@@ -78,7 +99,7 @@ jobs:
 
       - name: Bump version for preview
         shell: bash
-        run: node scripts/sync-version.mjs --preview ${{ github.sha }}
+        run: node scripts/sync-version.mjs --preview ${{ needs.prepare.outputs.preview_num }}
 
       - uses: tauri-apps/tauri-action@v0
         env:
