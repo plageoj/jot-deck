@@ -3,9 +3,9 @@
 // Single source of truth for what version the Tauri build will report.
 //
 // Usage:
-//   node scripts/sync-version.mjs <version>          # write <version>
+//   node scripts/sync-version.mjs <version>          # write <version> (also rewrites preview-base-version.txt with the base portion)
 //   node scripts/sync-version.mjs --from-package     # read from packages/app/package.json
-//   node scripts/sync-version.mjs --preview <sha>    # append -preview.<sha7> to package version
+//   node scripts/sync-version.mjs --preview <num>    # append -preview.<num> to base from preview-base-version.txt
 
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,10 @@ const TARGETS = {
   appPackage: resolve(repoRoot, "packages/app/package.json"),
   tauriConf: resolve(repoRoot, "packages/app/src-tauri/tauri.conf.json"),
   tauriCargo: resolve(repoRoot, "packages/app/src-tauri/Cargo.toml"),
+  coreCargo: resolve(repoRoot, "crates/core/Cargo.toml"),
 };
+
+const PREVIEW_BASE_FILE = resolve(repoRoot, "packages/app/preview-base-version.txt");
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, "utf8"));
@@ -34,6 +37,13 @@ async function updateJsonVersion(path, version) {
   if (data.version === version) return false;
   data.version = version;
   await writeJson(path, data);
+  return true;
+}
+
+async function updatePreviewBaseFile(path, baseVersion) {
+  const current = (await readFile(path, "utf8")).trim();
+  if (current === baseVersion) return false;
+  await writeFile(path, baseVersion + "\n");
   return true;
 }
 
@@ -59,8 +69,17 @@ function parseArgs(argv) {
     return { mode: "explicit", needRead: true };
   }
   if (argv[0] === "--preview") {
-    if (!argv[1]) throw new Error("--preview requires a sha argument");
-    return { mode: "preview", sha: argv[1] };
+    if (!argv[1]) throw new Error("--preview requires a numeric id argument");
+    if (!/^\d+$/.test(argv[1])) {
+      throw new Error(`--preview id must be numeric (got "${argv[1]}")`);
+    }
+    if (Number(argv[1]) > 65535) {
+      throw new Error(
+        `--preview id ${argv[1]} exceeds 65535 (MSI bundler limit). ` +
+          `Bump the base version in packages/app/preview-base-version.txt.`,
+      );
+    }
+    return { mode: "preview", num: argv[1] };
   }
   return { mode: "explicit", version: argv[0] };
 }
@@ -70,12 +89,13 @@ async function main() {
 
   let version;
   if (args.mode === "preview") {
-    const base = (await readJson(TARGETS.appPackage)).version.replace(
-      /-.*$/,
-      "",
-    );
-    const sha = args.sha.slice(0, 7);
-    version = `${base}-preview.${sha}`;
+    const base = (await readFile(PREVIEW_BASE_FILE, "utf8")).trim();
+    if (!/^\d+\.\d+\.\d+$/.test(base)) {
+      throw new Error(
+        `preview-base-version.txt must contain a bare MAJOR.MINOR.PATCH (got "${base}")`,
+      );
+    }
+    version = `${base}-preview.${args.num}`;
   } else if (args.needRead) {
     version = (await readJson(TARGETS.appPackage)).version;
   } else {
@@ -87,14 +107,30 @@ async function main() {
     throw new Error(`Invalid SemVer: ${version}`);
   }
 
+  const baseForPreview = version.replace(/[-+].*$/, "");
+
   const results = await Promise.all([
     updateJsonVersion(TARGETS.rootPackage, version),
     updateJsonVersion(TARGETS.appPackage, version),
     updateJsonVersion(TARGETS.tauriConf, version),
     updateCargoVersion(TARGETS.tauriCargo, version),
+    updateCargoVersion(TARGETS.coreCargo, version),
+    // Preview baseline is updated only on explicit-version runs, not on
+    // each preview build — otherwise the file's git history (which the
+    // workflow uses to count commits) would reset every build.
+    args.mode === "explicit"
+      ? updatePreviewBaseFile(PREVIEW_BASE_FILE, baseForPreview)
+      : Promise.resolve(false),
   ]);
 
-  const labels = ["package.json", "app/package.json", "tauri.conf.json", "Cargo.toml"];
+  const labels = [
+    "package.json",
+    "app/package.json",
+    "tauri.conf.json",
+    "src-tauri/Cargo.toml",
+    "crates/core/Cargo.toml",
+    "preview-base-version.txt",
+  ];
   for (const [i, changed] of results.entries()) {
     console.log(`${changed ? "updated" : "unchanged"}: ${labels[i]}`);
   }

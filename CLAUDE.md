@@ -92,3 +92,11 @@ Read the `docs/` folder first to understand the specification:
 3. Run Rust checks: `cargo check` (in crates/core and packages/app/src-tauri)
 4. Run Rust tests: `cargo test` (in crates/core)
 5. All user-facing text must be in English (power-user target audience)
+
+### Bumping the Base Version (Preview Pipeline)
+The Preview release workflow derives its pre-release number from `git rev-list --count` since `packages/app/preview-base-version.txt` was last modified (numeric, MSI bundler requires ≤ 65535). Whenever you bump MAJOR / MINOR / PATCH of the app:
+
+1. Run `node scripts/sync-version.mjs <new-version>` — this updates `package.json` files, `tauri.conf.json`, `Cargo.toml`, **and** `packages/app/preview-base-version.txt` (the bare `MAJOR.MINOR.PATCH` portion).
+2. Commit the change. The next Preview build will start counting from `0.0.0-preview.0` again (more precisely: `<new-version>-preview.<commits-since-this-commit>`).
+
+Never edit `packages/app/preview-base-version.txt` by hand without also updating the other version targets — keep them in sync via the script.
