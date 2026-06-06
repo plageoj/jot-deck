@@ -19,6 +19,7 @@ const TARGETS = {
   appPackage: resolve(repoRoot, "packages/app/package.json"),
   tauriConf: resolve(repoRoot, "packages/app/src-tauri/tauri.conf.json"),
   tauriCargo: resolve(repoRoot, "packages/app/src-tauri/Cargo.toml"),
+  coreCargo: resolve(repoRoot, "crates/core/Cargo.toml"),
 };
 
 const PREVIEW_BASE_FILE = resolve(repoRoot, "packages/app/preview-base-version.txt");
@@ -113,6 +114,7 @@ async function main() {
     updateJsonVersion(TARGETS.appPackage, version),
     updateJsonVersion(TARGETS.tauriConf, version),
     updateCargoVersion(TARGETS.tauriCargo, version),
+    updateCargoVersion(TARGETS.coreCargo, version),
     // Preview baseline is updated only on explicit-version runs, not on
     // each preview build — otherwise the file's git history (which the
     // workflow uses to count commits) would reset every build.
@@ -125,7 +127,8 @@ async function main() {
     "package.json",
     "app/package.json",
     "tauri.conf.json",
-    "Cargo.toml",
+    "src-tauri/Cargo.toml",
+    "crates/core/Cargo.toml",
     "preview-base-version.txt",
   ];
   for (const [i, changed] of results.entries()) {

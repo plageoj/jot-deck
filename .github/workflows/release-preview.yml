@@ -8,8 +8,9 @@ on:
       - '**/*.md'
       - '.github/ISSUE_TEMPLATE/**'
 
+# Least-privilege default; only jobs that publish/mutate the release elevate to write.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-preview
@@ -23,11 +24,12 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       preview_num: ${{ steps.version.outputs.preview_num }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           # Need full history to count commits since the base-version file
           # was last touched. The repo is small enough that the cost is negligible.
           fetch-depth: 0
+          persist-credentials: false
 
       - id: version
         name: Compute preview version
@@ -55,6 +57,8 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     needs: prepare
+    permissions:
+      contents: write # tauri-action creates/uploads the preview release
     strategy:
       fail-fast: false
       # Serialize matrix uploads so tauri-action's read-modify-write of
@@ -70,7 +74,9 @@ jobs:
             args: '--config src-tauri/tauri.conf.preview.json'
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-latest'
@@ -78,18 +84,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - uses: pnpm/action-setup@v5
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 24
           cache: pnpm
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: |
             packages/app/src-tauri -> target
@@ -101,7 +107,7 @@ jobs:
         shell: bash
         run: node scripts/sync-version.mjs --preview ${{ needs.prepare.outputs.preview_num }}
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -120,6 +126,8 @@ jobs:
   publish-manifest:
     name: Promote updater manifest & clean stale assets
     needs: [prepare, build]
+    permissions:
+      contents: write # promotes/deletes release assets via gh
     runs-on: ubuntu-latest
     steps:
       - name: Promote latest.json → latest-preview.json

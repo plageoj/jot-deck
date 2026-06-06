@@ -29,7 +29,7 @@ Jot Deck はタグ push を起点とした GitHub Releases 配信と、Tauri upd
 
 ## リポジトリ構成
 
-```
+```text
 packages/app/src-tauri/
 ├── tauri.conf.json              # 共通設定 (production が既定)
 ├── tauri.conf.preview.json      # preview チャンネル上書き
