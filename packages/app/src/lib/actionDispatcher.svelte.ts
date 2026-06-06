@@ -58,8 +58,8 @@ export class ActionDispatcher {
       return;
     }
 
-    // Settings dialog manages its own input — let it handle keys.
-    if (focus.showSettings) return;
+    // Settings / keybindings dialogs manage their own input — let them handle keys.
+    if (focus.showSettings || focus.showKeybindings) return;
 
     // Skip if focus is on input fields
     const target = event.target as HTMLElement;
@@ -156,6 +156,11 @@ export class ActionDispatcher {
 
     if (action === "showSettings") {
       this.focus.showSettings = true;
+      return;
+    }
+
+    if (action === "showKeybindings") {
+      this.focus.showKeybindings = true;
       return;
     }
 

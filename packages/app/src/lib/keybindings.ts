@@ -119,10 +119,105 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 ];
 
 /**
+ * User customization is stored as a map keyed by a *default* binding's stable
+ * signature. The value is the user's replacement key sequence, or `null` to
+ * disable the binding entirely. Keying off the immutable default (action +
+ * modes + default sequence) keeps overrides stable even after the user remaps
+ * the effective sequence, and lets stale overrides for removed defaults be
+ * dropped harmlessly on resolution.
+ */
+export type KeybindingOverrides = Record<string, string | null>;
+
+/**
+ * Stable identity for a default binding. The default `sequence` never changes
+ * (it lives in source), so the signature survives remapping of the effective
+ * key.
+ */
+export function signatureOf(binding: KeyBinding): string {
+  const modes = [...binding.modes].sort().join(",");
+  return `${binding.action} ${modes} ${binding.sequence}`;
+}
+
+/**
+ * Resolve the effective keybinding list by layering user overrides over the
+ * defaults, then appending user-added bindings. A `null` override disables
+ * (drops) the binding; a string override replaces its key sequence. Pure —
+ * does not touch the active registry.
+ */
+export function resolveKeybindings(
+  overrides: KeybindingOverrides = {},
+  additions: KeyBinding[] = []
+): KeyBinding[] {
+  const resolved: KeyBinding[] = [];
+  for (const binding of DEFAULT_KEYBINDINGS) {
+    const sig = signatureOf(binding);
+    if (Object.prototype.hasOwnProperty.call(overrides, sig)) {
+      const seq = overrides[sig];
+      if (seq === null || seq === "") continue; // disabled
+      resolved.push({ ...binding, sequence: seq });
+    } else {
+      resolved.push(binding);
+    }
+  }
+  for (const binding of additions) {
+    if (binding.sequence) resolved.push(binding);
+  }
+  return resolved;
+}
+
+export interface KnownAction {
+  action: string;
+  description: string;
+  /** Union of focus modes the action's default bindings apply to. */
+  modes: FocusMode[];
+}
+
+/**
+ * The distinct actions that can be bound, derived from the defaults (in source
+ * order). Used to populate the "add binding" action picker. Each action's
+ * `modes` is the union of the modes its default bindings use, which seeds a
+ * sensible default scope for a new binding.
+ */
+export function getKnownActions(): KnownAction[] {
+  const index = new Map<string, KnownAction>();
+  for (const b of DEFAULT_KEYBINDINGS) {
+    const existing = index.get(b.action);
+    if (existing) {
+      for (const m of b.modes) {
+        if (!existing.modes.includes(m)) existing.modes.push(m);
+      }
+    } else {
+      index.set(b.action, {
+        action: b.action,
+        description: b.description,
+        modes: [...b.modes],
+      });
+    }
+  }
+  return [...index.values()];
+}
+
+// The currently active bindings consulted by findAction / isValidPrefix /
+// getKeybindingsForMode. Starts as the defaults; the settings layer calls
+// setKeybindingOverrides() once persisted customizations have loaded.
+let activeBindings: KeyBinding[] = DEFAULT_KEYBINDINGS;
+
+/**
+ * Replace the active bindings with defaults + the given overrides + the user's
+ * added bindings. Call this whenever the persisted customization changes.
+ */
+export function setKeybindingOverrides(
+  overrides: KeybindingOverrides,
+  additions: KeyBinding[] = []
+): void {
+  activeBindings = resolveKeybindings(overrides, additions);
+}
+
+/**
  * Find the action for a given key sequence and focus mode
  */
 export function findAction(sequence: string, mode: FocusMode): string | null {
-  const binding = DEFAULT_KEYBINDINGS.find(
+  const binding = activeBindings.find(
     (b) => b.sequence === sequence && b.modes.includes(mode)
   );
   return binding?.action ?? null;
@@ -132,7 +227,7 @@ export function findAction(sequence: string, mode: FocusMode): string | null {
  * Check if the given sequence is a valid prefix for any keybinding
  */
 export function isValidPrefix(sequence: string, mode: FocusMode): boolean {
-  return DEFAULT_KEYBINDINGS.some(
+  return activeBindings.some(
     (b) =>
       b.sequence.startsWith(sequence) &&
       b.sequence !== sequence &&
@@ -144,5 +239,57 @@ export function isValidPrefix(sequence: string, mode: FocusMode): boolean {
  * Get all keybindings for display (cheatsheet)
  */
 export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
-  return DEFAULT_KEYBINDINGS.filter((b) => b.modes.includes(mode));
+  return activeBindings.filter((b) => b.modes.includes(mode));
+}
+
+export interface KeybindingConflict {
+  severity: "error" | "warn";
+  /** The conflicting binding's key sequence. */
+  sequence: string;
+  /** Human-readable description of the conflicting binding. */
+  description: string;
+}
+
+/**
+ * Check whether assigning `candidate` to a binding in `modes` would clash with
+ * another effective binding. `excludeSignature` is the signature of the
+ * binding being edited, so it doesn't conflict with itself.
+ *
+ * - `error`: an exact-sequence collision in an overlapping mode (the new key is
+ *   already taken — only one action can win).
+ * - `warn`: a prefix overlap in an overlapping mode (one sequence is a strict
+ *   prefix of the other, so the shorter one shadows the longer during multi-key
+ *   entry).
+ */
+export function findKeybindingConflicts(
+  candidate: string,
+  modes: FocusMode[],
+  excludeSignature: string,
+  overrides: KeybindingOverrides = {},
+  additions: KeyBinding[] = []
+): KeybindingConflict[] {
+  const effective = resolveKeybindings(overrides, additions);
+  const conflicts: KeybindingConflict[] = [];
+  for (const b of effective) {
+    if (signatureOf(b) === excludeSignature) continue;
+    const sharesMode = b.modes.some((m) => modes.includes(m));
+    if (!sharesMode) continue;
+    if (b.sequence === candidate) {
+      conflicts.push({
+        severity: "error",
+        sequence: b.sequence,
+        description: b.description,
+      });
+    } else if (
+      b.sequence.startsWith(candidate) ||
+      candidate.startsWith(b.sequence)
+    ) {
+      conflicts.push({
+        severity: "warn",
+        sequence: b.sequence,
+        description: b.description,
+      });
+    }
+  }
+  return conflicts;
 }

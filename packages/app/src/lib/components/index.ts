@@ -7,6 +7,7 @@ export { default as ConfirmDialog } from "./ConfirmDialog.svelte";
 export { default as Deck } from "./Deck.svelte";
 export { default as DeckSwitcher } from "./DeckSwitcher.svelte";
 export { default as KeybindingCheatsheet } from "./KeybindingCheatsheet.svelte";
+export { default as KeybindingsDialog } from "./KeybindingsDialog.svelte";
 export { default as MarkdownContent } from "./MarkdownContent.svelte";
 export { default as PaletteDialog } from "./PaletteDialog.svelte";
 export { default as RenameDialog } from "./RenameDialog.svelte";

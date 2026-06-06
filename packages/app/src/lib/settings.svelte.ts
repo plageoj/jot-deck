@@ -1,4 +1,10 @@
 import { getDatabase, type DatabaseBackend } from "./db";
+import {
+  setKeybindingOverrides,
+  type FocusMode,
+  type KeyBinding,
+  type KeybindingOverrides,
+} from "./keybindings";
 
 export type ThemeMode = "auto" | "dark" | "light";
 
@@ -9,6 +15,17 @@ export interface SettingsState {
   lineHeight: number;
   markdownEnabled: boolean;
   vimEnabled: boolean;
+  /**
+   * User keybinding customizations, keyed by a default binding's stable
+   * signature (see `signatureOf` in keybindings.ts). Value is the replacement
+   * key sequence, or `null` to disable the binding.
+   */
+  keybindingOverrides: KeybindingOverrides;
+  /**
+   * Brand-new keybindings the user has added (not derived from defaults).
+   * Appended to the resolved defaults by `resolveKeybindings`.
+   */
+  customKeybindings: KeyBinding[];
 }
 
 export const SETTINGS_DB_KEY = "app";
@@ -21,7 +38,54 @@ export const DEFAULT_SETTINGS: SettingsState = {
   lineHeight: 1.5,
   markdownEnabled: false,
   vimEnabled: false,
+  keybindingOverrides: {},
+  customKeybindings: [],
 };
+
+/**
+ * Defensively coerce a raw value into a KeybindingOverrides map: an object
+ * whose values are strings or null. Anything else is dropped.
+ */
+function coerceKeybindingOverrides(value: unknown): KeybindingOverrides {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: KeybindingOverrides = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (raw === null || typeof raw === "string") {
+      result[key] = raw;
+    }
+  }
+  return result;
+}
+
+const VALID_MODES: FocusMode[] = ["column", "card", "edit", "command"];
+
+/**
+ * Defensively coerce a raw value into a list of well-formed KeyBindings. Each
+ * entry must have a non-empty string sequence + action and a non-empty array of
+ * valid focus modes; anything malformed is dropped.
+ */
+function coerceCustomKeybindings(value: unknown): KeyBinding[] {
+  if (!Array.isArray(value)) return [];
+  const result: KeyBinding[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const b = raw as Partial<KeyBinding>;
+    if (typeof b.sequence !== "string" || !b.sequence) continue;
+    if (typeof b.action !== "string" || !b.action) continue;
+    if (!Array.isArray(b.modes)) continue;
+    const modes = b.modes.filter(
+      (m): m is FocusMode => VALID_MODES.includes(m as FocusMode),
+    );
+    if (modes.length === 0) continue;
+    result.push({
+      sequence: b.sequence,
+      action: b.action,
+      modes,
+      description: typeof b.description === "string" ? b.description : b.action,
+    });
+  }
+  return result;
+}
 
 export const FONT_FAMILY_PRESETS = [
   {
@@ -93,6 +157,8 @@ export function deserializeSettings(raw: string | null): SettingsState {
       typeof parsed.vimEnabled === "boolean"
         ? parsed.vimEnabled
         : DEFAULT_SETTINGS.vimEnabled,
+    keybindingOverrides: coerceKeybindingOverrides(parsed.keybindingOverrides),
+    customKeybindings: coerceCustomKeybindings(parsed.customKeybindings),
   };
 }
 
@@ -117,8 +183,17 @@ export class SettingsStore {
     } catch {
       this.state = { ...DEFAULT_SETTINGS };
     } finally {
+      this.applyKeybindings();
       this.loaded = true;
     }
+  }
+
+  /** Push the current keybinding customization into the active registry. */
+  applyKeybindings() {
+    setKeybindingOverrides(
+      this.state.keybindingOverrides,
+      this.state.customKeybindings,
+    );
   }
 
   /** Persist the current state. Writes are serialized via writeChain. */
@@ -144,8 +219,76 @@ export class SettingsStore {
     void this.persist();
   }
 
+  /**
+   * Set (or, with `sequence === null`, disable) the override for a single
+   * binding signature. Re-applies the active registry and persists.
+   */
+  setKeybindingOverride(signature: string, sequence: string | null) {
+    this.state.keybindingOverrides = {
+      ...this.state.keybindingOverrides,
+      [signature]: sequence,
+    };
+    this.applyKeybindings();
+    void this.persist();
+  }
+
+  /**
+   * Remove several overrides at once, restoring those bindings to their
+   * defaults. Used to reset a single binding or a whole command (action group).
+   */
+  clearKeybindingOverrides(signatures: string[]) {
+    const next = { ...this.state.keybindingOverrides };
+    let changed = false;
+    for (const sig of signatures) {
+      if (Object.prototype.hasOwnProperty.call(next, sig)) {
+        delete next[sig];
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    this.state.keybindingOverrides = next;
+    this.applyKeybindings();
+    void this.persist();
+  }
+
+  /** Append a brand-new user-defined binding. */
+  addCustomKeybinding(binding: KeyBinding) {
+    this.state.customKeybindings = [...this.state.customKeybindings, binding];
+    this.applyKeybindings();
+    void this.persist();
+  }
+
+  /** Replace the custom binding at `index` (e.g. after remapping its key). */
+  updateCustomKeybinding(index: number, binding: KeyBinding) {
+    if (index < 0 || index >= this.state.customKeybindings.length) return;
+    const next = [...this.state.customKeybindings];
+    next[index] = binding;
+    this.state.customKeybindings = next;
+    this.applyKeybindings();
+    void this.persist();
+  }
+
+  /** Remove the custom binding at `index`. */
+  removeCustomKeybinding(index: number) {
+    if (index < 0 || index >= this.state.customKeybindings.length) return;
+    this.state.customKeybindings = this.state.customKeybindings.filter(
+      (_, i) => i !== index,
+    );
+    this.applyKeybindings();
+    void this.persist();
+  }
+
+  /** Drop every customization — both default overrides and added bindings. */
+  resetAllKeybindings() {
+    this.state.keybindingOverrides = {};
+    this.state.customKeybindings = [];
+    this.applyKeybindings();
+    void this.persist();
+  }
+
   reset() {
     this.state = { ...DEFAULT_SETTINGS };
+    this.applyKeybindings();
     void this.persist();
   }
 }
