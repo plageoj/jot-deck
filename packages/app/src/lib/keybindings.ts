@@ -138,6 +138,44 @@ export function signatureOf(binding: KeyBinding): string {
   return `${binding.action} ${modes} ${binding.sequence}`;
 }
 
+interface ResolvedBinding extends KeyBinding {
+  /**
+   * Stable signature of the originating binding (the default's signature for
+   * overridden/default bindings, the addition's own signature otherwise).
+   * Unlike `signatureOf(this)`, it does not change when the effective
+   * `sequence` is remapped — so it can identify the binding being edited.
+   */
+  signature: string;
+}
+
+/**
+ * Resolve effective bindings while preserving each one's stable signature.
+ * Shared by `resolveKeybindings` (which projects away the signature) and
+ * `findKeybindingConflicts` (which needs it to exclude the edited binding).
+ */
+function resolveWithSignatures(
+  overrides: KeybindingOverrides,
+  additions: KeyBinding[]
+): ResolvedBinding[] {
+  const resolved: ResolvedBinding[] = [];
+  for (const binding of DEFAULT_KEYBINDINGS) {
+    const signature = signatureOf(binding);
+    if (Object.prototype.hasOwnProperty.call(overrides, signature)) {
+      const seq = overrides[signature];
+      if (seq === null || seq === "") continue; // disabled
+      resolved.push({ ...binding, sequence: seq, signature });
+    } else {
+      resolved.push({ ...binding, signature });
+    }
+  }
+  for (const binding of additions) {
+    if (binding.sequence) {
+      resolved.push({ ...binding, signature: signatureOf(binding) });
+    }
+  }
+  return resolved;
+}
+
 /**
  * Resolve the effective keybinding list by layering user overrides over the
  * defaults, then appending user-added bindings. A `null` override disables
@@ -148,21 +186,12 @@ export function resolveKeybindings(
   overrides: KeybindingOverrides = {},
   additions: KeyBinding[] = []
 ): KeyBinding[] {
-  const resolved: KeyBinding[] = [];
-  for (const binding of DEFAULT_KEYBINDINGS) {
-    const sig = signatureOf(binding);
-    if (Object.prototype.hasOwnProperty.call(overrides, sig)) {
-      const seq = overrides[sig];
-      if (seq === null || seq === "") continue; // disabled
-      resolved.push({ ...binding, sequence: seq });
-    } else {
-      resolved.push(binding);
-    }
-  }
-  for (const binding of additions) {
-    if (binding.sequence) resolved.push(binding);
-  }
-  return resolved;
+  return resolveWithSignatures(overrides, additions).map((b) => ({
+    sequence: b.sequence,
+    action: b.action,
+    modes: b.modes,
+    description: b.description,
+  }));
 }
 
 export interface KnownAction {
@@ -268,10 +297,10 @@ export function findKeybindingConflicts(
   overrides: KeybindingOverrides = {},
   additions: KeyBinding[] = []
 ): KeybindingConflict[] {
-  const effective = resolveKeybindings(overrides, additions);
+  const effective = resolveWithSignatures(overrides, additions);
   const conflicts: KeybindingConflict[] = [];
   for (const b of effective) {
-    if (signatureOf(b) === excludeSignature) continue;
+    if (b.signature === excludeSignature) continue;
     const sharesMode = b.modes.some((m) => modes.includes(m));
     if (!sharesMode) continue;
     if (b.sequence === candidate) {

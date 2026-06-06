@@ -274,6 +274,20 @@ describe("findKeybindingConflicts", () => {
     expect(conflicts.some((c) => c.severity === "error")).toBe(false);
   });
 
+  it("excludes an already-remapped default from self-conflict", () => {
+    // moveDown was remapped j -> x. Re-opening its remap and pressing "x"
+    // again must not report a conflict against itself — the exclude key is the
+    // stable (default-sequence) signature, not the remapped one.
+    const moveDown = DEFAULT_KEYBINDINGS.find(
+      (b) => b.action === "moveDown" && b.sequence === "j",
+    )!;
+    const sig = signatureOf(moveDown);
+    const conflicts = findKeybindingConflicts("x", ["card"], sig, {
+      [sig]: "x",
+    });
+    expect(conflicts.some((c) => c.severity === "error")).toBe(false);
+  });
+
   it("does not conflict across non-overlapping modes", () => {
     // "o" is createCard in column and createCardBelow in card. A candidate
     // bound only in column should not clash with a card-only binding.
