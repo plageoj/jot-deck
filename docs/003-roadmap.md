@@ -134,7 +134,7 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * 保存値が現在のカラム数 / カード数を超える場合のクランプ処理
 * Deck 削除時の永続化エントリのクリーンアップ
 
-### 3.9 設定画面・テーマ切り替え
+### 3.9 設定画面・テーマ切り替え ✅
 
 #### 成果物
 * ダーク / ライトモード（OS 設定追従）
@@ -150,9 +150,13 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * `SettingsDialog` コンポーネント（`Ctrl+,` / コマンドパレット「Settings」 / ヘッダーボタンから起動）
 * Markdown 表示切替（`MarkdownContent`、`#tag` ハイライトを保ったまま `**bold**` / `*italic*` / `` `code` `` / リンクをレンダリング）
 * CodeMirror の Vim モード ON/OFF 切り替え（OFF 時は `Ctrl+Enter` で保存して終了、`Escape` で保存せず終了）
-
-#### 未実装
-* キーバインドカスタマイズ UI（設定ダイアログ内にプレースホルダー表示。デフォルトはチートシート参照）
+* キーバインドカスタマイズ UI（独立モーダル `KeybindingsDialog`）
+  * 設定ダイアログの「Customize keybindings…」ボタン / コマンドパレット「Customize Keybindings」/ `focus.showKeybindings` から起動する独立モーダル
+  * **デフォルトの上書き**: 各デフォルトバインドの安定シグネチャ（`action + modes + デフォルト sequence`）をキーにユーザーの上書きを保存（`SettingsState.keybindingOverrides`）。キーを押して記録するリマップ（`Escape` で記録キャンセル）、無効化、個別/全体リセット。Column / Card / Common スコープ別の一覧・フィルタ
+  * **新規バインドの追加**: アクション（既定アクション一覧から選択）+ スコープ + キーを指定して独自バインドを追加（`SettingsState.customKeybindings`）。一覧から再マップ・削除可能
+  * いずれも SQLite の `app` 設定 JSON に相乗り（DB スキーマ変更なし）。防御的デシリアライズで不正値を除去
+  * 競合検出（同一キーの重複=エラーでブロック、プレフィックス重複=警告）
+  * `findAction` / `isValidPrefix` / `getKeybindingsForMode` をアクティブレジストリ駆動（デフォルト＋上書き＋追加）に変更し、チートシートにも反映
 
 ---
 
@@ -230,7 +234,7 @@ Automerge + PartyKit でリアルタイム同期。
 |:---|:---|:---|
 | **データ層完成** | Phase 1 | 完了 |
 | **Tauri 統合** | Phase 2 | 完了 |
-| **ローカル動作版** | Phase 3.1-3.9 | 進行中（3.1-3.9 完了。キーバインドカスタマイズ UI のみ未着手） |
+| **ローカル動作版** | Phase 3.1-3.9 | 完了 |
 | **AI 機能付き** | Phase 4 | 未着手 |
 | **MVP リリース** | Phase 5 | 未着手 |
 | **同期機能リリース** | Phase 6 | 未着手 |

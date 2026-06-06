@@ -7,6 +7,7 @@
     ConfirmDialog,
     DeckSwitcher,
     KeybindingCheatsheet,
+    KeybindingsDialog,
     RenameDialog,
     SettingsDialog,
     TagFilterBar,
@@ -341,8 +342,16 @@
     settings={settingsStore.state}
     onUpdate={(key, value) => settingsStore.update(key, value)}
     onReset={() => settingsStore.reset()}
+    onOpenKeybindings={() => {
+      focus.showSettings = false;
+      focus.showKeybindings = true;
+    }}
     onClose={() => (focus.showSettings = false)}
   />
+{/if}
+
+{#if focus.showKeybindings}
+  <KeybindingsDialog onClose={() => (focus.showKeybindings = false)} />
 {/if}
 
 <style>

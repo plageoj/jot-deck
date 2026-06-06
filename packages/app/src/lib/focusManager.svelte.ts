@@ -26,6 +26,7 @@ export class FocusManager {
   // Overlay state
   showCheatsheet = $state(false);
   showSettings = $state(false);
+  showKeybindings = $state(false);
   activePalette = $state<PaletteType>(null);
   previousFocusMode = $state<FocusMode>("column");
 

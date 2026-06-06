@@ -18,12 +18,19 @@
       value: SettingsState[K],
     ) => void;
     onReset: () => void;
+    onOpenKeybindings: () => void;
     onClose: () => void;
   }
 
-  let { settings, onUpdate, onReset, onClose }: Props = $props();
+  let { settings, onUpdate, onReset, onOpenKeybindings, onClose }: Props =
+    $props();
 
   let dialogRef = $state<HTMLDialogElement | null>(null);
+
+  let keybindingCustomized = $derived(
+    Object.keys(settings.keybindingOverrides).length > 0 ||
+      settings.customKeybindings.length > 0,
+  );
 
   onMount(() => {
     dialogRef?.showModal();
@@ -260,10 +267,21 @@
 
       <section class="settings-section">
         <h3>Keybindings</h3>
-        <p class="placeholder">
-          Customization UI is not yet implemented. Default bindings are
-          documented in the cheatsheet (<kbd>?</kbd>).
-        </p>
+        <div class="row">
+          <button
+            type="button"
+            class="btn kb-open-btn"
+            onclick={onOpenKeybindings}
+          >
+            Customize keybindings…{#if keybindingCustomized}<span
+                class="kb-badge">customized</span
+              >{/if}
+          </button>
+          <span class="hint"
+            >Remap, disable, or add keys. Defaults are listed in the cheatsheet
+            (<kbd>?</kbd>).</span
+          >
+        </div>
       </section>
     </div>
 
@@ -395,12 +413,7 @@
     color: var(--text-muted);
   }
 
-  .placeholder {
-    font-size: 0.8125rem;
-    color: var(--text-muted);
-  }
-
-  .placeholder kbd {
+  .hint kbd {
     padding: 0 0.375rem;
     background-color: var(--bg-primary);
     border: 1px solid var(--bg-tertiary);
@@ -408,6 +421,21 @@
     font-family: inherit;
     font-size: 0.75rem;
     color: var(--accent);
+  }
+
+  .kb-open-btn {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .kb-badge {
+    padding: 0 0.375rem;
+    border-radius: 999px;
+    background-color: var(--accent);
+    color: #fff;
+    font-size: 0.6875rem;
   }
 
   .segmented {
