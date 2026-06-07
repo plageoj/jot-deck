@@ -16,7 +16,7 @@ Jot Deck はタグ push を起点とした GitHub Releases 配信と、Tauri upd
 | トリガ | `v*.*.*` タグ push | `main` ブランチへの push |
 | GitHub Release | 通常 release | `prerelease: true` |
 | updater マニフェスト | `latest.json` | `latest-preview.json` |
-| バージョン表記 | `1.2.3` | `1.2.3-preview.<sha>` |
+| バージョン表記 | `1.2.3` | `1.2.3-<n>`（`<n>` = base からのコミット数） |
 
 ### A 案を採用する理由
 
@@ -76,7 +76,7 @@ packages/app/src-tauri/
 * **タグ運用**: rolling tag 方式（固定タグ `preview` を force-update）
 * **アセット命名**: `latest.json` ではなく `latest-preview.json` として配置（production と URL を分離）
 * **オプション**: `prerelease: true`, `make_latest: false`
-* **バージョン採番**: `package.json` のバージョンに `-preview.<short-sha>` を付与
+* **バージョン採番**: base バージョンに `-<n>`（`base-version.txt` 最終更新からのコミット数）を付与。Windows MSI/WiX は pre-release 識別子が数字のみであることを要求するため、`-preview.<n>` のような非数値接頭辞は使えない
 
 ### 共通シークレット
 
@@ -130,7 +130,7 @@ pnpm tauri signer generate -w ~/.tauri/jot-deck-updater.key
 ## バージョニング規約
 
 * Production: [Semantic Versioning](https://semver.org/) を採用。`v1.2.3`
-* Preview: `1.2.3-preview.<short-sha>` 形式。次の production リリースが `v1.2.3` になる予定であることを示す
+* Preview: `1.2.3-<n>` 形式（`<n>` は base バージョンファイル最終更新からのコミット数）。`1.2.3` が次の production リリース予定であることを示す。pre-release 識別子を数字のみにするのは Windows MSI/WiX の制約（非数値・>65535 の pre-release を拒否する）に従うため
 * `package.json` / `Cargo.toml` / `tauri.conf.json` の version を統一する仕組み（`pnpm version` + 同期スクリプト）は別途整備
 
 ---
