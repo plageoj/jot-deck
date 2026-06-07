@@ -414,25 +414,30 @@ fn cmd_tags(parts: &[&str], conn: &Connection) {
 }
 
 fn cmd_tag_search(parts: &[&str], conn: &Connection) {
-    if let (Some(deck_id), Some(tag_name)) = (parts.get(1), parts.get(2)) {
-        match tag::get_cards_by_tag(conn, deck_id, tag_name) {
-            Ok(card_ids) => {
-                if card_ids.is_empty() {
-                    println!("No cards found with tag #{}", tag_name);
-                } else {
-                    println!("Cards with tag #{}:", tag_name);
-                    for id in card_ids {
-                        if let Ok(c) = card::get_by_id(conn, &id) {
-                            let preview: String = c.content.chars().take(50).collect();
-                            println!("  {} - {}", c.id, preview);
-                        }
-                    }
-                }
-            }
-            Err(e) => println!("Error: {}", e),
-        }
-    } else {
+    let (Some(deck_id), Some(tag_name)) = (parts.get(1), parts.get(2)) else {
         println!("Usage: tag-search <deck_id> <tag_name>");
+        return;
+    };
+
+    let card_ids = match tag::get_cards_by_tag(conn, deck_id, tag_name) {
+        Ok(ids) => ids,
+        Err(e) => {
+            println!("Error: {}", e);
+            return;
+        }
+    };
+
+    if card_ids.is_empty() {
+        println!("No cards found with tag #{}", tag_name);
+        return;
+    }
+
+    println!("Cards with tag #{}:", tag_name);
+    for id in card_ids {
+        if let Ok(c) = card::get_by_id(conn, &id) {
+            let preview: String = c.content.chars().take(50).collect();
+            println!("  {} - {}", c.id, preview);
+        }
     }
 }
 
