@@ -327,11 +327,10 @@ describe("DEFAULT_KEYBINDINGS consistency", () => {
     for (const binding of DEFAULT_KEYBINDINGS) {
       for (const mode of binding.modes) {
         const key = `${mode}:${binding.sequence}`;
-        if (seen.has(key)) {
-          throw new Error(
-            `Duplicate binding: ${key} (${seen.get(key)} and ${binding.action})`
-          );
-        }
+        expect(
+          seen.has(key),
+          `Duplicate binding: ${key} (${seen.get(key)} and ${binding.action})`
+        ).toBe(false);
         seen.set(key, binding.action);
       }
     }

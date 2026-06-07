@@ -104,7 +104,7 @@ export const FONT_FAMILY_PRESETS = [
 
 export const FONT_SIZE_MIN = 11;
 export const FONT_SIZE_MAX = 22;
-export const LINE_HEIGHT_MIN = 1.0;
+export const LINE_HEIGHT_MIN = 1;
 export const LINE_HEIGHT_MAX = 2.2;
 
 function clampNumber(value: number, min: number, max: number): number {
@@ -164,7 +164,7 @@ export class SettingsStore {
   state = $state<SettingsState>({ ...DEFAULT_SETTINGS });
   loaded = $state(false);
 
-  private getBackend: () => Promise<DatabaseBackend>;
+  private readonly getBackend: () => Promise<DatabaseBackend>;
 
   // Serialize writes so concurrent updates land in order.
   private writeChain: Promise<void> = Promise.resolve();
