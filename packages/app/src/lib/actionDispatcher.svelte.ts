@@ -426,6 +426,9 @@ export class ActionDispatcher {
       focus.saveCurrentCardIndex();
       focus.focusedColumnIndex += direction;
       focus.restoreCardIndex();
+      // Empty destination column has no card to focus — drop to column mode,
+      // matching jumpToColumn / selectColumnFromPalette.
+      if (this.focusedCards.length === 0) focus.focusMode = "column";
       focus.scrollToFocusedColumn();
     }
   }

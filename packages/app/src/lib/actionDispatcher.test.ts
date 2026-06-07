@@ -1034,11 +1034,21 @@ describe("ActionDispatcher card-mode cross-column and paste actions", () => {
     expect(state.moveCardToColumnCalls.length).toBe(0);
   });
 
-  it("moveLeft navigates to the previous column in card mode", async () => {
+  it("moveLeft navigates to the previous column and stays in card mode", async () => {
     focus.focusedColumnIndex = 1;
     focus.focusedCardIndex = 0;
     await dispatcher.executeCardAction("moveLeft");
     expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusMode).toBe("card"); // col-0 has cards
+  });
+
+  it("moveRight to an empty column drops to column mode", async () => {
+    data.cardsByColumn = { ...data.cardsByColumn, "col-1": [] };
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 0;
+    await dispatcher.executeCardAction("moveRight");
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(focus.focusMode).toBe("column");
   });
 
   it("pasteAbove creates a card at the focused index from the clipboard", async () => {

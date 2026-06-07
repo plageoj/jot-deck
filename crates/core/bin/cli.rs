@@ -265,12 +265,12 @@ fn cmd_card_new(parts: &[&str], conn: &Connection) {
             conn,
             NewCard {
                 column_id: column_id.to_string(),
-                content: content.clone(),
+                content,
             },
         ) {
             Ok(c) => {
                 println!("Created card: {}", c.id);
-                print_synced_tags(conn, &c.id, &content);
+                print_card_tags(conn, &c.id);
             }
             Err(e) => println!("Error: {}", e),
         }
@@ -285,7 +285,7 @@ fn cmd_card_edit(parts: &[&str], conn: &Connection) {
         match card::update_content(conn, id, &content) {
             Ok(c) => {
                 println!("Updated card: {}", c.id);
-                print_synced_tags(conn, &c.id, &content);
+                print_card_tags(conn, &c.id);
             }
             Err(e) => println!("Error: {}", e),
         }
@@ -294,9 +294,9 @@ fn cmd_card_edit(parts: &[&str], conn: &Connection) {
     }
 }
 
-/// Sync a card's tags and print them if any were extracted.
-fn print_synced_tags(conn: &Connection, card_id: &str, content: &str) {
-    if let Ok(tags) = tag::sync_card_tags(conn, card_id, content) {
+/// Print a card's tags (already synced by create/update_content) if it has any.
+fn print_card_tags(conn: &Connection, card_id: &str) {
+    if let Ok(tags) = tag::get_tags_by_card(conn, card_id) {
         if !tags.is_empty() {
             let tag_names: Vec<_> = tags.iter().map(|t| format!("#{}", t.name)).collect();
             println!("  Tags: {}", tag_names.join(", "));
