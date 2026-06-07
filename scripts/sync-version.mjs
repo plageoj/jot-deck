@@ -5,7 +5,9 @@
 // Usage:
 //   node scripts/sync-version.mjs <version>          # write <version> (also rewrites preview-base-version.txt with the base portion)
 //   node scripts/sync-version.mjs --from-package     # read from packages/app/package.json
-//   node scripts/sync-version.mjs --preview <num>    # append -preview.<num> to base from preview-base-version.txt
+//   node scripts/sync-version.mjs --preview <num>    # append -<num> to base from preview-base-version.txt
+//                                                    # (numeric-only pre-release: the Windows MSI/WiX target
+//                                                    #  rejects non-numeric pre-release identifiers like "-preview.N")
 
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -95,7 +97,9 @@ async function main() {
         `preview-base-version.txt must contain a bare MAJOR.MINOR.PATCH (got "${base}")`,
       );
     }
-    version = `${base}-preview.${args.num}`;
+    // Numeric-only pre-release (e.g. 0.1.0-42). The Windows MSI/WiX bundler
+    // rejects non-numeric pre-release identifiers, so "-preview.42" can't be used.
+    version = `${base}-${args.num}`;
   } else if (args.needRead) {
     version = (await readJson(TARGETS.appPackage)).version;
   } else {

@@ -51,7 +51,11 @@ jobs:
             echo "::error::preview build number $NUM exceeds MSI limit (65535). Bump $BASE_FILE."
             exit 1
           fi
-          echo "version=${BASE}-preview.${NUM}" >> "$GITHUB_OUTPUT"
+          # Numeric-only pre-release (e.g. 0.1.0-42): the Windows MSI/WiX
+          # bundler rejects non-numeric pre-release identifiers. Must match
+          # the string scripts/sync-version.mjs --preview produces, since the
+          # cleanup step matches release assets by this exact version.
+          echo "version=${BASE}-${NUM}" >> "$GITHUB_OUTPUT"
           echo "preview_num=${NUM}" >> "$GITHUB_OUTPUT"
 
   build:
@@ -126,18 +130,26 @@ jobs:
   publish-manifest:
     name: Promote updater manifest & clean stale assets
     needs: [prepare, build]
+    # Run even when one platform build failed, so stale bundles from prior
+    # preview pushes can't pile up on the rolling `preview` release. Each step
+    # guards itself (see below) so a partial build can never corrupt the live
+    # updater manifest. Requires prepare to have produced the version string.
+    if: always() && needs.prepare.result == 'success'
     permissions:
       contents: write # promotes/deletes release assets via gh
     runs-on: ubuntu-latest
     steps:
       - name: Promote latest.json → latest-preview.json
+        # Only when EVERY platform built. tauri-action writes latest.json
+        # incrementally per successful platform, so on a partial failure it
+        # would reference bundles that were never uploaded — promoting that
+        # breaks updates for the missing platform. On partial failure we skip
+        # this and the prior latest-preview.json keeps serving the last
+        # fully-good build. --clobber atomically overwrites the prior manifest,
+        # so installed Preview clients see a valid manifest at every moment.
+        if: needs.build.result == 'success'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # --clobber atomically overwrites the prior latest-preview.json,
-        # so installed Preview clients see a valid manifest at every moment.
-        # If this job is skipped due to a partial build failure, the prior
-        # latest-preview.json (pointing at the prior build's bundles) stays
-        # intact and clients keep working until the next green run.
         run: |
           set -euo pipefail
           mkdir -p tmp && cd tmp
@@ -152,23 +164,39 @@ jobs:
             --repo "${{ github.repository }}" --yes
 
       - name: Delete stale bundles from prior preview builds
+        # Runs on every green-prepare run, including partial build failures, so
+        # leftover bundles never accumulate. Bundle filenames embed the version;
+        # two versions are protected from deletion:
+        #   - KEEP_VERSION: the version this run built (may be only partial)
+        #   - the version the live latest-preview.json still points at
+        # so we never delete the bundles installed clients are updating from.
+        # On the very first run neither has assets yet and nothing is deleted.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEEP_VERSION: ${{ needs.prepare.outputs.version }}
-        # Bundle filenames embed the version, so anything not matching the
-        # version we just published is leftover from a prior preview push.
-        # Keep latest-preview.json regardless.
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
+          # Version currently served to clients (empty until the first promote).
+          tmpdir=$(mktemp -d)
+          gh release download preview --repo "$REPO" \
+            --pattern 'latest-preview.json' --dir "$tmpdir" 2>/dev/null || true
+          LIVE_VERSION=$(jq -r '.version // empty' "$tmpdir/latest-preview.json" 2>/dev/null || true)
+          echo "Keeping version '$KEEP_VERSION'${LIVE_VERSION:+ and live version '$LIVE_VERSION'}"
           gh release view preview \
-            --repo "${{ github.repository }}" \
+            --repo "$REPO" \
             --json assets --jq '.assets[].name' \
           | while IFS= read -r asset; do
               case "$asset" in
                 latest-preview.json) continue ;;
                 *"$KEEP_VERSION"*) continue ;;
               esac
+              if [ -n "$LIVE_VERSION" ]; then
+                case "$asset" in
+                  *"$LIVE_VERSION"*) continue ;;
+                esac
+              fi
               echo "Deleting stale asset: $asset"
               gh release delete-asset preview "$asset" \
-                --repo "${{ github.repository }}" --yes
+                --repo "$REPO" --yes
             done
