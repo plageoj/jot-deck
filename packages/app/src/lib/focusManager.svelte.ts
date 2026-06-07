@@ -15,7 +15,7 @@ type PersistedFocusState = {
 };
 
 export class FocusManager {
-  private data: DeckData;
+  private readonly data: DeckData;
 
   // Focus state
   focusMode = $state<FocusMode>("card");

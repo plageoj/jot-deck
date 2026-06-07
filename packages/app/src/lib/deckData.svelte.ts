@@ -268,13 +268,13 @@ export class DeckData {
         content,
         position,
       });
-      if (position !== undefined) {
-        await this.loadCardsForColumns();
-      } else {
+      if (position === undefined) {
         this.cardsByColumn[columnId] = [
           ...(this.cardsByColumn[columnId] || []),
           card,
         ];
+      } else {
+        await this.loadCardsForColumns();
       }
       return card;
     } catch (e) {

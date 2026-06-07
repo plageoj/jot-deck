@@ -36,7 +36,7 @@ export class WasmBackend implements DatabaseBackend {
    */
   async init(): Promise<void> {
     if (this.db) return;
-    if (this.initPromise) return this.initPromise;
+    if (this.initPromise !== null) return this.initPromise;
 
     this.initPromise = this._doInit();
     return this.initPromise;
@@ -268,7 +268,13 @@ export class WasmBackend implements DatabaseBackend {
 
     // Get max position or use provided position
     let position: number;
-    if (params.position !== undefined) {
+    if (params.position === undefined) {
+      const maxResult = db.exec(
+        "SELECT COALESCE(MAX(position), -1) FROM columns WHERE deck_id = ? AND deleted_at IS NULL",
+        [params.deck_id]
+      );
+      position = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
+    } else {
       position = params.position;
       // Shift existing columns
       db.run(
@@ -276,12 +282,6 @@ export class WasmBackend implements DatabaseBackend {
          WHERE deck_id = ? AND position >= ? AND deleted_at IS NULL`,
         [now, params.deck_id, position]
       );
-    } else {
-      const maxResult = db.exec(
-        "SELECT COALESCE(MAX(position), -1) FROM columns WHERE deck_id = ? AND deleted_at IS NULL",
-        [params.deck_id]
-      );
-      position = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
     }
 
     db.run(
@@ -452,7 +452,13 @@ export class WasmBackend implements DatabaseBackend {
 
     // Get max position or use provided position
     let position: number;
-    if (params.position !== undefined) {
+    if (params.position === undefined) {
+      const maxResult = db.exec(
+        "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ? AND deleted_at IS NULL",
+        [params.column_id]
+      );
+      position = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
+    } else {
       position = params.position;
       // Shift existing cards
       db.run(
@@ -460,12 +466,6 @@ export class WasmBackend implements DatabaseBackend {
          WHERE column_id = ? AND position >= ? AND deleted_at IS NULL`,
         [now, params.column_id, position]
       );
-    } else {
-      const maxResult = db.exec(
-        "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ? AND deleted_at IS NULL",
-        [params.column_id]
-      );
-      position = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
     }
 
     db.run(

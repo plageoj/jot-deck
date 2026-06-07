@@ -18,7 +18,10 @@ type Status =
   | { kind: "error"; message: string };
 
 function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+  return (
+    typeof globalThis.window !== "undefined" &&
+    "__TAURI_INTERNALS__" in globalThis
+  );
 }
 
 class UpdaterStore {

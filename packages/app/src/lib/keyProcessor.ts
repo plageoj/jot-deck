@@ -1,40 +1,51 @@
 import { type FocusMode, findAction, isValidPrefix } from "./keybindings";
 
+/** Modifier-only keys that never produce a sequence on their own. */
+const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
+
+/** Keys that map directly to their own name as a sequence token. */
+const DIRECT_KEYS: Record<string, string> = {
+  Escape: "Escape",
+  Enter: "Enter",
+  Delete: "Delete",
+  PageUp: "PageUp",
+  PageDown: "PageDown",
+};
+
+/** Build the "Ctrl+"/"Shift+" prefix for the active modifiers. */
+function modifierPrefix(event: KeyboardEvent): string {
+  let prefix = "";
+  if (event.ctrlKey) prefix += "Ctrl+";
+  if (event.shiftKey) prefix += "Shift+";
+  return prefix;
+}
+
+/** Whether the key is a function key (F1, F2, …). */
+function isFunctionKey(key: string): boolean {
+  return (
+    key.startsWith("F") && key.length >= 2 && !Number.isNaN(Number(key.slice(1)))
+  );
+}
+
 /**
  * Normalize a keyboard event into a key sequence string.
  * Returns null for modifier-only keys or unrecognized keys.
  */
 export function normalizeKey(event: KeyboardEvent): string | null {
-  if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) {
-    return null;
-  }
+  const { key } = event;
 
-  if (event.key === "Escape") return "Escape";
-  if (event.key === "Enter") return "Enter";
-  if (event.key === "Delete") return "Delete";
-  if (event.key === "PageUp") return "PageUp";
-  if (event.key === "PageDown") return "PageDown";
+  if (MODIFIER_KEYS.has(key)) return null;
 
-  if (event.key.startsWith("F") && event.key.length >= 2 && !isNaN(Number(event.key.slice(1)))) {
-    return event.key;
-  }
+  const direct = DIRECT_KEYS[key];
+  if (direct) return direct;
 
-  if (event.key.startsWith("Arrow")) {
-    let prefix = "";
-    if (event.ctrlKey) prefix += "Ctrl+";
-    if (event.shiftKey) prefix += "Shift+";
-    return prefix + event.key;
-  }
+  if (isFunctionKey(key)) return key;
 
-  if (event.ctrlKey && event.key.length === 1) {
-    let prefix = "Ctrl+";
-    if (event.shiftKey) prefix += "Shift+";
-    return prefix + event.key;
-  }
+  if (key.startsWith("Arrow")) return modifierPrefix(event) + key;
 
-  if (event.key.length === 1) {
-    return event.key;
-  }
+  if (event.ctrlKey && key.length === 1) return modifierPrefix(event) + key;
+
+  if (key.length === 1) return key;
 
   return null;
 }
