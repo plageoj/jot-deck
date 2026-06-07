@@ -26,8 +26,10 @@ fn run_repl(conn: &mut Connection) {
         io::stdout().flush().unwrap();
 
         let mut input = String::new();
-        if io::stdin().lock().read_line(&mut input).is_err() {
-            break;
+        // Stop on read error or EOF (0 bytes), e.g. when stdin is a closed pipe.
+        match io::stdin().lock().read_line(&mut input) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
         }
 
         let input = input.trim();

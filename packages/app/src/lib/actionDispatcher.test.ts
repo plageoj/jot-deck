@@ -856,3 +856,211 @@ describe("ActionDispatcher destroy", () => {
     expect(() => dispatcher.destroy()).not.toThrow();
   });
 });
+
+describe("ActionDispatcher.handleKeydown routing", () => {
+  let data: InstanceType<typeof DeckData>;
+  let focus: InstanceType<typeof FocusManager>;
+  let dispatcher: InstanceType<typeof ActionDispatcher>;
+
+  beforeEach(async () => {
+    resetState();
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [
+      makeColumn("col-0", "deck-1", { position: 0 }),
+      makeColumn("col-1", "deck-1", { position: 1 }),
+    ];
+    state.cardsByColumn = new Map([
+      ["col-0", [makeCard("c-0-a", "col-0")]],
+      ["col-1", [makeCard("c-1-a", "col-1")]],
+    ]);
+
+    data = new DeckData();
+    await data.init();
+    data.currentDeck = makeDeck("deck-1");
+    data.columns = [...state.columns];
+    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
+
+    focus = new FocusManager(data);
+    focus.focusMode = "column";
+    focus.focusedColumnIndex = 0;
+    dispatcher = new ActionDispatcher(data, focus);
+  });
+
+  it("does nothing while in edit mode", () => {
+    focus.focusMode = "edit";
+    const event = makeKeyEvent({ key: "j" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(focus.focusMode).toBe("edit");
+  });
+
+  it("processes a palette trigger while a palette is open (command mode)", () => {
+    focus.openPalette("deck"); // focusMode -> command
+    const event = makeKeyEvent({ key: "P", ctrl: true, shift: true });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("ignores non-trigger keys while a palette is open", () => {
+    focus.openPalette("deck");
+    const event = makeKeyEvent({ key: "j" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("ignores modifier-only keys while a palette is open", () => {
+    focus.openPalette("deck");
+    const event = makeKeyEvent({ key: "Shift" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("closes the cheatsheet on Escape", () => {
+    focus.showCheatsheet = true;
+    const event = makeKeyEvent({ key: "Escape" });
+    dispatcher.handleKeydown(event);
+    expect(focus.showCheatsheet).toBe(false);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("ignores unrelated keys while the cheatsheet is open", () => {
+    focus.showCheatsheet = true;
+    const event = makeKeyEvent({ key: "a" });
+    dispatcher.handleKeydown(event);
+    expect(focus.showCheatsheet).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("opens the cheatsheet with ?", () => {
+    const event = makeKeyEvent({ key: "?" });
+    dispatcher.handleKeydown(event);
+    expect(focus.showCheatsheet).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("opens the cheatsheet with Ctrl+/", () => {
+    const event = makeKeyEvent({ key: "/", ctrl: true });
+    dispatcher.handleKeydown(event);
+    expect(focus.showCheatsheet).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("is a no-op while the keybindings dialog is open", () => {
+    focus.showKeybindings = true;
+    const event = makeKeyEvent({ key: "j" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("dispatches a bound action through the key processor", () => {
+    const event = makeKeyEvent({ key: "j" }); // column mode: enterCardFocusFirst
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("swallows a valid multi-key prefix without acting", () => {
+    const event = makeKeyEvent({ key: "d" }); // prefix for "dd"
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(focus.focusMode).toBe("column");
+  });
+
+  it("ignores keys with no representation on the main path", () => {
+    const event = makeKeyEvent({ key: "Shift" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe("ActionDispatcher card-mode cross-column and paste actions", () => {
+  let data: InstanceType<typeof DeckData>;
+  let focus: InstanceType<typeof FocusManager>;
+  let dispatcher: InstanceType<typeof ActionDispatcher>;
+
+  beforeEach(async () => {
+    resetState();
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [
+      makeColumn("col-0", "deck-1", { position: 0 }),
+      makeColumn("col-1", "deck-1", { position: 1 }),
+    ];
+    state.cardsByColumn = new Map([
+      ["col-0", [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")]],
+      ["col-1", [makeCard("c-1-a", "col-1")]],
+    ]);
+
+    data = new DeckData();
+    await data.init();
+    data.currentDeck = makeDeck("deck-1");
+    data.columns = [...state.columns];
+    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
+
+    focus = new FocusManager(data);
+    focus.focusMode = "card";
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 0;
+    dispatcher = new ActionDispatcher(data, focus);
+  });
+
+  it("moveCardLeft moves the focused card to the previous column", async () => {
+    focus.focusedColumnIndex = 1;
+    focus.focusedCardIndex = 0;
+    await dispatcher.executeCardAction("moveCardLeft");
+    expect(state.moveCardToColumnCalls[0]).toEqual({
+      id: "c-1-a",
+      column_id: "col-0",
+    });
+    expect(focus.focusedColumnIndex).toBe(0);
+  });
+
+  it("moveCardLeft is a no-op at the first column", async () => {
+    focus.focusedColumnIndex = 0;
+    await dispatcher.executeCardAction("moveCardLeft");
+    expect(state.moveCardToColumnCalls.length).toBe(0);
+  });
+
+  it("moveCardRight moves the focused card to the next column", async () => {
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 0;
+    await dispatcher.executeCardAction("moveCardRight");
+    expect(state.moveCardToColumnCalls[0].column_id).toBe("col-1");
+    expect(focus.focusedColumnIndex).toBe(1);
+  });
+
+  it("moveCardRight is a no-op at the last column", async () => {
+    focus.focusedColumnIndex = 1;
+    await dispatcher.executeCardAction("moveCardRight");
+    expect(state.moveCardToColumnCalls.length).toBe(0);
+  });
+
+  it("moveLeft navigates to the previous column in card mode", async () => {
+    focus.focusedColumnIndex = 1;
+    focus.focusedCardIndex = 0;
+    await dispatcher.executeCardAction("moveLeft");
+    expect(focus.focusedColumnIndex).toBe(0);
+  });
+
+  it("pasteAbove creates a card at the focused index from the clipboard", async () => {
+    focus.focusedCardIndex = 1;
+    focus.clipboardCard = { ...makeCard("clip", "col-0"), content: "above" };
+    await dispatcher.executeCardAction("pasteAbove");
+    expect(state.createCardCalls[0]?.content).toBe("above");
+    expect(state.createCardCalls[0]?.position).toBe(1);
+  });
+
+  it("pasteBelow/pasteAbove are no-ops with an empty clipboard", async () => {
+    focus.clipboardCard = null;
+    await dispatcher.executeCardAction("pasteAbove");
+    await dispatcher.executeCardAction("pasteBelow");
+    expect(state.createCardCalls.length).toBe(0);
+  });
+
+  it("deleteCard exits to column mode when the column becomes empty", async () => {
+    focus.focusedColumnIndex = 1; // col-1 has a single card
+    focus.focusedCardIndex = 0;
+    await dispatcher.executeCardAction("deleteCard");
+    expect(state.deleteCardCalls).toContain("c-1-a");
+    expect(focus.focusMode).toBe("column");
+  });
+});
