@@ -49,22 +49,53 @@ fn run_repl(conn: &mut Connection) {
 /// Dispatch a single command. Returns `false` when the REPL should exit.
 fn dispatch(cmd: &str, parts: &[&str], conn: &mut Connection) -> bool {
     match cmd {
+        "quit" | "exit" | "q" => {
+            println!("Goodbye!");
+            return false;
+        }
         "help" | "h" | "?" => print_help(),
+        "cleanup" => cmd_cleanup(conn),
+        _ => {
+            let handled = dispatch_deck(cmd, parts, conn)
+                || dispatch_column(cmd, parts, conn)
+                || dispatch_card(cmd, parts, conn)
+                || dispatch_tag_and_trash(cmd, parts, conn);
+            if !handled {
+                println!("Unknown command: {}. Type 'help' for available commands.", cmd);
+            }
+        }
+    }
+    true
+}
 
-        // Deck commands
+/// Handle deck commands. Returns `false` if `cmd` is not a deck command.
+fn dispatch_deck(cmd: &str, parts: &[&str], conn: &Connection) -> bool {
+    match cmd {
         "deck-new" | "dn" => cmd_deck_new(parts, conn),
         "deck-list" | "dl" => cmd_deck_list(conn),
         "deck-show" | "ds" => cmd_deck_show(parts, conn),
         "deck-delete" | "dd" => cmd_deck_delete(parts, conn),
+        _ => return false,
+    }
+    true
+}
 
-        // Column commands
+/// Handle column commands. Returns `false` if `cmd` is not a column command.
+fn dispatch_column(cmd: &str, parts: &[&str], conn: &Connection) -> bool {
+    match cmd {
         "col-new" | "cn" => cmd_col_new(parts, conn),
         "col-rename" | "cr" => cmd_col_rename(parts, conn),
         "col-delete" | "cd" => cmd_col_delete(parts, conn),
         "col-restore" => cmd_col_restore(parts, conn),
         "col-move" | "cm" => cmd_col_move(parts, conn),
+        _ => return false,
+    }
+    true
+}
 
-        // Card commands
+/// Handle card commands. Returns `false` if `cmd` is not a card command.
+fn dispatch_card(cmd: &str, parts: &[&str], conn: &Connection) -> bool {
+    match cmd {
         "card-new" | "an" => cmd_card_new(parts, conn),
         "card-edit" | "ae" => cmd_card_edit(parts, conn),
         "card-delete" | "ad" => cmd_card_delete(parts, conn),
@@ -72,23 +103,18 @@ fn dispatch(cmd: &str, parts: &[&str], conn: &mut Connection) -> bool {
         "card-fav" | "af" => cmd_card_fav(parts, conn),
         "card-move" | "am" => cmd_card_move(parts, conn),
         "card-movecol" => cmd_card_movecol(parts, conn),
+        _ => return false,
+    }
+    true
+}
 
-        // Tag commands
+/// Handle tag and trash commands. Returns `false` if `cmd` is not one of them.
+fn dispatch_tag_and_trash(cmd: &str, parts: &[&str], conn: &Connection) -> bool {
+    match cmd {
         "tags" | "t" => cmd_tags(parts, conn),
         "tag-search" | "ts" => cmd_tag_search(parts, conn),
-
-        // Trash commands
         "trash" => cmd_trash(parts, conn),
-
-        // Cleanup
-        "cleanup" => cmd_cleanup(conn),
-
-        "quit" | "exit" | "q" => {
-            println!("Goodbye!");
-            return false;
-        }
-
-        _ => println!("Unknown command: {}. Type 'help' for available commands.", cmd),
+        _ => return false,
     }
     true
 }
