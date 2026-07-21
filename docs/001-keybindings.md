@@ -18,6 +18,7 @@
 | **Card** | カード本体にフォーカス。カード単位の操作が可能。 | Column フォーカス時に `j` / `k` / `↑` / `↓` / `Enter` |
 | **Edit** | カード内テキスト編集中。CodeMirror がアクティブ。 | Card フォーカス時に `i` / `a` / `Enter` |
 | **Command** | コマンドパレット表示中。 | `Ctrl+Shift+p` / `F1` |
+| **Tutorial** | チュートリアルのガイドオーバーレイ表示中。下層フォーカスに被さる**一時レイヤー**。ハンズオン中（Observe）は `Escape` を含む全キーを下層へ透過して観測に徹し、`Tab` でコーチマークへ移ると中断・前後移動などの UI 操作（Control）が可能。終了時は元のフォーカスへ復帰。 | 初回起動ダイアログ / コマンドパレット「Tutorial」 |
 
 ```mermaid
 stateDiagram-v2
@@ -30,7 +31,13 @@ stateDiagram-v2
     Card --> Command : Ctrl+Shift+p / F1
     Command --> Column : Escape
     Command --> Card : Escape
+    Column --> Tutorial : Tutorial command / first launch
+    Card --> Tutorial : Tutorial command / first launch
+    Tutorial --> Column : finish / exit
+    Tutorial --> Card : finish / exit
 ```
+
+> **Note:** `Tutorial` は通常のフォーカス遷移とは異なり、下層の Column / Card / Edit に重ねて表示される一時オーバーレイ。詳細は `docs/007-tutorial.md` 4.2 を参照。
 
 ---
 
@@ -228,6 +235,7 @@ CodeMirror の Vim モードがそのまま適用される。
 | `AI Draft` | AI 清書を開始 |
 | `Toggle Theme` | ダーク/ライトモード切り替え |
 | `Keyboard Shortcuts` | キーバインド一覧表示 |
+| `Tutorial` | インタラクティブチュートリアルを開始（`docs/007-tutorial.md`） |
 
 ---
 
