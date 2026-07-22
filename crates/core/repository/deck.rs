@@ -20,7 +20,7 @@ fn parse_datetime(s: &str, col_idx: usize) -> rusqlite::Result<DateTime<Utc>> {
 
 /// Deck を作成する
 pub fn create(conn: &Connection, new_deck: NewDeck) -> Result<Deck> {
-    let id = Ulid::new().to_string();
+    let id = Ulid::generate().to_string();
     let now = Utc::now();
 
     conn.execute(

@@ -39,7 +39,7 @@ fn get_next_position(conn: &Connection, column_id: &str) -> Result<i32> {
 
 /// Card を作成する
 pub fn create(conn: &Connection, new_card: NewCard) -> Result<Card> {
-    let id = Ulid::new().to_string();
+    let id = Ulid::generate().to_string();
     let now = Utc::now();
     let position = get_next_position(conn, &new_card.column_id)?;
 
@@ -72,7 +72,7 @@ pub fn create(conn: &Connection, new_card: NewCard) -> Result<Card> {
 
 /// 特定の位置に Card を作成する
 pub fn create_at_position(conn: &Connection, new_card: NewCard, position: i32) -> Result<Card> {
-    let id = Ulid::new().to_string();
+    let id = Ulid::generate().to_string();
     let now = Utc::now();
 
     let tx = conn.unchecked_transaction()?;
