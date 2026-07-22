@@ -67,6 +67,10 @@ flowchart TB
 | **Frontend** | 外部起因の追加/更新を差分描画。delta のコアレス。 | ホットパス |
 | **同期エンジン** | commit 済みカードのみを対象に背景同期。 | 背景（ホットパス外） |
 
+> **共通基盤の注記:** 上表の**ローカル書き込み口・Card Repository・変更通知は本体の資産**であり、Reporter 専用ではない。同じ基盤を汎用エージェント向けに MCP として外部公開する姉妹設計が `008-mcp-server.md`。本書と 008 は互いに独立して読める。
+>
+> **トランスポートの違い:** Reporter は**ホストが spawn** するため、ホストが持つ stdio パイプ 1 本で committed / ephemeral の両チャネルを運び、ホストが書き込み口を握る（本節）。対して MCP ブリッジは **Claude が spawn** しホストがパイプを持てないため、`008` §3 では CLI 同型の**直接 DB リンク**（committed のみ、ephemeral 非対応）を採る。共有するのは core ライブラリと DB であって、到達経路は spawn 主体で変わる。
+
 ### 2.2 ホストが Reporter を spawn する
 
 Jot Deck 本体がホストとなり、設定に基づいて各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。この形により：
@@ -99,7 +103,7 @@ HTTP API である必然性はなく、Windows 対応を含めて **stdio + JSON
 | 実装コスト | 低 | 中 |
 | 他 MCP ホストからの再利用 | × | ◎（Reporter が汎用ドメインイベント源に格上げ） |
 
-サードパーティに Reporter/レシピを作らせてエコシステム化する事業方針を採るなら、初手からフル MCP 準拠に投資する価値がある。内製に留めるなら「ならう」だけで足りる。
+サードパーティに Reporter/レシピを作らせてエコシステム化する事業方針を採るなら、初手からフル MCP 準拠に投資する価値がある。内製に留めるなら「ならう」だけで足りる。**フル MCP 準拠が本当に要るのは汎用エージェント境界だけ**で、そこは本書ではなく `008-mcp-server.md` が扱う（Reporter 実装には不要）。
 
 ---
 
@@ -166,10 +170,11 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 ## 7. 並行性とカード所有権
 
-Reporter が delta を流し込む最中のユーザ手編集は衝突する。`stream.begin`〜`end` の間、対象カードは**その Reporter の所有**とみなす：
+Reporter が delta を流し込む最中のユーザ手編集は衝突する。カード編集の競合制御（占有ロック・楽観ロック）は `002-data-structure.md` §5 に一元定義される。本節はその Reporter における具体化：`stream.begin`〜`end` の間、対象カードは**その Reporter の占有**（`002` §5.2 の `locked_by`）とみなす。
 
 - ユーザ編集をロック、または「◍ AI 生成中」として視覚化。
 - 既存の focus model（column / card / edit / command）に、**streaming（read-only 表示）状態**を追加するイメージ。
+- `stream.begin` でロック取得、`end`（commit）で解放。放棄・クラッシュ時は `002` §5.2 のリース失効で回収する（→ 5 章の max open duration backstop と同根）。
 
 position 採番はユーザ手編集と AI 追記が同じカラム末尾を奪い合うため、**本体 Repository に一元化**（Reporter に採番させない）。
 
@@ -227,4 +232,4 @@ position 採番はユーザ手編集と AI 追記が同じカラム末尾を奪�
 - `000-spec.md` - 基本設計書（カード・カラム・Deck の概念）
 - `001-keybindings.md` - キーバインドと focus model（streaming 状態の追加先）
 - `002-data-structure.md` - データモデルと論理削除（同期メタの追加先）
-- `008-mcp-server.md` - Deck を汎用エージェント（Claude 等）に MCP サーバとして開く外向きの対の設計（読み取り側はここが担う）
+- `008-mcp-server.md` - 同じ本体基盤を汎用エージェント（Claude 等）向けに MCP として外部公開する姉妹設計（本書とは独立に読める）
