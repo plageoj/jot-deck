@@ -64,7 +64,7 @@ fn get_next_position(conn: &Connection, deck_id: &str) -> Result<i32> {
 
 /// Column を作成する
 pub fn create(conn: &Connection, new_column: NewColumn) -> Result<Column> {
-    let id = Ulid::new().to_string();
+    let id = Ulid::generate().to_string();
     let now = Utc::now();
     let position = get_next_position(conn, &new_column.deck_id)?;
 
@@ -99,7 +99,7 @@ pub fn create(conn: &Connection, new_column: NewColumn) -> Result<Column> {
 
 /// 特定の位置に Column を作成する
 pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i32) -> Result<Column> {
-    let id = Ulid::new().to_string();
+    let id = Ulid::generate().to_string();
     let now = Utc::now();
 
     let name = if new_column.name.is_empty() {

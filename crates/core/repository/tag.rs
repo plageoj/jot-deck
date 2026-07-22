@@ -40,7 +40,7 @@ pub fn get_or_create(conn: &Connection, name: &str) -> Result<Tag> {
     }
 
     // 存在しなければ作成
-    let id = Ulid::new().to_string();
+    let id = Ulid::generate().to_string();
     conn.execute(
         "INSERT INTO tags (id, name) VALUES (?1, ?2)",
         params![&id, name],
