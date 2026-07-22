@@ -37,7 +37,7 @@ stateDiagram-v2
     Tutorial --> Card : finish / exit
 ```
 
-> **Note:** `Tutorial` は通常のフォーカス遷移とは異なり、下層の Column / Card / Edit に重ねて表示される一時オーバーレイ。詳細は `docs/007-tutorial.md` 4.2 を参照。
+> **Note:** `Tutorial` は通常のフォーカス遷移とは異なり、下層の Column / Card / Edit に重ねて表示される一時オーバーレイ。詳細は `docs/006-tutorial.md` 4.2 を参照。
 
 ---
 
@@ -151,13 +151,7 @@ stateDiagram-v2
 | `u` | 直近の削除から順に復元（削除スタックの先頭をポップ） |
 | `g t` | 削除スタック一覧を表示（任意の Column/Card を選択して復元可能） |
 
-### 4.5 AI 操作
-
-| キー | 動作 |
-|:---|:---|
-| `Ctrl+Space` | AI 清書ダイアログを開く |
-
-### 4.6 その他
+### 4.5 その他
 
 | キー | 動作 |
 |:---|:---|
@@ -232,10 +226,9 @@ CodeMirror の Vim モードがそのまま適用される。
 | `Delete Column` | Column 論理削除 |
 | `Trash` | 削除スタック一覧を表示（任意の Column/Card を選択して復元） |
 | `Settings` | 設定画面を開く |
-| `AI Draft` | AI 清書を開始 |
 | `Toggle Theme` | ダーク/ライトモード切り替え |
 | `Keyboard Shortcuts` | キーバインド一覧表示 |
-| `Tutorial` | インタラクティブチュートリアルを開始（`docs/007-tutorial.md`） |
+| `Tutorial` | インタラクティブチュートリアルを開始（`docs/006-tutorial.md`） |
 
 ---
 
