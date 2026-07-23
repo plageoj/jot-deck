@@ -37,7 +37,7 @@ stateDiagram-v2
     Tutorial --> Card : finish / exit
 ```
 
-> **Note:** `Tutorial` は通常のフォーカス遷移とは異なり、下層の Column / Card / Edit に重ねて表示される一時オーバーレイ。詳細は `docs/007-tutorial.md` 4.2 を参照。
+> **Note:** `Tutorial` は通常のフォーカス遷移とは異なり、下層の Column / Card / Edit に重ねて表示される一時オーバーレイ。詳細は `docs/006-tutorial.md` 4.2 を参照。
 
 ---
 
@@ -151,13 +151,7 @@ stateDiagram-v2
 | `u` | 直近の削除から順に復元（削除スタックの先頭をポップ） |
 | `g t` | 削除スタック一覧を表示（任意の Column/Card を選択して復元可能） |
 
-### 4.5 AI 操作
-
-| キー | 動作 |
-|:---|:---|
-| `Ctrl+Space` | AI 清書ダイアログを開く |
-
-### 4.6 その他
+### 4.5 その他
 
 | キー | 動作 |
 |:---|:---|
@@ -232,10 +226,9 @@ CodeMirror の Vim モードがそのまま適用される。
 | `Delete Column` | Column 論理削除 |
 | `Trash` | 削除スタック一覧を表示（任意の Column/Card を選択して復元） |
 | `Settings` | 設定画面を開く |
-| `AI Draft` | AI 清書を開始 |
 | `Toggle Theme` | ダーク/ライトモード切り替え |
 | `Keyboard Shortcuts` | キーバインド一覧表示 |
-| `Tutorial` | インタラクティブチュートリアルを開始（`docs/007-tutorial.md`） |
+| `Tutorial` | インタラクティブチュートリアルを開始（`docs/006-tutorial.md`） |
 
 ---
 
@@ -251,33 +244,3 @@ CodeMirror の Vim モードがそのまま適用される。
 | 項目 | 問題 | 案 |
 |:---|:---|:---|
 | マルチカーソル | CodeMirror の Vim モードではサポート限定的 | MVP では対応しない |
-
----
-
-## 9. キーバインド設計の由来
-
-### 9.1 Vim 由来のキーバインド
-* `h/j/k/l` - 方向キー（左/下/上/右）
-* `i/a` - Edit フォーカス開始
-* `o/O` - 新規カード作成
-* `d d` - 削除
-* `y y` - ヤンク（コピー）
-* `p/P` - ペースト
-* `g g` - 先頭へ移動
-* `G` - 末尾へ移動
-* `u` - Undo
-* `Ctrl+r` - Redo
-* `H/L` - フォーカスに応じた移動（Column: 並び替え、Card: カラム間移動）
-* `J/K` - Card フォーカス時のカード並び替え
-* `Escape` - 上位フォーカスへ戻る
-
-### 9.2 Twitter (X) 由来のキーバインド
-* `j/k` - 投稿間の移動（Vim と共通）
-* `f` - Favorite（スコアアップ）※ 旧 Twitter の favorite キー
-* `F` - Unfavorite（スコアダウン）
-* `g h` - Deck 切り替え（Twitter の Home へ移動に類似）
-* `g n` - カラム切り替え（Twitter の Notifications に類似）
-* `g 1` 〜 `g 9` - n 番目のカラムへ（Twitter のリスト移動に類似）
-* `/` - 検索（Twitter と共通、`/#tag` でタグフィルタ）
-* `?` - ショートカット一覧表示（Twitter と共通）
-* `n` - 新規投稿（Jot Deck では `o` のエイリアスとして採用）

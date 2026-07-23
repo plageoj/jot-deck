@@ -18,7 +18,7 @@ Jot Deck はタグ push を起点とした GitHub Releases 配信と、Tauri upd
 | updater マニフェスト | `latest.json` | `latest-preview.json` |
 | バージョン表記 | `1.2.3` | `1.2.3-<n>`（`<n>` = base からのコミット数） |
 
-### A 案を採用する理由
+### チャンネルを別アプリとして分ける理由
 
 * Production と Preview を**別アプリとしてインストール**するため、データディレクトリが完全分離される
 * Preview で破壊的な SQLite マイグレーションを試しても Production のローカルデータが壊れない

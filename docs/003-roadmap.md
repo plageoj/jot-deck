@@ -57,8 +57,6 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * カード操作キー（`o`, `d d`, `y y`, `p` など）
 * カード削除操作
 * カラム操作キー（`H`, `L`, `c` など）
-
-#### 追加実装済み
 * カード コピー & ペースト（`y y` / `p` / `P`）
 * カラム切り替えパレット（`g n` / `g c` / `Ctrl+t`）
 
@@ -78,16 +76,6 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * タグによる Deck 全体フィルタ
 * フィルタ中の検索バー風 UI 表示
 
-#### 実装済み
-* DB 層でのタグ自動抽出・保存（`tags`, `card_tags` テーブル）
-* Tauri コマンド公開（`get_tags_by_deck`, `get_cards_by_tag`, `get_tag_suggestions`）
-* View モードでの `#tag` ハイライト表示（`TagHighlight` コンポーネント）
-* CodeMirror エディタでのタグオートコンプリート（`@codemirror/autocomplete`、`Tab` で確定）
-* タグクリックでの Deck 全体フィルタ（非マッチカードの半透明化）
-* `/` キーでタグパレット表示（`TagPalette`、`PaletteDialog` ベース）
-* フィルタ中の検索バー風 UI 表示（`TagFilterBar`）
-* コマンドパレットに「Filter by Tag」「Clear Tag Filter」追加
-
 ### 3.6 Deck 管理 UI ✅
 
 #### 成果物
@@ -95,17 +83,7 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * `Ctrl+p` によるコマンドパレットからの Deck 切り替え（VS Code の Recent Workspaces 風）
 * Deckスイッチャー UI（Chrome の Profile Switcher 風）
 * 起動時に最後に開いていた Deck を自動で開く
-* 初回起動時のオンボーディング Deck 読み込み
-
-#### 実装済み
-* DB 層での Deck CRUD
-* コマンドパレット基盤（Phase 3.4）
-* `Ctrl+P` で Deck 切り替えパレット表示（`DeckPalette`、`PaletteDialog` ベース）
-* Chrome Profile Switcher 風 `DeckSwitcher` ドロップダウン（ヘッダー内）
-* ドロップダウンからの Deck 名前変更・削除
-* コマンドパレットに「Switch Deck」「Rename Deck」「Delete Deck」追加
-* `localStorage` による最後に開いた Deck の記憶・自動復元
-* 初回起動時のオンボーディング Deck（「Getting Started」: Welcome / Navigation / Tips カラム付き）
+* 初回起動時のオンボーディング Deck 読み込み（「Getting Started」: Welcome / Navigation / Tips カラム付き）
 
 ### 3.7 削除スタック（ゴミ箱）UI ✅
 
@@ -114,25 +92,13 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * `u` で直近の削除から順に復元
 * `g t` で削除スタック一覧表示、任意の項目を選択して復元
 
-#### 実装済み
-* DB 層の `restoreCard()` / `restoreColumn()` / `getDeletedCards()` / `getDeletedColumns()`
-* `deleted_at` から導出する Deck 単位の削除スタック（`DeckData.getTrashItems()`）— アプリ再起動後も保持
-* `u` キーによる直近削除の復元（DB ベース）
-* `g t` キーバインドで `TrashPalette` を表示（`PaletteDialog` ベースのモーダル UI）
-* コマンドパレットに「Trash」追加
-
 ### 3.8 セッション状態の永続化 ✅
 
 #### 成果物
 * フォーカス位置（最後にフォーカスされた Column インデックス）の保存・復元
 * カラム別カードフォーカス（各 Column で最後にフォーカスされた Card インデックス）の保存・復元
 * 保存先: ブラウザ `localStorage`（Deck ごとに `jot-deck:focus:<deckId>` キー）
-
-#### 実装済み
-* `FocusManager` の Deck ごとの永続化（`focusedColumnIndex` + `lastFocusedCardByColumn`）
-* 起動時 / Deck 切り替え時の復元（`setCurrentDeck` + `clampToLoadedDeck`）
-* 保存値が現在のカラム数 / カード数を超える場合のクランプ処理
-* Deck 削除時の永続化エントリのクリーンアップ
+* 保存値が現在のカラム数 / カード数を超える場合はクランプする
 
 ### 3.9 設定画面・テーマ切り替え ✅
 
@@ -140,76 +106,75 @@ Rust バックエンド + 最小限 Svelte フロントエンドの統合。
 * ダーク / ライトモード（OS 設定追従）
 * フォント設定（family / size / line-height）
 * Markdown / プレーンテキスト表示切り替え
-* キーバインドカスタマイズ UI
-* Codemirror の Vim mode ON/OFF 切り替え
-
-#### 実装済み
-* `SettingsStore` による設定の永続化（将来的なオンライン同期のため SQLite に保存）
-* `data-theme` 属性ベースのランタイムテーマ切り替え（auto / dark / light）
-* フォントファミリー・サイズ・line-height を CSS カスタムプロパティで動的反映
-* `SettingsDialog` コンポーネント（`Ctrl+,` / コマンドパレット「Settings」 / ヘッダーボタンから起動）
-* Markdown 表示切替（`MarkdownContent`、`#tag` ハイライトを保ったまま `**bold**` / `*italic*` / `` `code` `` / リンクをレンダリング）
-* CodeMirror の Vim モード ON/OFF 切り替え（OFF 時は `Ctrl+Enter` で保存して終了、`Escape` で保存せず終了）
-* キーバインドカスタマイズ UI（独立モーダル `KeybindingsDialog`）
-  * 設定ダイアログの「Customize keybindings…」ボタン / コマンドパレット「Customize Keybindings」/ `focus.showKeybindings` から起動する独立モーダル
-  * **デフォルトの上書き**: 各デフォルトバインドの安定シグネチャ（`action + modes + デフォルト sequence`）をキーにユーザーの上書きを保存（`SettingsState.keybindingOverrides`）。キーを押して記録するリマップ（`Escape` で記録キャンセル）、無効化、個別/全体リセット。Column / Card / Common スコープ別の一覧・フィルタ
-  * **新規バインドの追加**: アクション（既定アクション一覧から選択）+ スコープ + キーを指定して独自バインドを追加（`SettingsState.customKeybindings`）。一覧から再マップ・削除可能
-  * いずれも SQLite の `app` 設定 JSON に相乗り（DB スキーマ変更なし）。防御的デシリアライズで不正値を除去
-  * 競合検出（同一キーの重複=エラーでブロック、プレフィックス重複=警告）
-  * `findAction` / `isValidPrefix` / `getKeybindingsForMode` をアクティブレジストリ駆動（デフォルト＋上書き＋追加）に変更し、チートシートにも反映
+* Codemirror の Vim mode ON/OFF 切り替え（OFF 時は `Ctrl+Enter` で保存して終了、`Escape` で保存せず終了）
+* 設定は SQLite の `app` 設定 JSON に保存（将来的なオンライン同期のため。DB スキーマ変更なし）
+* キーバインドカスタマイズ UI: デフォルトの上書き（リマップ / 無効化 / リセット）と新規バインドの追加。Column / Card / Common スコープ別に一覧・フィルタし、競合を検出（重複=エラー、プレフィックス重複=警告）
 
 ---
 
-## Phase 4: AI ストリーミング
+## Phase 4: MCP サーバ（読み取り面）
 
 ### 目標
-Cloudflare AI Gateway 経由で Gemini API 連携。Worker による認証・レート制限とストリーミングレスポンス実装。
+Deck の読み取り面を MCP サーバとして公開し、power user が手元の汎用エージェント（Claude Desktop / Claude Code 等）から Deck を AI ナレッジベースとして参照できるようにする。ローカル完結・バックエンド不要・課金不要。
 
-### 4.1 Worker 基盤
+MCP ブリッジは CLI 同型の**別プロセスから同一 `jot-deck.db` を直接開く**。読み取り専用でも GUI と同時オープンになるため、並行アクセス基盤の整備を先行タスクとして成果物に含める。
 
-#### 成果物
-* Cloudflare Worker プロジェクト作成
-* AI Gateway 設定（Gemini 連携）
-* `/synthesize` エンドポイント実装
-* JWT 認証・プラン別レート制限
+### 成果物
+* 並行アクセス基盤: `create_file_db` を **WAL モード＋busy_timeout** 化（GUI 側 `Mutex<Connection>` は書き込みトランザクションを長く握らない）
+* スキーマ移行: `columns` テーブルへ `private` / `description` を追加
+* stdio MCP ブリッジ server（`jot_deck_core` をリンクし DB を直接オープン・読み取り専用）
+* 読み取り tool: `list_columns` / `read_card` / `search_cards` / `recent_cards`
+* オンボーディング面: `describe_deck` tool（＋補助の `deck://schema` resource）と MCP `instructions`
+* KB resource: `deck://{deck_id}`
+* Deck 既定スコープ（接続＝1 Deck、設定ゼロで KB）と `private` 除外による read 可視性制御
+* Deck 管理 UI に deck id の表示/コピー導線（`mcpServers` 設定の env に貼る用）
 
-### 4.2 Rust クライアント
+> power user は手元のエージェントで清書・要約を行うため、AI 連携は自社クラウドではなく MCP 読み取り面で提供する。立ち上げコスト（Worker / 認証 / レート制限 / 推論コスト）を負わずに「Deck を AI KB として開く」狙いを最短で満たす。
 
-#### 成果物
-* `crates/core/src/ai/` モジュール作成
-* Worker API へのストリーミング HTTP リクエスト
-* Tauri Channel によるフロントエンド通知
-
-### 4.3 フロントエンド UI
-
-#### 成果物
-* 清書ダイアログコンポーネント
-* ストリーミング結果表示
-* 結果アクション（コピー、カード追加）
-* コマンドパレットへの `AI Draft` 追加
-
-### 4.4 エラーハンドリング・UX
-
-#### 成果物
-* エラー表示 UI（認証、レート制限、ネットワーク）
-* リトライロジック
-* 使用量表示
-
-詳細設計: `005-ai-integration.md`
+詳細設計: `008-mcp-server.md`
 
 ---
 
-## Phase 5: 認証・課金
+## Phase 5: Reporter 基盤 + MCP 書き込み面
 
 ### 目標
-Google OAuth + Stripe 連携。Cloudflare Workers で API を構築。
+Reporter（外部ストリーミング入力アダプタ）と汎用エージェントの書き込みを可能にする。トランスポートは spawn 主体で分岐する ―― Reporter はホストが spawn し stdio パイプ 1 本で両チャネルを運ぶ（ローカル書き込み口）、MCP ブリッジは Claude が spawn し直接 DB へ書く。有料 Reporter 製品ラインの土台。
+
+### 先行タスク（書き込み共通の土台）
+Reporter・MCP 書き込みのどちらより先に入れる。両パスが依存する。
+* `cards` テーブルへ `locked_by` / `locked_at` を追加するスキーマ移行
+* カード編集の競合制御（占有ロック＋楽観ロック、`002` §5）― Reporter の streaming 占有・MCP patch の楽観ロックが共通で乗る
+* GUI の**外部変更観測**: `PRAGMA data_version` の約 1s ポーリング＋`updated_at`/`deleted_at` 差分描画（ブリッジ/CLI の外部書き込み用。ホスト内 Reporter の書き込みは `update_hook` で即時描画）
+
+### 成果物（Reporter 基盤）
+* ローカル書き込み口（ホスト spawn ＋ stdio、認証スコープ・採番一元化・変更通知）
+* 2 チャネル（committed / ephemeral）とカード長 commit 制約、`streaming` フォーカス状態
+* frontend の外部起因カード追加/更新の差分描画（delta コアレス）
+* 参照実装 Reporter 1 種（例: 議事録、Whisper ベースの音声認識）
+
+### 成果物（MCP 書き込み面 ―― 直接 DB リンク）
+* カード書き込み: `append_card`（idempotency key）/ `patch_card`（`expected_updated_at` 楽観ロック）/ `move_card` / `delete_card`
+* 構造再編: `ensure_column` / `update_column` / `move_column`（Deck 内フル再編・Deck 越え不可）。`ensure_column` の新規作成は structure 有効かつ write allowlist 未指定のときのみ（deny structure / allowlist 明示ではエラー、既存取得は可）
+* 安全域（`008` §5）: capability opt-out（既定 full write、機微な接続は個別に deny）・接続ごとレート制限・接続 id 帰属・回復性（論理削除＋アンドゥ）
+
+詳細設計: `007-reporter-protocol.md` / `008-mcp-server.md`
+
+---
+
+## Phase 6: 認証・課金（Reporter 課金）
+
+### 目標
+Google OAuth + Stripe 連携。Cloudflare Workers で API を構築。音声認識（Whisper 等）の実コストと独自ロジックを内包する有料 Reporter のサブスク課金・ライセンス検証を実現する。
 
 ### 成果物
 * 認証・課金が動作する MVP 完成
+* Reporter 単位のサブスク / ライセンス検証
+
+> Reporter は Whisper 等の実コスト・独自チャンキング/分類ロジックを内包するため、サブスク課金に合理性がある（`007-reporter-protocol.md` §9.4）。本体（表示・検索・MCP 読み取り面）は無料で power user に広く行き渡らせ、Reporter で稼ぐ構造とする。
 
 ---
 
-## Phase 6: チュートリアル
+## Phase 7: チュートリアル
 
 ### 目標
 初回起動時および任意のタイミングで呼び出せるインタラクティブチュートリアルを実装。フォーカスモデルと主要操作をハンズオンで学べるようにする。
@@ -222,11 +187,11 @@ Google OAuth + Stripe 連携。Cloudflare Workers で API を構築。
 * スポットライト + コーチマーク + キーヒントのオーバーレイ UI（`tutorial` フォーカスモード）
 * 完了 / 中断 / 途中再開フラグの永続化（`SettingsStore` 相乗り、DB スキーマ変更なし）
 
-詳細設計: `007-tutorial.md`
+詳細設計: `006-tutorial.md`
 
 ---
 
-## Phase 7: クラウド同期
+## Phase 8: クラウド同期
 
 ### 目標
 Automerge + PartyKit でリアルタイム同期。
@@ -238,10 +203,10 @@ Automerge + PartyKit でリアルタイム同期。
 
 ## 将来の Phase
 
-* **Phase 8:** 全文検索
-* **Phase 9:** macOS / Linux 対応
-* **Phase 10:** エクスポート機能
-* **Phase 11:** 共有機能
+* **Phase 9:** 全文検索
+* **Phase 10:** macOS / Linux 対応
+* **Phase 11:** エクスポート機能
+* **Phase 12:** 共有機能
 
 ---
 
@@ -252,7 +217,8 @@ Automerge + PartyKit でリアルタイム同期。
 | **データ層完成** | Phase 1 | 完了 |
 | **Tauri 統合** | Phase 2 | 完了 |
 | **ローカル動作版** | Phase 3.1-3.9 | 完了 |
-| **AI 機能付き** | Phase 4 | 未着手 |
-| **MVP リリース** | Phase 5 | 未着手 |
-| **チュートリアル** | Phase 6 | 未着手 |
-| **同期機能リリース** | Phase 7 | 未着手 |
+| **AI KB 化（MCP 読み取り面）** | Phase 4 | 未着手 |
+| **Reporter 基盤** | Phase 5 | 未着手 |
+| **MVP リリース（Reporter 課金）** | Phase 6 | 未着手 |
+| **チュートリアル** | Phase 7 | 未着手 |
+| **同期機能リリース** | Phase 8 | 未着手 |

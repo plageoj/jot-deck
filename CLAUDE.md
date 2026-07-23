@@ -76,6 +76,9 @@ The app has four focus modes that determine keybinding behavior:
 
 ## Workflows
 
+### Documentation Policy
+The `docs/` folder is a **snapshot of the current spec and development process — it does not retain past history (経緯)**. When something changes, edit the docs in place so each one reads as the current truth. Do not accumulate historical context: no "previously X, now Y" notes, no rejected-alternative narratives, no change logs, and no records of what was edited in other docs. Git history is where the past lives.
+
 ### Before Implementing Features
 Read the `docs/` folder first to understand the specification:
 - `docs/000-spec.md` - Core concepts, terminology, UI/UX design
@@ -83,8 +86,10 @@ Read the `docs/` folder first to understand the specification:
 - `docs/002-data-structure.md` - Data models and deletion rules
 - `docs/003-roadmap.md` - Development phases
 - `docs/004-e2e-testing.md` - E2E testing and WASM SQLite setup
-- `docs/005-ai-integration.md` - AI synthesis via Cloudflare AI Gateway
-- `docs/006-release.md` - Release strategy (Production / Preview channels, Tauri updater)
+- `docs/005-release.md` - Release strategy (Production / Preview channels, Tauri updater)
+- `docs/006-tutorial.md` - Interactive onboarding tutorial (spotlight/coachmark overlay, hands-on steps)
+- `docs/007-reporter-protocol.md` - Reporter protocol (local-first streaming input adapters that append cards via stdio/JSON-RPC)
+- `docs/008-mcp-server.md` - Jot Deck as an MCP server (exposing Deck write/read to general agents like Claude via a stdio bridge)
 
 ### Before Creating a PR
 1. Run type checks: `pnpm --filter app check`
