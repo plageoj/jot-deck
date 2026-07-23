@@ -109,7 +109,7 @@ Reporter のトランスポートは MCP にならった**独自メソッド**�
 | 頻度 | 低 | 高（毎秒数十〜） |
 | SQLite | 書く（＝真実） | **書かない**（メモリ上のオーバーレイ） |
 | 同期 | 乗る | **乗らない** |
-| プロトコル形 | request/response（ack と id が要る） | notification（片方向・投げっぱなし） |
+| プロトコル形 | request/response（ack と id が要る） | 途中経過（`delta`）は notification（片方向・投げっぱなし）。開始/終了の境界はロック取得・commit を伴うため request/response（→ §6.2） |
 | 消えたら | 困る → 永続 | 困らない → 揮発でよい |
 
 **同期ログには commit しか流れない。** 数千の途中 delta は同期エンジンから完全に不可視であり、「append/edit 主体 → INSERT 中心 → ULID により衝突なし」という同期の単純性が保たれる。
@@ -148,15 +148,17 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 | `card.read` | Reporter → 本体 | 既存カードの読み返し（文脈把握・過去カードの更新対象特定）。 |
 | `deck.query` | Reporter → 本体 | カラム構成・直近カード等の問い合わせ。 |
 
-### 6.2 ストリームチャネル（notification）
+### 6.2 ストリームチャネル
 
-| メソッド | 方向 | 説明 |
-|:---|:---|:---|
-| `card.stream.begin(id)` | Reporter → 本体 | ストリーム開始。対象カードを Reporter 所有としてロック。 |
-| `card.stream.delta(id, chunk)` | Reporter → 本体 | 途中経過。本体は frontend にそのまま流すのみ。**DB は触らない**。 |
-| `card.stream.end(id)` | Reporter → 本体 | ストリーム終了。この時点で確定チャネルに落とす（commit）。 |
+独自プロトコルなので「ストリーム＝ notification」には縛られない。notification なのは**高頻度で揮発してよい途中経過（`delta`）だけ**。ストリームを開く/閉じる境界はロック取得・commit という**確定状態の変更**を伴うため request/response とし、失敗（ロック競合・commit エラー）を必ず呼び出し側へ返す。
 
-ライフサイクルは短命・周期的： `begin → delta… → commit →（次の）begin`。
+| メソッド | 方向 | 形 | 説明 |
+|:---|:---|:---|:---|
+| `card.stream.begin(id)` | Reporter → 本体 | request/response | ストリーム開始。対象カードを Reporter 所有としてロック取得し、**取得可否（成功／競合エラー）を返す**。ack を得るまで `delta` を送らない。 |
+| `card.stream.delta(id, chunk)` | Reporter → 本体 | notification | 途中経過。本体は frontend にそのまま流すのみ。**DB は触らない**。片方向・投げっぱなし。 |
+| `card.stream.end(id)` | Reporter → 本体 | request/response | ストリーム終了。確定チャネルに落とし（commit）、**commit 結果（`updated_at` 等）またはエラーを返して成功時にロックを解放**する。 |
+
+ライフサイクルは短命・周期的： `begin(ack) → delta… → end(commit) →（次の）begin`。境界の 2 メソッドだけが確定応答を持ち、間の `delta` は揮発する。
 
 ---
 
@@ -166,7 +168,7 @@ Reporter が delta を流し込む最中のユーザ手編集は衝突する。�
 
 - ユーザ編集をロック、または「◍ AI 生成中」として視覚化。
 - 既存の focus model（column / card / edit / command）に、**streaming（read-only 表示）状態**を追加するイメージ。
-- `stream.begin` でロック取得、`end`（commit）で解放。放棄・クラッシュ時は `002` §5.2 のリース失効で回収する（→ 5 章の max open duration backstop と同根）。
+- `stream.begin` の応答でロック取得可否が返り（競合時はエラー → ストリームを始めない）、`end`（commit）の応答で確定結果を受けてロックを解放する。放棄・クラッシュ時は `002` §5.2 のリース失効で回収する（→ 5 章の max open duration backstop と同根）。
 
 position 採番はユーザ手編集と AI 追記が同じカラム末尾を奪い合うため、**本体 Repository に一元化**（Reporter に採番させない）。
 
