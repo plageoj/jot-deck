@@ -137,7 +137,7 @@ NotionやWorkflowyなどの既存ツールを「重い」「遅い」と感じ�
 Jot Deck は自前のクラウド AI 機能を持たず、**Deck を MCP サーバとして開く**ことで、ユーザーが手元の汎用エージェント（Claude Desktop / Claude Code 等）から Deck を AI ナレッジベースとして読み書きできるようにする。推論はユーザー側のエージェント（およびその契約）が担い、Jot Deck は推論コスト・API キー・レート制限を負わない。ローカルファーストを維持する。
 
 ### 4.2 読み取り面（KB として使う）
-汎用エージェントが Deck のカラム/カードを読み、要約・想起・清書を行える。`query_deck` および `deck://` resource として公開する（詳細は `008-mcp-server.md`）。機密カラムを除外する可視性制御を持つ。
+汎用エージェントが Deck のカラム/カードを読み、要約・想起・清書を行える。読み取り tool（`list_columns` / `read_card` / `search_cards` / `recent_cards`）と `deck://{deck_id}` resource として公開する（詳細は `008-mcp-server.md`）。機密カラムを除外する可視性制御を持つ。
 
 ### 4.3 書き込み面（Reporter）
 外部のストリーミング入力（音声文字起こし、LLM 推論、Webhook 等）を解釈・分類してカードとして流し込む入力アダプタ「Reporter」を、ローカルの書き込み口経由で受け入れる（詳細は `007-reporter-protocol.md`）。音声認識（Whisper 等）を内包する有料 Reporter がマネタイズの中心。

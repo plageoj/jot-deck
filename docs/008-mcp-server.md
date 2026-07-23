@@ -26,14 +26,9 @@ Jot Deck 本体は、自身の Deck に対する **書き込み・読み出し�
 
 ---
 
-## 1. 方向性 ―― Deck を開く、が正しい像
+## 1. 方向性 ―― Deck を開く
 
-MCP は「**サーバが tool/resource を公開し、ホスト（Claude 等）がそれを呼ぶ**」構造である。ここで **Reporter**（外部入力をカード化して Deck に流し込むアダプタ。前提節を参照）とエージェントをつなぐ絵は 2 通りあり得るが、意味があるのは片方だけ。
-
-- **✗ エージェントが Reporter を "消費する"**: Reporter は分類済みイベントを能動的に生成して push する**プロデューサ**であり、エージェントが呼び出す受動的な tool 提供者ではない。この向きは無意味。
-- **◎ エージェントが Deck に書く / 読む**: **Deck 側が write/read を MCP サーバとして公開し、エージェントがそのクライアントになる**。このときエージェントは「汎用 LLM で駆動される Reporter」として振る舞う。
-
-したがって本設計の要諦は **「Deck を汎用エージェントに開く」** ことである。
+MCP は「**サーバが tool/resource を公開し、ホスト（Claude 等）がそれを呼ぶ**」構造である。本設計では **Deck 側が write/read を MCP サーバとして公開し、エージェントがそのクライアントになる**。このときエージェントは「汎用 LLM で駆動される Reporter」として振る舞う。本設計の要諦は **「Deck を汎用エージェントに開く」** ことである。
 
 ---
 
@@ -123,9 +118,9 @@ flowchart LR
 - **意味**: 指定カラムの末尾に新規カードを作成。**position の採番と ULID 発番は本体 Repository が行う**（§4.4）。`content` 中の `#tag` は本体が自動抽出する（`002-data-structure.md` §2）。エージェントに複数枚を作らせたい入力は、Reporter 同様「短いカードの連なり」として複数回 `append_card` を呼ばせる（1 枚を成長させない）。
 
 #### `patch_card`
-- **引数**: `card_id`（string, ULID, 必須）, `content`（string, 必須）, `expected_updated_at`（string, 任意 ―― 直前に読んだ `updated_at`）
+- **引数**: `card_id`（string, ULID, 必須）, `content`（string, 必須）, `expected_updated_at`（string, 必須 ―― 直前に読んだ `updated_at`）
 - **返り値**: `{ card_id, updated_at }`
-- **意味**: 既存カードの本文を確定置換。永続化し同期に乗る。タグは再抽出される。ストリーミングの途中表示ではなく**確定 edit のみ**（`card.stream.*` は非公開）。`expected_updated_at` を添えると、ユーザ手編集との lost update を楽観ロックで防ぐ（`002-data-structure.md` §5.3 の compare-and-swap。不一致なら拒否 → 再読込して再試行）。
+- **意味**: 既存カードの本文を確定置換。永続化し同期に乗る。タグは再抽出される。ストリーミングの途中表示ではなく**確定 edit のみ**（`card.stream.*` は非公開）。`expected_updated_at` は**必須**で、ユーザ手編集との lost update を楽観ロックで防ぐ（`002-data-structure.md` §5.3 の compare-and-swap。現在値と不一致なら拒否 → `read_card` で再読込して再試行）。無条件上書きは公開せず、更新は常に CAS で守られる。
 
 #### `move_card`
 - **引数**: `card_id`（string, ULID, 必須）, `to_column_id`（string, ULID, 任意 ―― 省略時は同カラム内で並べ替え）, `before_card_id` / `after_card_id`（string, ULID, どちらか任意 ―― 省略時は移動先カラムの末尾）
@@ -223,7 +218,7 @@ flowchart LR
 - 階層は Deck > Column > Card。カードは **tweet サイズの原子単位**。
 - **長い入力は 1 枚を成長させず、短いカードの連なりとして `append_card` を複数回**呼ぶ（最重要）。
 - `#tag` は本文に書けば本体が自動抽出。position / ID は本体が採番するので**推測・生成しない**。
-- カラムは作れない（既存カラムへ書くだけ）。削除は論理削除で復元可能。
+- カラム作成は `structure` capability が有効で write allowlist 未指定の接続に限り `ensure_column` で行える（allowlist を明示した接続では新規作成は無効。→ §4.5）。削除は論理削除で復元可能。
 
 **2. `describe_deck`（bootstrap tool）＝この接続の実行時実体と制約**
 静的仕様ではなく**接続時点の実体**を 1 回で返す：
@@ -252,8 +247,8 @@ flowchart LR
 | **Deck 境界** | 接続は 1 Deck に固定され、越境しない（Deck 作成・Deck 間移動は不可）。Deck がユーザの最上位の整理意図であり、blast radius の壁。→ §4.4 / §4.5 |
 | **`private` 除外** | ユーザが立てた `private` カラムは全接続から読めず・書けない。既定 KB（設定ゼロで Deck 全体可視・可書）の唯一の hard な穴。フィルタは本体側。→ §4.5 |
 | **capability（opt-out）** | 接続の権限 read / append / edit / delete / structure は**既定すべて有効**（設定ゼロで Deck 全体を読み書き・再編＝§4.5 と一致）。機微な用途では個別に **deny して絞る**（例: KB 読取専用なら append 以降を deny、re-org させたくない接続は structure を deny）。allowlist を明示した接続では `ensure_column` の新規作成が無効（§4.5）。 |
-| **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。この代償を **①全操作が論理削除＋アンドゥで回復可能（構造の復元性）** と **②機微な接続は capability を deny して封じられる** ことで受ける。外部由来カードには provenance ラベルを付す。 |
-| **構造の復元性** | カラム/カードの改名・移動・削除ミスは論理削除＋アンドゥ（`002` §3）で戻せる。構造変更を開く代償を、暴走時も元に戻せることで受ける。 |
+| **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。この代償を **①削除・カスケード削除は論理削除＋アンドゥで復元でき、上書き・改名・移動は誤操作の拡散を境界（Deck）とレート制限で抑える** と **②機微な接続は capability を deny して封じられる** ことで受ける。外部由来カードには provenance ラベルを付す。 |
+| **構造の復元性** | カラム/カードの削除ミスは論理削除＋アンドゥ（`002` §3）で戻せる。ただし `patch_card` の内容上書き・`update_column` の改名・`move_card` / `move_column` の位置変更は論理削除の対象外で、以前の状態を自動復元する保証はない（before/after を持つ耐久リビジョン履歴は将来課題 → §7）。これらは境界・CAS・レート制限で暴走の代償を抑える。 |
 | **カード長 backstop** | 1 カードの最大長（本体のカード長 backstop）。 |
 | **レート制限** | 接続ごとの writes/分 上限。カード長 backstop が縛れない「小カード大量投入」の暴走を抑える。 |
 | **べき等性** | `append_card` は idempotency key を受け、同一キーの再送は新規作成せず既存 id を返す。ホスト再送での重複カードを防ぐ。 |
