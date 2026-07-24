@@ -144,8 +144,10 @@ impl Bridge {
     }
 
     fn tool_list_columns(&self) -> Result<Value, String> {
+        // Wrap the list in an object: MCP `structuredContent` must be a JSON
+        // object, not a top-level array (strict hosts reject arrays).
         query::list_columns(&self.conn, &self.deck_id)
-            .map(|c| json!(c))
+            .map(|c| json!({ "columns": c }))
             .map_err(|e| e.to_string())
     }
 
@@ -165,7 +167,7 @@ impl Bridge {
             limit: args.get("limit").and_then(Value::as_u64).map(|n| n as usize),
         };
         query::search_cards(&self.conn, &self.deck_id, &params)
-            .map(|c| json!(c))
+            .map(|c| json!({ "cards": c }))
             .map_err(|e| e.to_string())
     }
 
@@ -173,7 +175,7 @@ impl Bridge {
         let column_id = opt_str(args, "column_id");
         let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize);
         query::recent_cards(&self.conn, &self.deck_id, column_id.as_deref(), limit)
-            .map(|c| json!(c))
+            .map(|c| json!({ "cards": c }))
             .map_err(|e| e.to_string())
     }
 
@@ -484,16 +486,39 @@ mod tests {
     fn list_columns_omits_private() {
         let (bridge, _, _) = bridge_with_data();
         let resp = call(&bridge, 1, "list_columns", json!({}));
-        let cols = structured(&resp).as_array().unwrap();
+        let cols = structured(&resp)["columns"].as_array().unwrap();
         assert_eq!(cols.len(), 1);
         assert_eq!(cols[0]["name"], "Research");
+    }
+
+    #[test]
+    fn list_returning_tools_wrap_structured_content_in_object() {
+        // MCP `structuredContent` must be a JSON object; a top-level array is
+        // rejected by strict hosts. The list-returning tools wrap their results.
+        let (bridge, col_id, _) = bridge_with_data();
+        for (name, args, key) in [
+            ("list_columns", json!({}), "columns"),
+            ("search_cards", json!({}), "cards"),
+            ("recent_cards", json!({ "column_id": col_id }), "cards"),
+        ] {
+            let resp = call(&bridge, 1, name, args);
+            assert_eq!(resp["result"]["isError"], false, "{name} errored");
+            assert!(
+                structured(&resp).is_object(),
+                "{name} structuredContent must be an object"
+            );
+            assert!(
+                structured(&resp)[key].is_array(),
+                "{name} must expose its list under `{key}`"
+            );
+        }
     }
 
     #[test]
     fn search_cards_finds_by_tag() {
         let (bridge, _, _) = bridge_with_data();
         let resp = call(&bridge, 1, "search_cards", json!({ "tags": ["lang"] }));
-        let cards = structured(&resp).as_array().unwrap();
+        let cards = structured(&resp)["cards"].as_array().unwrap();
         assert_eq!(cards.len(), 1);
         assert!(cards[0]["content"].as_str().unwrap().contains("rust"));
     }
