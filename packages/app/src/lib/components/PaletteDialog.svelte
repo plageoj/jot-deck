@@ -1,14 +1,23 @@
 <script lang="ts" module>
+  import type { PaletteIconName } from "./PaletteIcon.svelte";
+
   export interface PaletteItem {
     id: string;
     label: string;
     shortcut?: string;
     current?: boolean;
+    /** Optional group heading shown above the first item of a run. */
+    section?: string;
+    /** Destructive styling (e.g. delete). */
+    danger?: boolean;
+    /** Optional leading icon (e.g. for action items). */
+    icon?: PaletteIconName;
   }
 </script>
 
 <script lang="ts" generics="T extends PaletteItem">
   import { onMount, type Snippet } from "svelte";
+  import PaletteIcon from "./PaletteIcon.svelte";
 
   interface Props {
     items: T[];
@@ -17,6 +26,8 @@
     onSelect: (item: T) => void;
     onClose: () => void;
     renderItem?: Snippet<[T]>;
+    /** Non-navigable content rendered between the input and the list. */
+    header?: Snippet;
   }
 
   let {
@@ -26,6 +37,7 @@
     onSelect,
     onClose,
     renderItem,
+    header,
   }: Props = $props();
 
   let query = $state("");
@@ -51,8 +63,8 @@
   });
 
   $effect(() => {
-    const item = listRef?.children[selectedIndex] as HTMLElement | undefined;
-    item?.scrollIntoView({ block: "nearest" });
+    const el = listRef?.querySelector(`[data-index="${selectedIndex}"]`);
+    (el as HTMLElement | null)?.scrollIntoView({ block: "nearest" });
   });
 
   function handleKeydown(event: KeyboardEvent) {
@@ -73,12 +85,12 @@
           selectedIndex = Math.max(selectedIndex - 1, 0);
         }
         break;
-      case "Enter":
+      case "Enter": {
         event.preventDefault();
-        if (filteredItems.length > 0) {
-          onSelect(filteredItems[selectedIndex]);
-        }
+        const item = filteredItems[selectedIndex];
+        if (item) onSelect(item);
         break;
+      }
     }
   }
 
@@ -107,18 +119,26 @@
       spellcheck="false"
       autocomplete="off"
     />
+    {#if header}
+      {@render header()}
+    {/if}
     {#if filteredItems.length > 0}
       <ul bind:this={listRef} class="palette-list" role="listbox">
         {#each filteredItems as item, index (item.id)}
+          {#if item.section && item.section !== filteredItems[index - 1]?.section}
+            <li class="palette-section" aria-hidden="true">{item.section}</li>
+          {/if}
           <li
             class="palette-item"
             class:selected={index === selectedIndex}
+            data-index={index}
             role="option"
             aria-selected={index === selectedIndex}
           >
             <button
               type="button"
               class="palette-item-button"
+              class:danger={item.danger}
               tabindex="-1"
               onclick={() => onSelect(item)}
               onmouseenter={() => (selectedIndex = index)}
@@ -126,9 +146,14 @@
               {#if renderItem}
                 {@render renderItem(item)}
               {:else}
-                <span class="palette-label" class:current={item.current}
-                  >{item.label}</span
-                >
+                <span class="palette-label-group">
+                  {#if item.icon}
+                    <PaletteIcon name={item.icon} />
+                  {/if}
+                  <span class="palette-label" class:current={item.current}
+                    >{item.label}</span
+                  >
+                </span>
                 {#if item.shortcut}
                   <kbd class="palette-shortcut">{item.shortcut}</kbd>
                 {/if}
@@ -167,7 +192,7 @@
   .palette-panel {
     width: 100%;
     max-width: 500px;
-    max-height: 400px;
+    max-height: 480px;
     display: flex;
     flex-direction: column;
     background-color: var(--bg-secondary);
@@ -198,6 +223,15 @@
     padding: 0.25rem 0;
   }
 
+  .palette-section {
+    padding: 0.5rem 1rem 0.25rem;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
   .palette-item {
     padding: 0;
   }
@@ -225,12 +259,27 @@
     outline: none;
   }
 
+  .palette-label-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
   .palette-label {
     color: var(--text);
     font-size: 0.875rem;
   }
 
   .palette-label.current {
+    color: var(--accent);
+  }
+
+  .palette-item-button.danger .palette-label {
+    color: var(--accent);
+  }
+
+  .palette-item-button.danger :global(.palette-icon) {
     color: var(--accent);
   }
 

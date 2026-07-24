@@ -33,8 +33,8 @@ export async function createFreshDeck(page: Page) {
   await page.keyboard.press("Control+p");
   await page.waitForTimeout(300);
 
-  // Click "+ New Deck"
-  await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+  // Select the "New deck" action row
+  await page.locator(".palette-item", { hasText: "New deck" }).click();
   await page.waitForTimeout(500);
 
   // Now on the new deck with no columns — create one
