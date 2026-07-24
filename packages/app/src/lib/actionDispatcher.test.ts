@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Card, Column, Deck } from "$lib/types";
 import type { DatabaseBackend } from "$lib/db";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
+import { updaterStore } from "./updater.svelte";
 
 const state = {
   decks: [] as Deck[],
@@ -373,6 +374,24 @@ describe("ActionDispatcher.executeAction palette routing", () => {
     expect(focus.focusMode).not.toBe("command");
   });
 
+  it("routes showAbout to focus.showAbout = true (no palette)", async () => {
+    await dispatcher.executeAction("showAbout");
+    expect(focus.showAbout).toBe(true);
+    expect(focus.activePalette).toBeNull();
+    expect(focus.focusMode).not.toBe("command");
+  });
+
+  it("routes checkForUpdates to open the About dialog and trigger a check", async () => {
+    const spy = vi.spyOn(updaterStore, "check");
+    try {
+      await dispatcher.executeAction("checkForUpdates");
+      expect(focus.showAbout).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("Ctrl+, in card mode opens settings via the global keydown handler", () => {
     focus.focusMode = "card";
     const event = makeKeyEvent({ key: ",", ctrl: true });
@@ -691,6 +710,13 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(state.createDeckCalls).toBe(1);
   });
 
+  it("restoreOnboarding rebuilds the Getting Started deck and closes the palette", async () => {
+    await dispatcher.executeCommand("restoreOnboarding");
+    await flushPromises();
+    expect(state.createDeckCalls).toBe(1);
+    expect(focus.activePalette).toBeNull();
+  });
+
   it("switchDeck reopens the deck palette", async () => {
     await dispatcher.executeCommand("switchDeck");
     expect(focus.activePalette).toBe("deck");
@@ -950,6 +976,14 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     const event = makeKeyEvent({ key: "j" });
     dispatcher.handleKeydown(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("is a no-op while the about dialog is open", () => {
+    focus.showAbout = true;
+    const event = makeKeyEvent({ key: "j" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(focus.focusMode).toBe("column");
   });
 
   it("dispatches a bound action through the key processor", () => {

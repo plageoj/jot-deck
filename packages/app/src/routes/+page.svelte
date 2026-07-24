@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
   import {
+    AboutDialog,
     Deck as DeckComponent,
     ColumnPalette,
     CommandPalette,
@@ -231,9 +232,18 @@
     columnCount={data.columns.length}
     cardCount={totalCardCount}
     onSelect={(deck) => actions.selectDeckFromPalette(deck.id)}
-    onNew={() => data.createDeck()}
-    onRename={handleRenameDeck}
-    onDelete={handleDeleteDeck}
+    onNew={() => {
+      focus.closePalette();
+      data.createDeck();
+    }}
+    onRename={(deck) => {
+      focus.closePalette();
+      handleRenameDeck(deck);
+    }}
+    onDelete={(deck) => {
+      focus.closePalette();
+      handleDeleteDeck(deck);
+    }}
     getMcpConfig={(deck) => data.generateMcpConfig(deck.id)}
     onClose={() => focus.closePalette()}
   />
@@ -262,9 +272,18 @@
     cardsByColumn={data.cardsByColumn}
     focusedColumnIndex={focus.focusedColumnIndex}
     onSelect={(i) => actions.selectColumnFromPalette(i)}
-    onNew={() => data.createColumn()}
-    onRename={handleRenameColumn}
-    onDelete={handleDeleteColumn}
+    onNew={() => {
+      focus.closePalette();
+      data.createColumn();
+    }}
+    onRename={(column) => {
+      focus.closePalette();
+      handleRenameColumn(column);
+    }}
+    onDelete={(column) => {
+      focus.closePalette();
+      handleDeleteColumn(column);
+    }}
     onClose={() => focus.closePalette()}
   />
 {:else if focus.focusMode === "command"}
@@ -347,12 +366,20 @@
       focus.showSettings = false;
       focus.showKeybindings = true;
     }}
+    onOpenAbout={() => {
+      focus.showSettings = false;
+      focus.showAbout = true;
+    }}
     onClose={() => (focus.showSettings = false)}
   />
 {/if}
 
 {#if focus.showKeybindings}
   <KeybindingsDialog onClose={() => (focus.showKeybindings = false)} />
+{/if}
+
+{#if focus.showAbout}
+  <AboutDialog onClose={() => (focus.showAbout = false)} />
 {/if}
 
 <style>

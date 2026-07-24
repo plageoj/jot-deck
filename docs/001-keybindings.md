@@ -222,6 +222,7 @@ CodeMirror の Vim モードがそのまま適用される。
 |:---|:---|
 | `Switch Deck` | Deck 一覧を表示して切り替え |
 | `New Deck` | 新規 Deck 作成 |
+| `Restore Getting Started Deck` | オンボーディング Deck を再生成（既存 Deck は残したまま先頭に追加して選択） |
 | `New Column` | 新規 Column 作成 |
 | `Delete Column` | Column 論理削除 |
 | `Trash` | 削除スタック一覧を表示（任意の Column/Card を選択して復元） |

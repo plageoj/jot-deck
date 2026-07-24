@@ -13,19 +13,24 @@ jobs:
   build:
     name: Build (${{ matrix.platform }})
     permissions:
-      contents: write # tauri-action creates the draft release & uploads assets
+      contents: write # tauri-action creates/uploads the per-platform staging release
     strategy:
+      # Builds run fully in parallel. There is no cross-platform race on the
+      # updater manifest because each platform uploads to its OWN throwaway
+      # staging release (staging_tag below), so tauri-action's read-modify-write
+      # of latest.json never touches a shared tag. The `assemble` job merges the
+      # three per-platform manifests onto the real release tag afterwards.
       fail-fast: false
-      # Serialize matrix uploads so tauri-action's read-modify-write of
-      # latest.json on the same release tag can't race across platforms.
-      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
+            staging_tag: ${{ github.ref_name }}-staging-macos
             args: '--target universal-apple-darwin'
           - platform: ubuntu-latest
+            staging_tag: ${{ github.ref_name }}-staging-linux
             args: ''
           - platform: windows-latest
+            staging_tag: ${{ github.ref_name }}-staging-windows
             args: ''
     runs-on: ${{ matrix.platform }}
     steps:
@@ -68,6 +73,17 @@ jobs:
           REF: ${{ github.ref_name }}
         run: node scripts/sync-version.mjs "${REF#v}"
 
+      # Reset the throwaway staging release so a retry can't inherit stale
+      # bundles from a previous attempt. Draft releases carry no git tag, so this
+      # leaves no ref behind. Ignore "not found" on the first run.
+      - name: Reset staging release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "${{ matrix.staging_tag }}" \
+            --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -75,17 +91,98 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: packages/app
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Jot Deck ${{ github.ref_name }}'
-          releaseBody: 'See the assets to download and install this version.'
+          # Per-platform DRAFT staging release: invisible to users and creates no
+          # git tag. tauri-action writes a correct, platform-complete latest.json
+          # here; the assemble job merges the three onto the real release tag, so
+          # we never hand-maintain the platform-key map.
+          tagName: ${{ matrix.staging_tag }}
+          releaseName: 'Staging (${{ matrix.platform }})'
+          releaseBody: 'Throwaway staging release — assembled into the real release, then deleted.'
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true
           args: ${{ matrix.args }}
 
+  assemble:
+    name: Assemble draft release
+    needs: build
+    # Always run so leftover staging drafts are cleaned up even on a partial
+    # build failure; the promote step itself only runs when every platform built.
+    if: always()
+    permissions:
+      contents: write # creates the real draft release & uploads assets via gh
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ github.ref_name }}
+      MANIFEST_NAME: latest.json
+      STAGING_TAGS: '${{ github.ref_name }}-staging-macos ${{ github.ref_name }}-staging-linux ${{ github.ref_name }}-staging-windows'
+    steps:
+      - name: Promote staged bundles & merge updater manifest into draft release
+        if: needs.build.result == 'success'
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          VERSION="${TAG#v}"
+          NOTES="See the assets to download and install this version."
+
+          # Create the real DRAFT release on the pushed tag (the publish job
+          # flips it to published). Idempotent across retries.
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" --draft \
+              --title "Jot Deck $TAG" --notes "$NOTES" --target "$GITHUB_SHA"
+          fi
+
+          norm_manifests=()
+          for tag in $STAGING_TAGS; do
+            dir="$work/$tag"
+            mkdir -p "$dir"
+            # Pull every asset from the staging draft (bundles, .sig, latest.json).
+            gh release download "$tag" --repo "$REPO" --dir "$dir"
+
+            # Move bundles + signatures onto the real release. Filenames embed the
+            # version so platforms never collide; --clobber makes retries idempotent.
+            find "$dir" -type f ! -name 'latest.json' -print0 \
+              | xargs -0 -r gh release upload "$TAG" --repo "$REPO" --clobber
+
+            # Rewrite this manifest's URLs from the staging tag to the real tag
+            # (literal string replace — no regex), then keep just its platforms.
+            from="/releases/download/$tag/"
+            to="/releases/download/$TAG/"
+            jq --arg from "$from" --arg to "$to" \
+              '.platforms |= with_entries(.value.url |= (split($from) | join($to)))' \
+              "$dir/latest.json" > "$dir/norm.json"
+            norm_manifests+=("$dir/norm.json")
+          done
+
+          # Merge the three platform-complete manifests into one. version/notes
+          # are injected authoritatively (staging bodies are throwaway text);
+          # pub_date is taken from the first, and the platform maps are unioned.
+          jq -s --arg version "$VERSION" --arg notes "$NOTES" '{
+            version: $version,
+            notes: $notes,
+            pub_date: .[0].pub_date,
+            platforms: (reduce .[] as $m ({}; . + $m.platforms))
+          }' "${norm_manifests[@]}" > "$work/$MANIFEST_NAME"
+
+          gh release upload "$TAG" "$work/$MANIFEST_NAME" --repo "$REPO" --clobber
+
+      - name: Delete staging releases
+        # Always run — even on partial build failure — so throwaway drafts never
+        # accumulate. Draft deletion removes no git tag.
+        if: always()
+        run: |
+          set -euo pipefail
+          for tag in $STAGING_TAGS; do
+            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag 2>/dev/null || true
+          done
+
   publish:
     name: Publish release
-    needs: build
+    needs: [build, assemble]
+    # Only publish a release that was fully built and assembled.
+    if: needs.build.result == 'success' && needs.assemble.result == 'success'
     permissions:
       contents: write # flips the draft release to published via gh
     runs-on: ubuntu-latest

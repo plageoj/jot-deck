@@ -153,7 +153,8 @@ Reporter・MCP 書き込みのどちらより先に入れる。両パスが依�
 * ローカル書き込み口（ホスト spawn ＋ stdio、認証スコープ・採番一元化・変更通知）
 * 2 チャネル（committed / ephemeral）とカード長 commit 制約、`streaming` フォーカス状態
 * frontend の外部起因カード追加/更新の差分描画（delta コアレス）
-* 参照実装 Reporter 1 種（例: 議事録、Whisper ベースの音声認識）
+* 配管パッケージの切り出し: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離。一次実装は **Python**。参照実装 Reporter のトランスポート層をそのままパッケージ化し、後の公開 SDK の種とする（`007` §9.5）
+* 参照実装 Reporter 1 種（Python。例: 議事録、Whisper ベースの音声認識）
 
 ### 成果物（MCP 書き込み面 ―― 直接 DB リンク）
 * カード書き込み: `append_card`（idempotency key）/ `patch_card`（`expected_updated_at` 楽観ロック）/ `move_card` / `delete_card`
@@ -204,12 +205,27 @@ Automerge + PartyKit でリアルタイム同期。
 
 ---
 
+## Phase 9: サードパーティ Reporter SDK / エコシステム開放
+
+### 目標
+Phase 5 で内部的に切り出した配管パッケージ（`007` §9.5）を、第三者が自作 Reporter を書けるよう**公開 SDK に昇格**させ、Reporter エコシステムを開放する。フル MCP 準拠は不要 ―― サードパーティ Reporter も本体 spawn で Reporter プロトコルを話す（`007` §2.2 / §3.2）。
+
+### 成果物
+* 配管パッケージの公開 SDK 化（publish ＋ API ドキュメント ＋ サンプル Reporter）
+* Reporter プロトコル仕様の外部向け文書化（`007` を実装リファレンスとして整備）
+* サードパーティ向け per-Reporter 書き込みスコープの実装（書けるカラム/デッキの制限。本体 spawn は「自分が起動した」ことしか保証せず登録バイナリの良性は保証しないため必須。`007` §10）
+* Reporter 登録 UI（バイナリのフルパス登録。Claude Desktop `mcpServers` 相当の power-user 設定）
+
+詳細設計: `007-reporter-protocol.md` §9.5 / §3.2
+
+---
+
 ## 将来の Phase
 
-* **Phase 9:** 全文検索
-* **Phase 10:** macOS / Linux 対応
-* **Phase 11:** エクスポート機能
-* **Phase 12:** 共有機能
+* **Phase 10:** 全文検索
+* **Phase 11:** macOS / Linux 対応
+* **Phase 12:** エクスポート機能
+* **Phase 13:** 共有機能
 
 ---
 
@@ -225,3 +241,4 @@ Automerge + PartyKit でリアルタイム同期。
 | **MVP リリース（Reporter 課金）** | Phase 6 | 未着手 |
 | **チュートリアル** | Phase 7 | 未着手 |
 | **同期機能リリース** | Phase 8 | 未着手 |
+| **Reporter エコシステム開放（SDK 公開）** | Phase 9 | 未着手 |

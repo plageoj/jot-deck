@@ -8,6 +8,7 @@ export interface Command {
 export const COMMANDS: Command[] = [
   { id: "switch-deck", label: "Switch Deck", shortcut: "Ctrl+P", action: "switchDeck" },
   { id: "new-deck", label: "New Deck", action: "newDeck" },
+  { id: "restore-onboarding", label: "Restore Getting Started Deck", action: "restoreOnboarding" },
   { id: "rename-deck", label: "Rename Deck", action: "renameDeck" },
   { id: "delete-deck", label: "Delete Deck", action: "deleteDeck" },
   { id: "switch-column", label: "Switch Column", shortcut: "g n", action: "showColumnPalette" },
@@ -20,6 +21,8 @@ export const COMMANDS: Command[] = [
   { id: "settings", label: "Settings", shortcut: "Ctrl+,", action: "showSettings" },
   { id: "keybindings", label: "Customize Keybindings", action: "showKeybindings" },
   { id: "shortcuts", label: "Keyboard Shortcuts", shortcut: "?", action: "showShortcuts" },
+  { id: "check-updates", label: "Check for Updates", action: "checkForUpdates" },
+  { id: "about", label: "About Jot Deck", action: "showAbout" },
 ];
 
 export function filterCommands(query: string): Command[] {

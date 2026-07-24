@@ -38,7 +38,7 @@ export class DeckData {
       this.error = null;
       this.decks = await this.db.getAllDecks();
       if (this.decks.length === 0) {
-        await this.createOnboardingDeck();
+        this.decks = [await this.createOnboardingDeck()];
       }
       if (this.decks.length > 0) {
         const lastDeckId = this.getLastDeckId();
@@ -54,9 +54,14 @@ export class DeckData {
     }
   }
 
-  private async createOnboardingDeck() {
+  /**
+   * Build the "Getting Started" onboarding deck (columns + seed cards) and
+   * return it. The caller owns `this.decks` — this only creates persisted
+   * records so it can be reused both on first launch and by an on-demand
+   * "Restore Getting Started deck" command.
+   */
+  private async createOnboardingDeck(): Promise<Deck> {
     const deck = await this.db.createDeck({ name: "Getting Started" });
-    this.decks = [deck];
 
     const col1 = await this.db.createColumn({
       deck_id: deck.id,
@@ -118,6 +123,27 @@ export class DeckData {
       content:
         "`f` / `+` — Increase card score\n`F` / `-` — Decrease card score\n\nUse **scores** to highlight important cards.",
     });
+
+    return deck;
+  }
+
+  /**
+   * Recreate the "Getting Started" onboarding deck on demand (via the command
+   * palette). Non-destructive: the fresh deck is prepended to the list and
+   * selected, leaving existing decks untouched. This is the only way back to
+   * the onboarding content after first launch, since the delete-deck UI is
+   * hidden when a single deck remains.
+   */
+  async restoreOnboardingDeck(): Promise<Deck | null> {
+    try {
+      const deck = await this.createOnboardingDeck();
+      this.decks = [deck, ...this.decks];
+      await this.selectDeck(deck);
+      return deck;
+    } catch (e) {
+      this.error = `Failed to restore onboarding deck: ${e}`;
+      return null;
+    }
   }
 
   private getLastDeckId(): string | null {
