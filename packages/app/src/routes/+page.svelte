@@ -231,9 +231,18 @@
     columnCount={data.columns.length}
     cardCount={totalCardCount}
     onSelect={(deck) => actions.selectDeckFromPalette(deck.id)}
-    onNew={() => data.createDeck()}
-    onRename={handleRenameDeck}
-    onDelete={handleDeleteDeck}
+    onNew={() => {
+      focus.closePalette();
+      data.createDeck();
+    }}
+    onRename={(deck) => {
+      focus.closePalette();
+      handleRenameDeck(deck);
+    }}
+    onDelete={(deck) => {
+      focus.closePalette();
+      handleDeleteDeck(deck);
+    }}
     onClose={() => focus.closePalette()}
   />
 {:else if focus.activePalette === "tag"}
@@ -261,9 +270,18 @@
     cardsByColumn={data.cardsByColumn}
     focusedColumnIndex={focus.focusedColumnIndex}
     onSelect={(i) => actions.selectColumnFromPalette(i)}
-    onNew={() => data.createColumn()}
-    onRename={handleRenameColumn}
-    onDelete={handleDeleteColumn}
+    onNew={() => {
+      focus.closePalette();
+      data.createColumn();
+    }}
+    onRename={(column) => {
+      focus.closePalette();
+      handleRenameColumn(column);
+    }}
+    onDelete={(column) => {
+      focus.closePalette();
+      handleDeleteColumn(column);
+    }}
     onClose={() => focus.closePalette()}
   />
 {:else if focus.focusMode === "command"}

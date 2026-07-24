@@ -30,11 +30,11 @@ test.describe("Deck Management", () => {
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
 
-    const dialog = page.locator("dialog.switcher-dialog");
+    const dialog = page.locator("dialog.palette-dialog");
     await expect(dialog).toBeVisible();
 
     // Should show search input
-    await expect(page.locator(".switcher-input")).toBeFocused();
+    await expect(page.locator(".palette-input")).toBeFocused();
 
     // Should show current deck section
     await expect(page.locator(".current-name")).toContainText("Getting Started");
@@ -52,7 +52,7 @@ test.describe("Deck Management", () => {
     await page.locator("button", { hasText: "Manage Decks" }).click();
     await page.waitForTimeout(300);
 
-    await expect(page.locator("dialog.switcher-dialog")).toBeVisible();
+    await expect(page.locator("dialog.palette-dialog")).toBeVisible();
     await expect(page.locator(".current-name")).toContainText("Getting Started");
 
     await page.keyboard.press("Escape");
@@ -63,8 +63,8 @@ test.describe("Deck Management", () => {
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
 
-    // Click "+ New Deck"
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    // Select the "New deck" action row
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Should switch to the new deck
@@ -75,11 +75,25 @@ test.describe("Deck Management", () => {
     await expect(page.locator("text=No columns in this deck")).toBeVisible();
   });
 
+  test("create a new deck via keyboard (filter + Enter)", async ({ page }) => {
+    await page.keyboard.press("Control+p");
+    await page.waitForTimeout(300);
+
+    // Type to surface the "New deck" action, then run it with Enter
+    await page.keyboard.type("new deck", { delay: 50 });
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(500);
+
+    await expect(page.locator("h1")).toContainText("New Deck");
+    await expect(page.locator("text=No columns in this deck")).toBeVisible();
+  });
+
   test("switch between decks", async ({ page }) => {
     // Create a new deck first
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Should be on "New Deck"
@@ -89,8 +103,10 @@ test.describe("Deck Management", () => {
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
 
-    // "Getting Started" should be in the "Other Decks" section
-    const otherDeck = page.locator(".deck-item-name", { hasText: "Getting Started" });
+    // "Getting Started" should be in the "Other decks" section
+    const otherDeck = page.locator(".palette-item", {
+      hasText: "Getting Started",
+    });
     await expect(otherDeck).toBeVisible();
     await otherDeck.click();
     await page.waitForTimeout(500);
@@ -104,26 +120,25 @@ test.describe("Deck Management", () => {
     // Create a second deck
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Open switcher again — "Getting Started" should be in other decks
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
 
-    // Type to filter
+    // Type to filter — only the matching deck row should remain
     await page.keyboard.type("getting", { delay: 50 });
     await page.waitForTimeout(200);
 
-    // Should show "Getting Started" in results
-    const items = page.locator(".deck-item");
+    const items = page.locator(".palette-item");
     await expect(items).toHaveCount(1);
     await expect(items.first()).toContainText("Getting Started");
 
     // Type something with no match
-    await page.locator(".switcher-input").fill("zzzzz");
+    await page.locator(".palette-input").fill("zzzzz");
     await page.waitForTimeout(200);
-    await expect(page.locator(".empty-message")).toBeVisible();
+    await expect(page.locator(".palette-empty")).toBeVisible();
 
     await page.keyboard.press("Escape");
   });
@@ -132,16 +147,18 @@ test.describe("Deck Management", () => {
     // Create a second deck
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Open switcher
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
 
-    // "Getting Started" should be the only item in other decks
-    const items = page.locator(".deck-item");
-    await expect(items).toHaveCount(1);
+    // Deck rows come before action rows, so the first item is the only
+    // other deck: "Getting Started".
+    await expect(page.locator(".palette-item").first()).toContainText(
+      "Getting Started",
+    );
 
     // Press Enter to select it
     await page.keyboard.press("Enter");
@@ -156,8 +173,8 @@ test.describe("Deck Management", () => {
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
 
-    // Click the rename icon button
-    await page.locator(".icon-btn[title='Rename Deck']").click();
+    // Select the "Rename deck" action row
+    await page.locator(".palette-item", { hasText: "Rename deck" }).click();
     await page.waitForTimeout(300);
 
     // RenameDialog should be open
@@ -176,6 +193,25 @@ test.describe("Deck Management", () => {
     // h1 and title should reflect new name
     await expect(page.locator("h1")).toContainText("My Deck");
     await expect(page).toHaveTitle("My Deck - Jot Deck");
+  });
+
+  test("rename deck via keyboard (filter + Enter)", async ({ page }) => {
+    await page.keyboard.press("Control+p");
+    await page.waitForTimeout(300);
+
+    // Surface and run the "Rename deck" action from the keyboard
+    await page.keyboard.type("rename", { delay: 50 });
+    await page.waitForTimeout(200);
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(300);
+
+    await expect(page.locator("dialog.rename-dialog")).toBeVisible();
+
+    await page.locator(".rename-input").fill("Keyboard Deck");
+    await page.locator(".btn-confirm").click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator("h1")).toContainText("Keyboard Deck");
   });
 
   test("rename deck via command palette", async ({ page }) => {
@@ -202,19 +238,19 @@ test.describe("Deck Management", () => {
     // Create a second deck first (can't delete the only deck)
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Now on "New Deck" — open switcher to go back to onboarding deck
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".deck-item-name", { hasText: "Getting Started" }).click();
+    await page.locator(".palette-item", { hasText: "Getting Started" }).click();
     await page.waitForTimeout(500);
 
     // Open switcher and delete current deck ("Getting Started")
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".icon-btn[title='Delete Deck']").click();
+    await page.locator(".palette-item", { hasText: "Delete deck" }).click();
     await page.waitForTimeout(300);
 
     // ConfirmDialog should appear
@@ -229,10 +265,24 @@ test.describe("Deck Management", () => {
     // Should switch to the remaining deck
     await expect(page.locator("h1")).toContainText("New Deck");
 
-    // Open switcher — only one deck should remain
+    // Open switcher — no other decks should remain
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await expect(page.locator(".deck-item")).toHaveCount(0);
+    await expect(
+      page.locator(".palette-section", { hasText: "Other decks" }),
+    ).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+  });
+
+  test("delete deck action is hidden when only one deck exists", async ({ page }) => {
+    await page.keyboard.press("Control+p");
+    await page.waitForTimeout(300);
+
+    // Only the onboarding deck exists, so "Delete deck" must not be offered
+    await expect(
+      page.locator(".palette-item", { hasText: "Delete deck" }),
+    ).toHaveCount(0);
 
     await page.keyboard.press("Escape");
   });
@@ -241,19 +291,19 @@ test.describe("Deck Management", () => {
     // Create a second deck
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Switch back to onboarding deck
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".deck-item-name", { hasText: "Getting Started" }).click();
+    await page.locator(".palette-item", { hasText: "Getting Started" }).click();
     await page.waitForTimeout(500);
 
     // Try to delete but cancel
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".icon-btn[title='Delete Deck']").click();
+    await page.locator(".palette-item", { hasText: "Delete deck" }).click();
     await page.waitForTimeout(300);
 
     // Cancel
@@ -268,7 +318,7 @@ test.describe("Deck Management", () => {
     // Create a second deck
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
-    await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
     // Should be on "New Deck"
@@ -296,7 +346,8 @@ test.describe("Deck Management", () => {
     await page.waitForTimeout(300);
 
     // Deck switcher should be open
-    await expect(page.locator("dialog.switcher-dialog")).toBeVisible();
+    await expect(page.locator("dialog.palette-dialog")).toBeVisible();
+    await expect(page.locator(".current-name")).toContainText("Getting Started");
 
     await page.keyboard.press("Escape");
   });
