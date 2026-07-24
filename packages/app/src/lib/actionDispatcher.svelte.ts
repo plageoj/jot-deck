@@ -586,6 +586,9 @@ export class ActionDispatcher {
       case "newDeck":
         this.data.createDeck();
         break;
+      case "restoreOnboarding":
+        this.data.restoreOnboardingDeck();
+        break;
       case "switchDeck":
         this.focus.openPalette("deck");
         break;

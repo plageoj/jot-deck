@@ -691,6 +691,13 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(state.createDeckCalls).toBe(1);
   });
 
+  it("restoreOnboarding rebuilds the Getting Started deck and closes the palette", async () => {
+    await dispatcher.executeCommand("restoreOnboarding");
+    await flushPromises();
+    expect(state.createDeckCalls).toBe(1);
+    expect(focus.activePalette).toBeNull();
+  });
+
   it("switchDeck reopens the deck palette", async () => {
     await dispatcher.executeCommand("switchDeck");
     expect(focus.activePalette).toBe("deck");
