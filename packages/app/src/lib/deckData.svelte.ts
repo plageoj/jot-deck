@@ -111,6 +111,11 @@ export class DeckData {
     await this.db.createCard({
       column_id: col3.id,
       content:
+        "Format cards with Markdown: **bold**, *italic*, `code`, and [links](https://example.com).\n\nEnable \"Render Markdown\" in Settings to see it in view mode.",
+    });
+    await this.db.createCard({
+      column_id: col3.id,
+      content:
         "f / + — Increase card score\nF / - — Decrease card score\n\nUse scores to highlight important cards.",
     });
   }
