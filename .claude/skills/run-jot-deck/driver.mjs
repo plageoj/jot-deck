@@ -18,6 +18,7 @@
  *
  *   flow = "smoke" (default) — create a fresh deck, add 3 cards, verify + shot
  *   flow = "load"            — just load the app and screenshot (no writes)
+ *   flow = "vim"             — probe whether the CodeMirror editor is in Vim mode
  *
  * Env:
  *   BASE_URL   dev server URL         (default http://localhost:1420)
@@ -76,7 +77,26 @@ async function typeInEditor(page, text) {
 
 async function saveAndExitEditor(page) {
   await page.keyboard.press("Control+Enter");
-  await sleep(300);
+  // The editor detaches once the card is saved; wait for that instead of a
+  // blind delay so the next `o` doesn't race the still-open editor.
+  await page.locator(".cm-editor").waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+}
+
+// Open the deck switcher and create a clean, empty deck with one column.
+// NOTE: these selectors/keybindings mirror packages/app/e2e/e2e-helpers.ts —
+// that file is the source of truth. If the app renames a button or changes a
+// keybinding, update both. (This standalone .mjs can't import the .ts helper.)
+async function createFreshDeckWithColumn(page) {
+  await page.keyboard.press("Control+p");
+  // .click() auto-waits for the switcher and button to be actionable.
+  await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+  // A fresh deck has no columns — create one if prompted (the check's own
+  // timeout covers the deck-switch render, so no fixed sleep needed).
+  const createCol = page.locator("text=Create Column");
+  if (await createCol.isVisible({ timeout: 2000 }).catch(() => false)) {
+    await createCol.click();
+  }
+  await page.keyboard.press("Escape"); // leave any palette -> column focus
 }
 
 async function main() {
@@ -93,30 +113,19 @@ async function main() {
     await page.goto(BASE_URL, { waitUntil: "networkidle", timeout: 30000 });
     // The h1 shows the current deck name once WASM SQLite + onboarding load.
     await page.locator("h1").first().waitFor({ state: "visible", timeout: 20000 });
-    await sleep(1200); // WASM init + data load
+    // Gate on real readiness (the onboarding deck's first column rendering)
+    // rather than a blind delay, so this is robust across warm/cold WASM starts.
+    await page.locator(".column").first().waitFor({ state: "visible", timeout: 20000 });
     console.log(`[driver] app loaded, deck heading = "${(await page.locator("h1").first().innerText()).trim()}"`);
 
     if (flow === "smoke") {
-      // Open the deck switcher (Ctrl+P) and create a clean, empty deck.
-      await page.keyboard.press("Control+p");
-      await sleep(400);
-      await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
-      await sleep(600);
-
-      // Fresh deck has no columns — create one if prompted.
-      const createCol = page.locator("text=Create Column");
-      if (await createCol.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await createCol.click();
-        await sleep(500);
-      }
-      await page.keyboard.press("Escape");
-      await sleep(300);
+      await createFreshDeckWithColumn(page);
 
       // Create three cards with `o` (new card -> editor -> save).
       const notes = ["Write at the speed of thought #demo", "Keyboard-first, Vim-style", "Local-first, crystallize with AI"];
       for (const note of notes) {
         await page.keyboard.press("o");
-        await sleep(400);
+        await page.locator(".cm-editor").waitFor({ state: "visible", timeout: 5000 });
         await typeInEditor(page, note);
         await saveAndExitEditor(page);
       }
@@ -130,20 +139,10 @@ async function main() {
     }
 
     if (flow === "vim") {
-      // Ensure a column exists, then open a new card to focus the editor.
-      await page.keyboard.press("Control+p");
-      await sleep(400);
-      await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
-      await sleep(600);
-      const createCol = page.locator("text=Create Column");
-      if (await createCol.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await createCol.click();
-        await sleep(500);
-      }
-      await page.keyboard.press("Escape");
-      await sleep(300);
+      // Open a new card to focus the editor, then probe its mode.
+      await createFreshDeckWithColumn(page);
       await page.keyboard.press("o");
-      await sleep(500);
+      await page.locator(".cm-editor").waitFor({ state: "visible", timeout: 5000 });
 
       // Vim is setting-gated: CardEditor loads the @replit/codemirror-vim
       // `vim()` extension only when settings.vimEnabled is true (default false,
