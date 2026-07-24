@@ -19,6 +19,20 @@ its real keybindings, and writes a screenshot.
 > **Paths below are relative to the repo root** (the `<unit>` for this skill).
 > Run everything from there unless noted.
 
+## Scope — what this verifies (and what it does not)
+
+This skill drives the **frontend through the WASM SQLite backend**, which is a
+*separate reimplementation* of the Rust backend. Keep that boundary in mind:
+
+- **Covers** (trust a green run here): UI rendering, keybindings, focus model,
+  palettes, card/column/deck interactions, settings, tags — the layer most PRs
+  touch.
+- **Does NOT cover**: the real Rust backend (`crates/core`), Tauri IPC/`invoke`,
+  on-disk SQLite/FTS5, and physical-deletion cleanup. A green run here says
+  nothing about those. For backend changes, use `cargo test` (in `crates/core`)
+  and/or a real desktop build (`pnpm tauri dev`) instead — this skill is a fast
+  "see the change in the UI" tool, not a backend/IPC test.
+
 ## Prerequisites
 
 - Node (v24 tested) and `pnpm` (v10.33, pinned via `packageManager`).
