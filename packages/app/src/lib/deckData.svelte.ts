@@ -74,28 +74,28 @@ export class DeckData {
     await this.db.createCard({
       column_id: col1.id,
       content:
-        "Welcome to Jot Deck!\n\nA keyboard-centric note-taking app with a TweetDeck-style column layout.\n\nPress ? to see all keybindings.",
+        "**Welcome to Jot Deck!**\n\nA keyboard-centric note-taking app with a TweetDeck-style column layout.\n\nPress `?` to see all keybindings.",
     });
     await this.db.createCard({
       column_id: col1.id,
       content:
-        "Each deck holds multiple columns, and each column holds cards.\n\nYou're looking at the \"Getting Started\" deck right now.",
+        "Each deck holds multiple columns, and each column holds cards.\n\nYou're looking at the **Getting Started** deck right now.",
     });
 
     await this.db.createCard({
       column_id: col2.id,
       content:
-        "h / l — Move between columns\nj / k — Move between cards\ni or Enter — Edit a card\nCtrl+Enter — Save & exit edit\nEsc — Discard & exit edit",
+        "`h` / `l` — Move between columns\n`j` / `k` — Move between cards\n`i` or `Enter` — Edit a card\n`Ctrl+Enter` — Save & exit edit\n`Esc` — Discard & exit edit",
     });
     await this.db.createCard({
       column_id: col2.id,
       content:
-        "o — New card below\nO — New card above\nc — New column\ndd — Delete card/column",
+        "`o` — New card below\n`O` — New card above\n`c` — New column\n`dd` — Delete card/column",
     });
     await this.db.createCard({
       column_id: col2.id,
       content:
-        "Ctrl+P — Switch deck\nCtrl+Shift+P — Command palette\ng n — Switch column\n/ — Filter by tag",
+        "`Ctrl+P` — Switch deck\n`Ctrl+Shift+P` — Command palette\n`g n` — Switch column\n`/` — Filter by tag",
     });
 
     await this.db.createCard({
@@ -106,17 +106,17 @@ export class DeckData {
     await this.db.createCard({
       column_id: col3.id,
       content:
-        "While editing, just type like a normal text editor.\n\nCtrl+Enter saves and Esc discards — then navigate cards with j / k.\n\nPrefer Vim? Enable Vim mode in Settings.",
+        "While editing, just type like a normal text editor.\n\n`Ctrl+Enter` saves and `Esc` discards — then navigate cards with `j` / `k`.\n\nPrefer Vim? Enable **Vim mode** in Settings.",
     });
     await this.db.createCard({
       column_id: col3.id,
       content:
-        "Format cards with Markdown: **bold**, *italic*, `code`, and [links](https://example.com).\n\nEnable \"Render Markdown\" in Settings to see it in view mode.",
+        "Cards render **Markdown** by default: **bold**, *italic*, `code`, and [links](https://example.com).\n\nPrefer plain text? Turn off \"Render Markdown\" in Settings.",
     });
     await this.db.createCard({
       column_id: col3.id,
       content:
-        "f / + — Increase card score\nF / - — Decrease card score\n\nUse scores to highlight important cards.",
+        "`f` / `+` — Increase card score\n`F` / `-` — Decrease card score\n\nUse **scores** to highlight important cards.",
     });
   }
 

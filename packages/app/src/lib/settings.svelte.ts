@@ -36,7 +36,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
     '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif',
   fontSize: 14,
   lineHeight: 1.5,
-  markdownEnabled: false,
+  markdownEnabled: true,
   vimEnabled: false,
   keybindingOverrides: {},
   customKeybindings: [],
