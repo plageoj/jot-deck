@@ -57,6 +57,25 @@ describe("filterCommands", () => {
     expect(settings?.shortcut).toBe("Ctrl+,");
   });
 
+  it("should include Check for Updates command bound to checkForUpdates", () => {
+    const cmd = COMMANDS.find((c) => c.id === "check-updates");
+    expect(cmd).toBeDefined();
+    expect(cmd?.label).toBe("Check for Updates");
+    expect(cmd?.action).toBe("checkForUpdates");
+  });
+
+  it("should include About command bound to showAbout", () => {
+    const cmd = COMMANDS.find((c) => c.id === "about");
+    expect(cmd).toBeDefined();
+    expect(cmd?.label).toBe("About Jot Deck");
+    expect(cmd?.action).toBe("showAbout");
+  });
+
+  it("should surface both commands when filtering by 'update'", () => {
+    const results = filterCommands("update");
+    expect(results.some((c) => c.action === "checkForUpdates")).toBe(true);
+  });
+
   it("should return empty array for no matches", () => {
     expect(filterCommands("zzzzz")).toEqual([]);
   });

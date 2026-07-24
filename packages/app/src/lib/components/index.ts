@@ -1,3 +1,4 @@
+export { default as AboutDialog } from "./AboutDialog.svelte";
 export { default as Card } from "./Card.svelte";
 export { default as CardEditor } from "./CardEditor.svelte";
 export { default as Column } from "./Column.svelte";

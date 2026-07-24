@@ -3,6 +3,7 @@ import type { FocusManager } from "./focusManager.svelte";
 import type { Card, Column } from "./types";
 import { findAction } from "./keybindings";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
+import { updaterStore } from "./updater.svelte";
 
 const HALF_PAGE_SIZE = 5;
 
@@ -60,8 +61,8 @@ export class ActionDispatcher {
       return;
     }
 
-    // Settings / keybindings dialogs manage their own input — let them handle keys.
-    if (focus.showSettings || focus.showKeybindings) return;
+    // Settings / keybindings / about dialogs manage their own input — let them handle keys.
+    if (focus.showSettings || focus.showKeybindings || focus.showAbout) return;
 
     // Skip if focus is on input fields
     if (this.isEditableTarget(event.target as HTMLElement)) return;
@@ -195,6 +196,19 @@ export class ActionDispatcher {
 
     if (action === "showKeybindings") {
       this.focus.showKeybindings = true;
+      return;
+    }
+
+    if (action === "showAbout") {
+      this.focus.showAbout = true;
+      return;
+    }
+
+    if (action === "checkForUpdates") {
+      // Surface the result inline in the About dialog, then kick off the
+      // check — a manual check that finds nothing is otherwise silent.
+      this.focus.showAbout = true;
+      void updaterStore.check();
       return;
     }
 

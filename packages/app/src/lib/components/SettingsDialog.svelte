@@ -19,10 +19,11 @@
     ) => void;
     onReset: () => void;
     onOpenKeybindings: () => void;
+    onOpenAbout: () => void;
     onClose: () => void;
   }
 
-  let { settings, onUpdate, onReset, onOpenKeybindings, onClose }: Props =
+  let { settings, onUpdate, onReset, onOpenKeybindings, onOpenAbout, onClose }: Props =
     $props();
 
   let dialogRef = $state<HTMLDialogElement | null>(null);
@@ -286,9 +287,14 @@
     </div>
 
     <footer class="settings-footer">
-      <button type="button" class="btn btn-ghost" onclick={onReset}>
-        Reset to defaults
-      </button>
+      <div class="footer-actions">
+        <button type="button" class="btn btn-ghost" onclick={onReset}>
+          Reset to defaults
+        </button>
+        <button type="button" class="btn btn-ghost" onclick={onOpenAbout}>
+          About &amp; updates…
+        </button>
+      </div>
       <span class="hint"
         >Defaults: <span class="value">{DEFAULT_SETTINGS.fontSize}px</span> /
         line-height
@@ -517,8 +523,14 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 0.75rem;
     padding: 0.625rem 1rem;
     border-top: 1px solid var(--bg-tertiary);
+  }
+
+  .footer-actions {
+    display: flex;
+    gap: 0.5rem;
   }
 
   .btn {

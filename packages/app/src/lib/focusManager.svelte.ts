@@ -27,6 +27,7 @@ export class FocusManager {
   showCheatsheet = $state(false);
   showSettings = $state(false);
   showKeybindings = $state(false);
+  showAbout = $state(false);
   activePalette = $state<PaletteType>(null);
   previousFocusMode = $state<FocusMode>("column");
 
