@@ -130,8 +130,8 @@ fn escape_like(s: &str) -> String {
 }
 
 /// カラムが接続 Deck の可視範囲（非削除・非 private）にあるか。存在しない/別 Deck
-/// の場合も false。
-fn is_column_visible(conn: &Connection, deck_id: &str, column_id: &str) -> Result<bool> {
+/// の場合も false。書き込み面（write.rs）も同じ可視性判定を共有する。
+pub(crate) fn is_column_visible(conn: &Connection, deck_id: &str, column_id: &str) -> Result<bool> {
     let visible: Option<i64> = conn
         .query_row(
             "SELECT 1 FROM columns

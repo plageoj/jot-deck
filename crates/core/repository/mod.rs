@@ -4,3 +4,4 @@ pub mod deck;
 pub mod query;
 pub mod setting;
 pub mod tag;
+pub mod write;

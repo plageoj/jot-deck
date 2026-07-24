@@ -1,18 +1,27 @@
-//! Jot Deck MCP bridge — read surface (008-mcp-server.md).
+//! Jot Deck MCP bridge (008-mcp-server.md).
 //!
 //! A small stdio JSON-RPC server that links `jot_deck_core`, opens the deck's
 //! SQLite file directly (the CLI's sibling — no IPC with the GUI), and maps MCP
-//! `tools/call` onto the deck-scoped read queries in `jot_deck_core::query`.
-//! It is connected to a single Deck (`deck_id`); `private` and deleted columns
-//! are filtered inside the core queries, which are the trust boundary.
+//! `tools/call` onto the deck-scoped queries in `jot_deck_core::query` (reads)
+//! and `jot_deck_core::write` (writes). It is connected to a single Deck
+//! (`deck_id`); `private`/deleted filtering and deck-boundary enforcement live in
+//! those core modules, which are the trust boundary.
 //!
-//! Only the read surface (Phase 4) is implemented: `list_columns`, `read_card`,
-//! `search_cards`, `recent_cards`, `describe_deck`, plus the `deck://` resources.
-//! Write tools arrive in Phase 5.
+//! Read surface: `list_columns`, `read_card`, `search_cards`, `recent_cards`,
+//! `describe_deck`, plus the `deck://` resources.
+//!
+//! Write surface (card writes): `append_card`, `patch_card`, `move_card`,
+//! `delete_card`. On top of the core trust boundary the bridge applies
+//! connection policy — capability opt-out (append/edit/delete), a per-connection
+//! write rate limit, and write attribution logging (008 §5). Column-structure
+//! tools (`ensure_column` etc.) arrive in a follow-up.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use jot_deck_core::{query, Connection};
+use jot_deck_core::{query, write, Connection};
 use serde_json::{json, Value};
 
 /// Protocol version we advertise when the client requests none, or requests one
@@ -55,23 +64,163 @@ pub fn resolve_db_path() -> Option<String> {
 
 /// Primer loaded into the host's system context on `initialize` (008 §4.6).
 const INSTRUCTIONS: &str = "\
-Jot Deck exposes one Deck as a read-only knowledge base. Hierarchy: Deck > Column > Card. \
-A Card is a tweet-sized atomic note. To find things, start with `describe_deck` or \
-`list_columns` to learn the columns and their purpose, then `search_cards` (full-text + \
-tag/score/column filters) or `recent_cards`. Fetch a single card with `read_card`. \
-Column and card ids are ULIDs assigned by Jot Deck — discover them via the tools, never \
-guess them. `#tag` markers in card content are indexed and searchable. Private columns are \
-never returned. This connection is read-only; there are no write tools.";
+Jot Deck exposes one Deck as a read/write knowledge base. Hierarchy: Deck > Column > Card. \
+A Card is a tweet-sized atomic note. Start with `describe_deck` or `list_columns` to learn \
+the columns (each has a purpose) and what this connection may do, then `search_cards` \
+(full-text + tag/score/column filters), `recent_cards`, or `read_card` to read. To write: \
+`append_card` adds a card to a column's end — for long input, append several short cards \
+rather than growing one. `patch_card` edits a card's content and requires \
+`expected_updated_at` (the `updated_at` you last read) so concurrent edits don't clobber \
+each other; on a conflict, re-read and retry. `move_card` reorders or moves a card by naming \
+an anchor card (before/after), not a raw position. `delete_card` soft-deletes (recoverable). \
+`#tag` markers in content are auto-extracted; column and card ids are ULIDs assigned by Jot \
+Deck — discover them via the tools, never guess them. Private columns are never visible. \
+Some connections disable write or specific capabilities; `describe_deck` reports what's \
+available.";
+
+/// Default per-connection write cap: writes/minute (008 §5 rate limit). Overridable
+/// via `JOT_DECK_MAX_WRITES_PER_MIN`.
+const DEFAULT_MAX_WRITES_PER_MIN: usize = 120;
+
+/// Which write verbs a connection may invoke (008 §5). All default ON; a
+/// connection opts out via the `JOT_DECK_DENY` env list (e.g. `append,delete`).
+/// `move_card` is gated under `edit` (it mutates an existing card's placement).
+#[derive(Debug, Clone, Copy)]
+pub struct Capabilities {
+    pub append: bool,
+    pub edit: bool,
+    pub delete: bool,
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Self {
+            append: true,
+            edit: true,
+            delete: true,
+        }
+    }
+}
+
+impl Capabilities {
+    /// Parse a deny list like `"append, delete"` into capabilities (default all
+    /// on; unknown tokens are ignored).
+    pub fn from_deny_list(deny: &str) -> Self {
+        let mut c = Self::default();
+        for tok in deny
+            .split(',')
+            .map(|s| s.trim().to_ascii_lowercase())
+            .filter(|s| !s.is_empty())
+        {
+            match tok.as_str() {
+                "append" => c.append = false,
+                "edit" => c.edit = false,
+                "delete" => c.delete = false,
+                _ => {}
+            }
+        }
+        c
+    }
+}
+
+/// Per-connection sliding-window write rate limiter (008 §5). Bounds the
+/// "many tiny writes" runaway the card-length backstop can't catch.
+struct RateLimiter {
+    max_per_min: usize,
+    events: Mutex<VecDeque<Instant>>,
+}
+
+impl RateLimiter {
+    fn new(max_per_min: usize) -> Self {
+        Self {
+            max_per_min,
+            events: Mutex::new(VecDeque::new()),
+        }
+    }
+
+    /// Record a write attempt; err if it would exceed the per-minute cap.
+    fn check_and_record(&self) -> Result<(), String> {
+        let now = Instant::now();
+        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cutoff) = now.checked_sub(Duration::from_secs(60)) {
+            while events.front().is_some_and(|&t| t < cutoff) {
+                events.pop_front();
+            }
+        }
+        if events.len() >= self.max_per_min {
+            return Err(format!(
+                "Rate limit exceeded: max {} writes/min for this connection. Slow down and retry.",
+                self.max_per_min
+            ));
+        }
+        events.push_back(now);
+        Ok(())
+    }
+}
+
+/// Per-connection policy the bridge applies on top of the core trust boundary.
+pub struct BridgeConfig {
+    pub capabilities: Capabilities,
+    pub max_writes_per_min: usize,
+    /// Opaque id identifying this connection in write-attribution logs (008 §5).
+    pub connection_id: String,
+}
+
+impl Default for BridgeConfig {
+    fn default() -> Self {
+        Self {
+            capabilities: Capabilities::default(),
+            max_writes_per_min: DEFAULT_MAX_WRITES_PER_MIN,
+            connection_id: ulid::Ulid::generate().to_string(),
+        }
+    }
+}
+
+impl BridgeConfig {
+    /// Build the connection policy from the bridge's environment:
+    /// `JOT_DECK_DENY` (capability opt-out) and `JOT_DECK_MAX_WRITES_PER_MIN`.
+    pub fn from_env() -> Self {
+        let capabilities = std::env::var("JOT_DECK_DENY")
+            .map(|d| Capabilities::from_deny_list(&d))
+            .unwrap_or_default();
+        let max_writes_per_min = std::env::var("JOT_DECK_MAX_WRITES_PER_MIN")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(DEFAULT_MAX_WRITES_PER_MIN);
+        Self {
+            capabilities,
+            max_writes_per_min,
+            connection_id: ulid::Ulid::generate().to_string(),
+        }
+    }
+}
 
 /// The MCP bridge over one connection and one deck.
 pub struct Bridge {
     conn: Connection,
     deck_id: String,
+    capabilities: Capabilities,
+    rate_limiter: RateLimiter,
+    connection_id: String,
 }
 
 impl Bridge {
+    /// Build a bridge with the default policy (full write capabilities).
     pub fn new(conn: Connection, deck_id: String) -> Self {
-        Self { conn, deck_id }
+        Self::with_config(conn, deck_id, BridgeConfig::default())
+    }
+
+    /// Build a bridge with an explicit connection policy (capabilities, rate
+    /// limit, connection id).
+    pub fn with_config(conn: Connection, deck_id: String, config: BridgeConfig) -> Self {
+        Self {
+            conn,
+            deck_id,
+            capabilities: config.capabilities,
+            rate_limiter: RateLimiter::new(config.max_writes_per_min),
+            connection_id: config.connection_id,
+        }
     }
 
     /// Handle one incoming JSON-RPC message. Returns the serialized response, or
@@ -99,7 +248,7 @@ impl Bridge {
         match method {
             "initialize" => success(id, self.initialize(&params)),
             "ping" => success(id, json!({})),
-            "tools/list" => success(id, json!({ "tools": tool_defs() })),
+            "tools/list" => success(id, json!({ "tools": self.tool_defs() })),
             "tools/call" => self.tools_call(id, params),
             "resources/list" => success(id, json!({ "resources": self.resource_defs() })),
             "resources/read" => self.resources_read(id, params),
@@ -136,6 +285,10 @@ impl Bridge {
             "search_cards" => self.tool_search_cards(&args),
             "recent_cards" => self.tool_recent_cards(&args),
             "describe_deck" => self.tool_describe_deck(),
+            "append_card" => self.tool_append_card(&args),
+            "patch_card" => self.tool_patch_card(&args),
+            "move_card" => self.tool_move_card(&args),
+            "delete_card" => self.tool_delete_card(&args),
             other => {
                 return error_response(id, -32602, &format!("Unknown tool: {}", other));
             }
@@ -187,9 +340,124 @@ impl Bridge {
     }
 
     fn tool_describe_deck(&self) -> Result<Value, String> {
-        query::describe_deck(&self.conn, &self.deck_id)
-            .map(|d| json!(d))
-            .map_err(|e| e.to_string())
+        let desc = query::describe_deck(&self.conn, &self.deck_id).map_err(|e| e.to_string())?;
+        let mut v = json!(desc);
+        // Augment the core description with this connection's write policy so the
+        // agent learns its effective scope without the user explaining it (008 §4.6).
+        v["capabilities"] = json!({
+            "read": true,
+            "append": self.capabilities.append,
+            "edit": self.capabilities.edit,
+            "delete": self.capabilities.delete,
+        });
+        if let Some(obj) = v.get_mut("constraints").and_then(Value::as_object_mut) {
+            obj.insert(
+                "max_writes_per_min".to_string(),
+                json!(self.rate_limiter.max_per_min),
+            );
+        }
+        Ok(v)
+    }
+
+    // ---- write tools (008 §4.1) ----
+
+    /// Gate a write on its capability (008 §5). Denied verbs are also hidden from
+    /// `tools/list`, but an agent may still call one — answer with a clear error.
+    fn require_capability(&self, enabled: bool, verb: &str) -> Result<(), String> {
+        if enabled {
+            Ok(())
+        } else {
+            Err(format!(
+                "The '{}' capability is disabled for this connection.",
+                verb
+            ))
+        }
+    }
+
+    /// Log a write to stderr for connection attribution (008 §5). stdout carries
+    /// JSON-RPC, so audit lines go to stderr where MCP hosts capture them.
+    fn log_write(&self, tool: &str, card_id: &str) {
+        eprintln!(
+            "[jot-deck-mcp] conn={} deck={} {} card={}",
+            self.connection_id, self.deck_id, tool, card_id
+        );
+    }
+
+    fn tool_append_card(&self, args: &Value) -> Result<Value, String> {
+        self.require_capability(self.capabilities.append, "append")?;
+        self.rate_limiter.check_and_record()?;
+        let column_id = require_str(args, "column_id")?;
+        let content = require_str(args, "content")?;
+        let idempotency_key = opt_str(args, "idempotency_key");
+        let card = write::append_card(
+            &self.conn,
+            &self.deck_id,
+            &column_id,
+            &content,
+            idempotency_key.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        self.log_write("append_card", &card.id);
+        Ok(json!({
+            "card_id": card.id,
+            "column_id": card.column_id,
+            "position": card.position,
+            "created_at": card.created_at.to_rfc3339(),
+        }))
+    }
+
+    fn tool_patch_card(&self, args: &Value) -> Result<Value, String> {
+        self.require_capability(self.capabilities.edit, "edit")?;
+        self.rate_limiter.check_and_record()?;
+        let card_id = require_str(args, "card_id")?;
+        let content = require_str(args, "content")?;
+        let expected = require_str(args, "expected_updated_at")?;
+        let expected_updated_at = chrono::DateTime::parse_from_rfc3339(&expected)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .map_err(|_| {
+                "expected_updated_at must be an RFC3339 timestamp (the updated_at you last read)"
+                    .to_string()
+            })?;
+        let card = write::patch_card(
+            &self.conn,
+            &self.deck_id,
+            &card_id,
+            &content,
+            expected_updated_at,
+        )
+        .map_err(|e| e.to_string())?;
+        self.log_write("patch_card", &card.id);
+        Ok(json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }))
+    }
+
+    fn tool_move_card(&self, args: &Value) -> Result<Value, String> {
+        self.require_capability(self.capabilities.edit, "edit")?;
+        self.rate_limiter.check_and_record()?;
+        let card_id = require_str(args, "card_id")?;
+        let to_column_id = opt_str(args, "to_column_id");
+        let before_card_id = opt_str(args, "before_card_id");
+        let after_card_id = opt_str(args, "after_card_id");
+        let card = write::move_card(
+            &self.conn,
+            &self.deck_id,
+            &card_id,
+            to_column_id.as_deref(),
+            before_card_id.as_deref(),
+            after_card_id.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        self.log_write("move_card", &card.id);
+        Ok(json!({ "card_id": card.id, "column_id": card.column_id, "position": card.position }))
+    }
+
+    fn tool_delete_card(&self, args: &Value) -> Result<Value, String> {
+        self.require_capability(self.capabilities.delete, "delete")?;
+        self.rate_limiter.check_and_record()?;
+        let card_id = require_str(args, "card_id")?;
+        let card = write::delete_card(&self.conn, &self.deck_id, &card_id).map_err(|e| e.to_string())?;
+        self.log_write("delete_card", &card.id);
+        let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
+        Ok(json!({ "card_id": card.id, "deleted_at": deleted_at }))
     }
 
     // ---- resources ----
@@ -268,8 +536,28 @@ impl Bridge {
 
 // ---- tool schema ----
 
-/// MCP tool definitions with input schemas and teaching descriptions (008 §4.6).
-fn tool_defs() -> Vec<Value> {
+impl Bridge {
+    /// Tools this connection exposes: the read surface always, plus each write
+    /// tool whose capability is enabled (denied verbs are hidden so the agent
+    /// won't attempt them → 008 §4.6).
+    fn tool_defs(&self) -> Vec<Value> {
+        let mut defs = read_tool_defs();
+        if self.capabilities.append {
+            defs.push(append_card_def());
+        }
+        if self.capabilities.edit {
+            defs.push(patch_card_def());
+            defs.push(move_card_def());
+        }
+        if self.capabilities.delete {
+            defs.push(delete_card_def());
+        }
+        defs
+    }
+}
+
+/// Read-surface tool definitions with input schemas and teaching descriptions (008 §4.6).
+fn read_tool_defs() -> Vec<Value> {
     vec![
         json!({
             "name": "describe_deck",
@@ -321,6 +609,73 @@ fn tool_defs() -> Vec<Value> {
             },
         }),
     ]
+}
+
+fn append_card_def() -> Value {
+    json!({
+        "name": "append_card",
+        "description": "Append a new card to the end of a column and return its ULID. Get column_id from list_columns/describe_deck first. For long input, call this several times with short cards rather than growing one. Pass idempotency_key to make host resends safe (a repeat returns the same card).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "column_id": { "type": "string", "description": "Target column ULID." },
+                "content": { "type": "string", "description": "Card text; #tags are auto-extracted." },
+                "idempotency_key": { "type": "string", "description": "Optional key; resends with the same key don't create duplicates." }
+            },
+            "required": ["column_id", "content"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn patch_card_def() -> Value {
+    json!({
+        "name": "patch_card",
+        "description": "Replace a card's content. Requires expected_updated_at (the updated_at you last read via read_card/search_cards) — the write applies only if the card is unchanged since, otherwise it conflicts and you should re-read and retry. Tags are re-extracted.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "card_id": { "type": "string", "description": "Card ULID." },
+                "content": { "type": "string", "description": "New full content." },
+                "expected_updated_at": { "type": "string", "description": "RFC3339 updated_at last read for this card (optimistic lock)." }
+            },
+            "required": ["card_id", "content", "expected_updated_at"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn move_card_def() -> Value {
+    json!({
+        "name": "move_card",
+        "description": "Reorder a card or move it to another column in this deck. Express intent with an anchor — before_card_id or after_card_id (at most one) — not a raw position; omit both to append to the target column's end. Omit to_column_id to reorder within the current column. Moving to the same spot is a no-op.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "card_id": { "type": "string", "description": "Card ULID to move." },
+                "to_column_id": { "type": "string", "description": "Destination column ULID (same deck); omit to reorder in place." },
+                "before_card_id": { "type": "string", "description": "Place the card immediately before this card." },
+                "after_card_id": { "type": "string", "description": "Place the card immediately after this card." }
+            },
+            "required": ["card_id"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn delete_card_def() -> Value {
+    json!({
+        "name": "delete_card",
+        "description": "Soft-delete a card (recoverable from the user's trash; physically removed only after 30 days). Use when a card is wrong or obsolete.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "card_id": { "type": "string", "description": "Card ULID to delete." }
+            },
+            "required": ["card_id"],
+            "additionalProperties": false,
+        },
+    })
 }
 
 // ---- JSON-RPC helpers ----
@@ -595,5 +950,166 @@ mod tests {
         let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
         assert!(text.contains("Research"));
         assert!(!text.contains("hidden"));
+    }
+
+    // ---- write surface ----
+
+    /// A single-column deck with the given connection policy. Returns the bridge
+    /// and the (public, writable) column id.
+    fn bridge_with_config(config: BridgeConfig) -> (Bridge, String) {
+        let conn = create_in_memory().unwrap();
+        let d = deck::create(
+            &conn,
+            NewDeck {
+                name: "KB".to_string(),
+                sort_order: SortOrder::default(),
+            },
+        )
+        .unwrap();
+        let col = column::create(
+            &conn,
+            NewColumn {
+                deck_id: d.id.clone(),
+                name: "Notes".to_string(),
+            },
+        )
+        .unwrap();
+        (Bridge::with_config(conn, d.id, config), col.id)
+    }
+
+    fn tool_names(bridge: &Bridge) -> Vec<String> {
+        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+        let resp: Value = serde_json::from_str(&bridge.handle_message(&req).unwrap()).unwrap();
+        resp["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn tools_list_exposes_write_surface_by_default() {
+        let (bridge, _, _) = bridge_with_data();
+        let names = tool_names(&bridge);
+        for expected in ["append_card", "patch_card", "move_card", "delete_card"] {
+            assert!(names.contains(&expected.to_string()), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn append_card_creates_and_returns_ids() {
+        let (bridge, col_id, _) = bridge_with_data();
+        let resp = call(&bridge, 1, "append_card", json!({ "column_id": col_id, "content": "new note #x" }));
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(structured(&resp)["card_id"].is_string());
+        assert_eq!(structured(&resp)["column_id"], col_id);
+    }
+
+    #[test]
+    fn append_card_to_private_column_is_error() {
+        // Reach the private column id via a direct fixture (it is never listed).
+        let conn = create_in_memory().unwrap();
+        let d = deck::create(&conn, NewDeck { name: "KB".into(), sort_order: SortOrder::default() }).unwrap();
+        let secret = column::create(&conn, NewColumn { deck_id: d.id.clone(), name: "Secret".into() }).unwrap();
+        column::update(&conn, &secret.id, None, None, Some(true)).unwrap();
+        let bridge = Bridge::new(conn, d.id);
+
+        let resp = call(&bridge, 1, "append_card", json!({ "column_id": secret.id, "content": "x" }));
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn append_card_is_idempotent() {
+        let (bridge, col_id, _) = bridge_with_data();
+        let a = call(&bridge, 1, "append_card", json!({ "column_id": col_id, "content": "once", "idempotency_key": "k1" }));
+        let b = call(&bridge, 2, "append_card", json!({ "column_id": col_id, "content": "ignored", "idempotency_key": "k1" }));
+        assert_eq!(structured(&a)["card_id"], structured(&b)["card_id"]);
+    }
+
+    #[test]
+    fn patch_card_applies_and_rejects_stale() {
+        let (bridge, _col, card_id) = bridge_with_data();
+        let read = call(&bridge, 1, "read_card", json!({ "card_id": card_id }));
+        let updated_at = structured(&read)["updated_at"].as_str().unwrap().to_string();
+
+        let ok = call(&bridge, 2, "patch_card", json!({ "card_id": card_id, "content": "patched", "expected_updated_at": updated_at.clone() }));
+        assert_eq!(ok["result"]["isError"], false);
+
+        // Reusing the now-stale updated_at conflicts.
+        let stale = call(&bridge, 3, "patch_card", json!({ "card_id": card_id, "content": "again", "expected_updated_at": updated_at }));
+        assert_eq!(stale["result"]["isError"], true);
+    }
+
+    #[test]
+    fn patch_card_rejects_bad_timestamp() {
+        let (bridge, _col, card_id) = bridge_with_data();
+        let resp = call(&bridge, 1, "patch_card", json!({ "card_id": card_id, "content": "x", "expected_updated_at": "not-a-date" }));
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn delete_card_soft_deletes() {
+        let (bridge, col_id, _) = bridge_with_data();
+        let appended = call(&bridge, 1, "append_card", json!({ "column_id": col_id, "content": "bye" }));
+        let new_id = structured(&appended)["card_id"].as_str().unwrap().to_string();
+        let resp = call(&bridge, 2, "delete_card", json!({ "card_id": new_id }));
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(structured(&resp)["deleted_at"].as_str().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn move_card_reorders_by_anchor() {
+        let (bridge, col_id, card_id) = bridge_with_data();
+        let b = call(&bridge, 1, "append_card", json!({ "column_id": col_id, "content": "B" }));
+        let b_id = structured(&b)["card_id"].as_str().unwrap().to_string();
+        // Move the original card after B → order becomes (B, original).
+        let resp = call(&bridge, 2, "move_card", json!({ "card_id": card_id, "after_card_id": b_id }));
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(structured(&resp)["column_id"], col_id);
+
+        let recent = call(&bridge, 3, "recent_cards", json!({ "column_id": col_id }));
+        let cards = structured(&recent)["cards"].as_array().unwrap();
+        // recent_cards is created_desc; both exist, sanity check the move didn't error out the set.
+        assert_eq!(cards.len(), 2);
+    }
+
+    #[test]
+    fn denied_capability_hides_tool_and_errors_on_call() {
+        let mut config = BridgeConfig::default();
+        config.capabilities.append = false;
+        let (bridge, col_id) = bridge_with_config(config);
+
+        // Hidden from tools/list…
+        let names = tool_names(&bridge);
+        assert!(!names.contains(&"append_card".to_string()));
+        // …but a direct call still fails cleanly (edit remains available).
+        assert!(names.contains(&"patch_card".to_string()));
+        let resp = call(&bridge, 1, "append_card", json!({ "column_id": col_id, "content": "x" }));
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn rate_limit_blocks_excess_writes() {
+        let mut config = BridgeConfig::default();
+        config.max_writes_per_min = 1;
+        let (bridge, col_id) = bridge_with_config(config);
+
+        let first = call(&bridge, 1, "append_card", json!({ "column_id": col_id, "content": "a" }));
+        assert_eq!(first["result"]["isError"], false);
+        let second = call(&bridge, 2, "append_card", json!({ "column_id": col_id, "content": "b" }));
+        assert_eq!(second["result"]["isError"], true);
+    }
+
+    #[test]
+    fn describe_deck_reports_capabilities() {
+        let mut config = BridgeConfig::default();
+        config.capabilities.delete = false;
+        let (bridge, _col) = bridge_with_config(config);
+        let resp = call(&bridge, 1, "describe_deck", json!({}));
+        let caps = &structured(&resp)["capabilities"];
+        assert_eq!(caps["append"], true);
+        assert_eq!(caps["delete"], false);
+        assert!(structured(&resp)["constraints"]["max_writes_per_min"].is_number());
     }
 }

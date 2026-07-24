@@ -1941,10 +1941,12 @@ dependencies = [
 name = "jot-deck-mcp"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "dirs",
  "jot-deck-core",
  "serde",
  "serde_json",
+ "ulid",
 ]
 
 [[package]]
