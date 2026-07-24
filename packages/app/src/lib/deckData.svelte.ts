@@ -85,7 +85,7 @@ export class DeckData {
     await this.db.createCard({
       column_id: col2.id,
       content:
-        "h / l — Move between columns\nj / k — Move between cards\ni or Enter — Edit a card\nEsc — Exit edit mode",
+        "h / l — Move between columns\nj / k — Move between cards\ni or Enter — Edit a card\nCtrl+Enter — Save & exit edit\nEsc — Discard & exit edit",
     });
     await this.db.createCard({
       column_id: col2.id,
@@ -106,7 +106,7 @@ export class DeckData {
     await this.db.createCard({
       column_id: col3.id,
       content:
-        "Cards support Vim-style keybindings in edit mode.\n\nPress Esc to exit edit mode, then navigate with h/j/k/l.",
+        "While editing, just type like a normal text editor.\n\nCtrl+Enter saves and Esc discards — then navigate cards with j / k.\n\nPrefer Vim? Enable Vim mode in Settings.",
     });
     await this.db.createCard({
       column_id: col3.id,
