@@ -51,6 +51,20 @@
     }
   }
 
+  // In the Tauri shell, route external links through the system browser via
+  // the opener plugin so the webview itself never navigates away. In the
+  // web/dev build we let the anchor behave normally.
+  async function openExternal(event: MouseEvent, url: string) {
+    if (!isTauri) return;
+    event.preventDefault();
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch {
+      // Best-effort — opening a link should never crash the dialog.
+    }
+  }
+
   function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -152,6 +166,34 @@
           </p>
         {/if}
       </section>
+
+      <footer class="about-links">
+        <a
+          href="https://jot-deck.com"
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={(e) => openExternal(e, "https://jot-deck.com")}
+        >
+          Website
+        </a>
+        <a
+          href="https://github.com/plageoj/jot-deck"
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={(e) => openExternal(e, "https://github.com/plageoj/jot-deck")}
+        >
+          GitHub
+        </a>
+        <a
+          href="https://github.com/plageoj/jot-deck/issues"
+          target="_blank"
+          rel="noopener noreferrer"
+          onclick={(e) =>
+            openExternal(e, "https://github.com/plageoj/jot-deck/issues")}
+        >
+          Report an issue
+        </a>
+      </footer>
     </div>
   </div>
 </dialog>
@@ -288,6 +330,31 @@
   .hint {
     font-size: 0.75rem;
     color: var(--text-muted);
+  }
+
+  .about-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--bg-tertiary);
+  }
+
+  .about-links a {
+    font-size: 0.8125rem;
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .about-links a:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+  }
+
+  .about-links a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 2px;
   }
 
   .btn {
