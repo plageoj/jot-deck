@@ -590,6 +590,25 @@ describe("DeckData onboarding", () => {
     expect(fresh.decks[0].name).toBe("Getting Started");
   });
 
+  it("restoreOnboardingDeck prepends and selects a fresh deck without removing existing decks", async () => {
+    state.decks = [makeDeck("existing-deck", "My Notes")];
+
+    const fresh = new DeckData();
+    await fresh.init();
+    expect(fresh.decks.length).toBe(1);
+
+    const restored = await fresh.restoreOnboardingDeck();
+
+    expect(restored).not.toBeNull();
+    expect(restored?.name).toBe("Getting Started");
+    // Prepended, existing deck preserved.
+    expect(fresh.decks.length).toBe(2);
+    expect(fresh.decks[0].id).toBe(restored?.id);
+    expect(fresh.decks.some((d) => d.id === "existing-deck")).toBe(true);
+    // Newly restored deck becomes the current one.
+    expect(fresh.currentDeck?.id).toBe(restored?.id);
+  });
+
   it("falls back to first deck when stored last-deck-id no longer exists", async () => {
     state.decks = [makeDeck("known-deck")];
     state.columns = [makeColumn("col-active", "known-deck")];
