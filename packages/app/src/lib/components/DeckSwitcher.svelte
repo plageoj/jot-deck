@@ -31,6 +31,22 @@
   let inputRef = $state<HTMLInputElement | null>(null);
   let dialogRef = $state<HTMLDialogElement | null>(null);
   let listRef = $state<HTMLUListElement | null>(null);
+  let copied = $state(false);
+  let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Copy the deck's ULID to the clipboard for pasting into an mcpServers
+   * config (JOT_DECK_DECK_ID). See docs/008-mcp-server.md §4.5. */
+  async function copyDeckId() {
+    if (!currentDeck) return;
+    try {
+      await navigator.clipboard.writeText(currentDeck.id);
+      copied = true;
+      clearTimeout(copyResetTimer);
+      copyResetTimer = setTimeout(() => (copied = false), 1500);
+    } catch {
+      // Clipboard unavailable (e.g. permissions); leave state unchanged.
+    }
+  }
 
   let otherDecks = $derived(decks.filter((d) => d.id !== currentDeck?.id));
 
@@ -118,6 +134,41 @@
           <div class="current-actions">
             <button
               class="icon-btn"
+              title={copied ? "Copied!" : "Copy MCP deck id"}
+              aria-label="Copy MCP deck id"
+              onclick={copyDeckId}
+            >
+              {#if copied}
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              {:else}
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              {/if}
+            </button>
+            <button
+              class="icon-btn"
               title="Rename Deck"
               onclick={() => {
                 dialogRef?.close();
@@ -171,6 +222,16 @@
           {cardCount}
           {cardCount === 1 ? "card" : "cards"}
         </div>
+        <button
+          type="button"
+          class="deck-id-row"
+          title="Copy MCP deck id"
+          onclick={copyDeckId}
+        >
+          <span class="deck-id-label">MCP id</span>
+          <code class="deck-id-value">{currentDeck.id}</code>
+          <span class="deck-id-hint">{copied ? "Copied!" : "Copy"}</span>
+        </button>
       </div>
     {/if}
 
@@ -324,6 +385,51 @@
     margin-top: 0.25rem;
     font-size: 0.75rem;
     color: var(--text-muted);
+  }
+
+  .deck-id-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin-top: 0.5rem;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-align: left;
+    transition:
+      background-color 0.1s ease,
+      color 0.1s ease;
+  }
+
+  .deck-id-row:hover {
+    background-color: var(--bg-tertiary);
+    color: var(--text);
+  }
+
+  .deck-id-label {
+    font-size: 0.625rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    flex-shrink: 0;
+  }
+
+  .deck-id-value {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.6875rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+
+  .deck-id-hint {
+    font-size: 0.625rem;
+    flex-shrink: 0;
   }
 
   /* Other decks section */

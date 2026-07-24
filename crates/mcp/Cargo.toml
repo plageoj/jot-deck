@@ -1,0 +1,16 @@
+[package]
+name = "jot-deck-mcp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "jot-deck-mcp"
+path = "src/main.rs"
+
+[dependencies]
+jot-deck-core = { path = "../core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

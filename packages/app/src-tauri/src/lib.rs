@@ -126,9 +126,19 @@ fn create_column(state: State<AppState>, params: CreateColumnParams) -> CommandR
 }
 
 #[tauri::command]
-fn update_column(state: State<AppState>, id: String, name: String) -> CommandResult<Column> {
+fn update_column(
+    state: State<AppState>,
+    id: String,
+    name: Option<String>,
+    description: Option<String>,
+    private: Option<bool>,
+) -> CommandResult<Column> {
     let conn = get_conn(&state)?;
-    column::update(&conn, &id, Some(&name)).map_err(Into::into)
+    // description: フロントは常に希望する完全な値を送る。空文字は NULL クリア扱い。
+    let description_arg = description
+        .as_deref()
+        .map(|s| if s.is_empty() { None } else { Some(s) });
+    column::update(&conn, &id, name.as_deref(), description_arg, private).map_err(Into::into)
 }
 
 #[tauri::command]

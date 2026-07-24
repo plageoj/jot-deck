@@ -74,6 +74,8 @@ export class WasmBackend implements DatabaseBackend {
         deck_id TEXT NOT NULL,
         name TEXT NOT NULL,
         position INTEGER NOT NULL,
+        description TEXT,
+        private INTEGER NOT NULL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
@@ -229,7 +231,7 @@ export class WasmBackend implements DatabaseBackend {
     await this.init();
     const db = this.ensureDb();
     const results = db.exec(
-      `SELECT id, deck_id, name, position, created_at, updated_at, deleted_at
+      `SELECT id, deck_id, name, position, description, private, created_at, updated_at, deleted_at
        FROM columns
        WHERE deck_id = ? AND deleted_at IS NULL
        ORDER BY position ASC`,
@@ -243,7 +245,7 @@ export class WasmBackend implements DatabaseBackend {
     await this.init();
     const db = this.ensureDb();
     const results = db.exec(
-      "SELECT id, deck_id, name, position, created_at, updated_at, deleted_at FROM columns WHERE id = ?",
+      "SELECT id, deck_id, name, position, description, private, created_at, updated_at, deleted_at FROM columns WHERE id = ?",
       [id]
     );
     if (results.length === 0 || results[0].values.length === 0) {
@@ -293,16 +295,31 @@ export class WasmBackend implements DatabaseBackend {
     return this.getColumn(id);
   }
 
-  async updateColumn(id: string, name: string): Promise<Column> {
+  async updateColumn(
+    id: string,
+    name?: string,
+    description?: string,
+    isPrivate?: boolean
+  ): Promise<Column> {
     await this.init();
     const db = this.ensureDb();
+    const current = await this.getColumn(id);
     const now = this.now();
 
-    db.run("UPDATE columns SET name = ?, updated_at = ? WHERE id = ?", [
-      name,
-      now,
-      id,
-    ]);
+    const newName = name ?? current.name;
+    // Empty description string clears to NULL; undefined leaves it unchanged.
+    const newDescription =
+      description === undefined
+        ? current.description
+        : description === ""
+          ? null
+          : description;
+    const newPrivate = isPrivate ?? current.private;
+
+    db.run(
+      "UPDATE columns SET name = ?, description = ?, private = ?, updated_at = ? WHERE id = ?",
+      [newName, newDescription, newPrivate ? 1 : 0, now, id]
+    );
 
     return this.getColumn(id);
   }
@@ -402,7 +419,7 @@ export class WasmBackend implements DatabaseBackend {
     await this.init();
     const db = this.ensureDb();
     const results = db.exec(
-      `SELECT id, deck_id, name, position, created_at, updated_at, deleted_at
+      `SELECT id, deck_id, name, position, description, private, created_at, updated_at, deleted_at
        FROM columns
        WHERE deck_id = ? AND deleted_at IS NOT NULL
        ORDER BY deleted_at DESC`,
@@ -781,9 +798,11 @@ export class WasmBackend implements DatabaseBackend {
       deck_id: row[1] as string,
       name: row[2] as string,
       position: row[3] as number,
-      created_at: row[4] as string,
-      updated_at: row[5] as string,
-      deleted_at: row[6] as string | null,
+      description: (row[4] as string | null) ?? null,
+      private: (row[5] as number) === 1,
+      created_at: row[6] as string,
+      updated_at: row[7] as string,
+      deleted_at: row[8] as string | null,
     };
   }
 

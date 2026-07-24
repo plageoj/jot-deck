@@ -1938,6 +1938,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "jot-deck-mcp"
+version = "0.1.0"
+dependencies = [
+ "jot-deck-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "jot-deck-tauri"
 version = "0.1.0"
 dependencies = [

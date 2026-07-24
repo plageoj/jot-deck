@@ -234,7 +234,7 @@ fn cmd_col_new(parts: &[&str], conn: &Connection) {
 fn cmd_col_rename(parts: &[&str], conn: &Connection) {
     if let (Some(id), Some(name)) = (parts.get(1), parts.get(2..)) {
         let name = name.join(" ");
-        match column::update(conn, id, Some(&name)) {
+        match column::update(conn, id, Some(&name), None, None) {
             Ok(col) => println!("Renamed column: {} -> {}", col.id, col.name),
             Err(e) => println!("Error: {}", e),
         }

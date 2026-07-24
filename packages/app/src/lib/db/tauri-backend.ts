@@ -53,8 +53,18 @@ export class TauriBackend implements DatabaseBackend {
     return invoke<Column>("create_column", { params });
   }
 
-  async updateColumn(id: string, name: string): Promise<Column> {
-    return invoke<Column>("update_column", { id, name });
+  async updateColumn(
+    id: string,
+    name?: string,
+    description?: string,
+    isPrivate?: boolean
+  ): Promise<Column> {
+    return invoke<Column>("update_column", {
+      id,
+      name,
+      description,
+      private: isPrivate,
+    });
   }
 
   async moveColumn(id: string, position: number): Promise<Column> {

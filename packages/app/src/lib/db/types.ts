@@ -45,7 +45,12 @@ export interface DatabaseBackend {
   getColumnsByDeck(deckId: string): Promise<Column[]>;
   getColumn(id: string): Promise<Column>;
   createColumn(params: CreateColumnParams): Promise<Column>;
-  updateColumn(id: string, name: string): Promise<Column>;
+  updateColumn(
+    id: string,
+    name?: string,
+    description?: string,
+    isPrivate?: boolean
+  ): Promise<Column>;
   moveColumn(id: string, position: number): Promise<Column>;
   deleteColumn(id: string): Promise<void>;
   restoreColumn(id: string): Promise<Column>;

@@ -38,12 +38,20 @@ cargo check           # Type check Rust code
 cargo test            # Run Rust tests
 ```
 
+### MCP bridge (read-only Deck access for external agents)
+```bash
+cargo run -p jot-deck-mcp     # Reads env: JOT_DECK_DB_PATH, JOT_DECK_DECK_ID
+```
+Speaks JSON-RPC 2.0 over stdio. Spawned by an MCP host (Claude Desktop / Claude Code)
+via its `mcpServers` config; copy the deck id from the GUI Deck switcher ("MCP id").
+
 ## Architecture
 
 ### Monorepo Structure
 - `packages/app/` - Tauri application (SvelteKit frontend + Rust backend)
 - `packages/web/` - Landing page (Astro, deployed to Cloudflare Pages)
 - `crates/core/` - Rust core library (SQLite/FTS5 database, models, repositories)
+- `crates/mcp/` - stdio MCP bridge server exposing the read surface of a Deck (links `jot-deck-core`, opens the DB directly). See `docs/008-mcp-server.md`.
 
 ### Frontend (packages/app/src)
 - **Components** (`src/lib/components/`): Deck, Column, Card, CardEditor (CodeMirror 6 with Vim mode), VirtualList
