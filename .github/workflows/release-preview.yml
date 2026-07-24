@@ -62,19 +62,24 @@ jobs:
     name: Build (${{ matrix.platform }})
     needs: prepare
     permissions:
-      contents: write # tauri-action creates/uploads the preview release
+      contents: write # tauri-action creates/uploads the per-platform staging release
     strategy:
+      # Builds run fully in parallel. There is no cross-platform race on the
+      # updater manifest because each platform uploads to its OWN throwaway
+      # staging release (staging_tag below), so tauri-action's read-modify-write
+      # of latest.json never touches a shared tag. The `assemble` job merges the
+      # three per-platform manifests into the live `preview` release afterwards.
       fail-fast: false
-      # Serialize matrix uploads so tauri-action's read-modify-write of
-      # latest.json on the same release tag can't race across platforms.
-      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
+            staging_tag: preview-staging-macos
             args: '--config src-tauri/tauri.conf.preview.json --target universal-apple-darwin'
           - platform: ubuntu-latest
+            staging_tag: preview-staging-linux
             args: '--config src-tauri/tauri.conf.preview.json'
           - platform: windows-latest
+            staging_tag: preview-staging-windows
             args: '--config src-tauri/tauri.conf.preview.json'
     runs-on: ${{ matrix.platform }}
     steps:
@@ -111,6 +116,17 @@ jobs:
         shell: bash
         run: node scripts/sync-version.mjs --preview ${{ needs.prepare.outputs.preview_num }}
 
+      # Reset the throwaway staging release so a retry can't inherit stale
+      # bundles from a previous attempt. Draft releases carry no git tag, so this
+      # leaves no ref behind. Ignore "not found" on the first run.
+      - name: Reset staging release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "${{ matrix.staging_tag }}" \
+            --repo "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -118,78 +134,137 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: packages/app
-          tagName: preview
-          releaseName: 'Jot Deck Preview (${{ needs.prepare.outputs.version }})'
-          releaseBody: 'Rolling preview build from commit ${{ github.sha }}. Production data is unaffected — preview installs as a separate app.'
-          releaseDraft: false
+          # Per-platform DRAFT staging release: invisible to users and creates no
+          # git tag. tauri-action writes a correct, platform-complete latest.json
+          # here; the assemble job merges the three into the live `preview`
+          # manifest, so we never hand-maintain the platform-key map.
+          tagName: ${{ matrix.staging_tag }}
+          releaseName: 'Preview staging (${{ matrix.platform }})'
+          releaseBody: 'Throwaway staging release — assembled into the preview release, then deleted.'
+          releaseDraft: true
           prerelease: true
           includeUpdaterJson: true
           updaterJsonKeepUniversal: true
           args: ${{ matrix.args }}
 
-  publish-manifest:
-    name: Promote updater manifest & clean stale assets
+  assemble:
+    name: Assemble preview release & clean stale assets
     needs: [prepare, build]
-    # Run even when one platform build failed, so stale bundles from prior
-    # preview pushes can't pile up on the rolling `preview` release. Each step
-    # guards itself (see below) so a partial build can never corrupt the live
-    # updater manifest. Requires prepare to have produced the version string.
+    # Run even when one platform build failed, so leftover staging drafts are
+    # always cleaned up. Each step guards itself so a partial build can never
+    # corrupt the live updater manifest. Requires prepare's version string.
     if: always() && needs.prepare.result == 'success'
     permissions:
-      contents: write # promotes/deletes release assets via gh
+      contents: write # promotes staging assets to the preview release via gh
     runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      LIVE_TAG: preview
+      MANIFEST_NAME: latest-preview.json
+      STAGING_TAGS: 'preview-staging-macos preview-staging-linux preview-staging-windows'
     steps:
-      - name: Promote latest.json → latest-preview.json
-        # Only when EVERY platform built. tauri-action writes latest.json
-        # incrementally per successful platform, so on a partial failure it
-        # would reference bundles that were never uploaded — promoting that
-        # breaks updates for the missing platform. On partial failure we skip
-        # this and the prior latest-preview.json keeps serving the last
-        # fully-good build. --clobber atomically overwrites the prior manifest,
-        # so installed Preview clients see a valid manifest at every moment.
+      - name: Promote staged bundles & merge updater manifest
+        # Only when EVERY platform built. On a partial failure we skip this so
+        # the prior preview bundles + latest-preview.json keep serving the last
+        # fully-good build. --clobber overwrites atomically, so installed Preview
+        # clients always see a consistent manifest.
         if: needs.build.result == 'success'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          mkdir -p tmp && cd tmp
-          gh release download preview \
-            --repo "${{ github.repository }}" \
-            --pattern 'latest.json'
-          mv latest.json latest-preview.json
-          gh release upload preview latest-preview.json \
-            --repo "${{ github.repository }}" \
-            --clobber
-          gh release delete-asset preview latest.json \
-            --repo "${{ github.repository }}" --yes
+          work=$(mktemp -d)
+          NOTES="Rolling preview build from commit $GITHUB_SHA. Production data is unaffected — preview installs as a separate app."
+
+          # Ensure the live rolling `preview` release exists to receive assets.
+          if ! gh release view "$LIVE_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$LIVE_TAG" --repo "$REPO" \
+              --prerelease --title "Jot Deck Preview ($VERSION)" \
+              --notes "$NOTES" --target "$GITHUB_SHA"
+          fi
+
+          norm_manifests=()
+          for tag in $STAGING_TAGS; do
+            dir="$work/$tag"
+            mkdir -p "$dir"
+            # Pull every asset from the staging draft (bundles, .sig, latest.json).
+            gh release download "$tag" --repo "$REPO" --dir "$dir"
+
+            # Move bundles + signatures onto the live preview release. Filenames
+            # embed the version so platforms never collide; --clobber makes
+            # retries idempotent.
+            find "$dir" -type f ! -name 'latest.json' -print0 \
+              | xargs -0 -r gh release upload "$LIVE_TAG" --repo "$REPO" --clobber
+
+            # Rewrite this manifest's URLs from the staging tag to the live tag
+            # (literal string replace — no regex), then keep just its platforms.
+            from="/releases/download/$tag/"
+            to="/releases/download/$LIVE_TAG/"
+            jq --arg from "$from" --arg to "$to" \
+              '.platforms |= with_entries(.value.url |= (split($from) | join($to)))' \
+              "$dir/latest.json" > "$dir/norm.json"
+            norm_manifests+=("$dir/norm.json")
+          done
+
+          # Merge the three platform-complete manifests into one. version/notes
+          # are injected authoritatively (staging bodies are throwaway text);
+          # pub_date is taken from the first, and the platform maps are unioned.
+          jq -s --arg version "$VERSION" --arg notes "$NOTES" '{
+            version: $version,
+            notes: $notes,
+            pub_date: .[0].pub_date,
+            platforms: (reduce .[] as $m ({}; . + $m.platforms))
+          }' "${norm_manifests[@]}" > "$work/$MANIFEST_NAME"
+
+          gh release upload "$LIVE_TAG" "$work/$MANIFEST_NAME" \
+            --repo "$REPO" --clobber
+
+          # Keep release metadata in step with the freshly promoted build.
+          gh release edit "$LIVE_TAG" --repo "$REPO" \
+            --title "Jot Deck Preview ($VERSION)" --notes "$NOTES"
+
+          # Roll the fixed `preview` tag to this commit (rolling-tag contract).
+          # Only reached on a fully-successful promote, so the tag never points
+          # at a partial build. Create the ref if it doesn't exist yet.
+          gh api -X PATCH "repos/$REPO/git/refs/tags/$LIVE_TAG" \
+            -f sha="$GITHUB_SHA" -F force=true 2>/dev/null \
+          || gh api -X POST "repos/$REPO/git/refs" \
+            -f ref="refs/tags/$LIVE_TAG" -f sha="$GITHUB_SHA"
+
+      - name: Delete staging releases
+        # Always run — even on partial build failure — so throwaway drafts never
+        # accumulate. Draft deletion removes no git tag.
+        if: always()
+        run: |
+          set -euo pipefail
+          for tag in $STAGING_TAGS; do
+            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag 2>/dev/null || true
+          done
 
       - name: Delete stale bundles from prior preview builds
         # Runs on every green-prepare run, including partial build failures, so
         # leftover bundles never accumulate. Bundle filenames embed the version;
         # two versions are protected from deletion:
-        #   - KEEP_VERSION: the version this run built (may be only partial)
+        #   - VERSION: the version this run built (may be only partial)
         #   - the version the live latest-preview.json still points at
         # so we never delete the bundles installed clients are updating from.
         # On the very first run neither has assets yet and nothing is deleted.
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          KEEP_VERSION: ${{ needs.prepare.outputs.version }}
-          REPO: ${{ github.repository }}
+        if: always()
         run: |
           set -euo pipefail
           # Version currently served to clients (empty until the first promote).
           tmpdir=$(mktemp -d)
-          gh release download preview --repo "$REPO" \
-            --pattern 'latest-preview.json' --dir "$tmpdir" 2>/dev/null || true
-          LIVE_VERSION=$(jq -r '.version // empty' "$tmpdir/latest-preview.json" 2>/dev/null || true)
-          echo "Keeping version '$KEEP_VERSION'${LIVE_VERSION:+ and live version '$LIVE_VERSION'}"
-          gh release view preview \
+          gh release download "$LIVE_TAG" --repo "$REPO" \
+            --pattern "$MANIFEST_NAME" --dir "$tmpdir" 2>/dev/null || true
+          LIVE_VERSION=$(jq -r '.version // empty' "$tmpdir/$MANIFEST_NAME" 2>/dev/null || true)
+          echo "Keeping version '$VERSION'${LIVE_VERSION:+ and live version '$LIVE_VERSION'}"
+          gh release view "$LIVE_TAG" \
             --repo "$REPO" \
             --json assets --jq '.assets[].name' \
           | while IFS= read -r asset; do
               case "$asset" in
-                latest-preview.json) continue ;;
-                *"$KEEP_VERSION"*) continue ;;
+                "$MANIFEST_NAME") continue ;;
+                *"$VERSION"*) continue ;;
               esac
               if [ -n "$LIVE_VERSION" ]; then
                 case "$asset" in
@@ -197,6 +272,6 @@ jobs:
                 esac
               fi
               echo "Deleting stale asset: $asset"
-              gh release delete-asset preview "$asset" \
+              gh release delete-asset "$LIVE_TAG" "$asset" \
                 --repo "$REPO" --yes
             done
