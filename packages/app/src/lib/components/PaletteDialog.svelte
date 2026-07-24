@@ -1,4 +1,6 @@
 <script lang="ts" module>
+  import type { PaletteIconName } from "./PaletteIcon.svelte";
+
   export interface PaletteItem {
     id: string;
     label: string;
@@ -8,11 +10,14 @@
     section?: string;
     /** Destructive styling (e.g. delete). */
     danger?: boolean;
+    /** Optional leading icon (e.g. for action items). */
+    icon?: PaletteIconName;
   }
 </script>
 
 <script lang="ts" generics="T extends PaletteItem">
   import { onMount, type Snippet } from "svelte";
+  import PaletteIcon from "./PaletteIcon.svelte";
 
   interface Props {
     items: T[];
@@ -141,9 +146,14 @@
               {#if renderItem}
                 {@render renderItem(item)}
               {:else}
-                <span class="palette-label" class:current={item.current}
-                  >{item.label}</span
-                >
+                <span class="palette-label-group">
+                  {#if item.icon}
+                    <PaletteIcon name={item.icon} />
+                  {/if}
+                  <span class="palette-label" class:current={item.current}
+                    >{item.label}</span
+                  >
+                </span>
                 {#if item.shortcut}
                   <kbd class="palette-shortcut">{item.shortcut}</kbd>
                 {/if}
@@ -249,6 +259,13 @@
     outline: none;
   }
 
+  .palette-label-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
   .palette-label {
     color: var(--text);
     font-size: 0.875rem;
@@ -259,6 +276,10 @@
   }
 
   .palette-item-button.danger .palette-label {
+    color: var(--accent);
+  }
+
+  .palette-item-button.danger :global(.palette-icon) {
     color: var(--accent);
   }
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Column, Card } from "$lib/types";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
+  import PaletteIcon from "./PaletteIcon.svelte";
 
   interface Props {
     columns: Column[];
@@ -62,6 +63,7 @@
         id: "__rename",
         label: "Rename column",
         section: "Actions",
+        icon: "rename",
         action: { kind: "rename", column: currentColumn },
       });
       if (columns.length > 1) {
@@ -70,6 +72,7 @@
           label: "Delete column",
           section: "Actions",
           danger: true,
+          icon: "delete",
           action: { kind: "delete", column: currentColumn },
         });
       }
@@ -79,6 +82,7 @@
       id: "__new",
       label: "New column",
       section: "Actions",
+      icon: "new",
       action: { kind: "new" },
     });
 
@@ -130,7 +134,12 @@
 {/snippet}
 
 {#snippet renderItem(item: ColumnPaletteItem)}
-  <span class="col-name" class:danger={item.danger}>{item.label}</span>
+  <span class="col-name-group">
+    {#if item.icon}
+      <PaletteIcon name={item.icon} />
+    {/if}
+    <span class="col-name" class:danger={item.danger}>{item.label}</span>
+  </span>
   <span class="col-meta">
     {#if item.action.kind === "select" && item.cardCount !== undefined}
       {item.cardCount}
@@ -176,13 +185,20 @@
     font-family: monospace;
   }
 
+  .col-name-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+  }
+
   .col-name {
     font-size: 0.875rem;
     color: var(--text);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex: 1;
     min-width: 0;
   }
 

@@ -49,6 +49,7 @@
         id: "__rename",
         label: "Rename deck",
         section: "Actions",
+        icon: "rename",
         action: { kind: "rename", deck: currentDeck },
       });
       if (decks.length > 1) {
@@ -57,6 +58,7 @@
           label: "Delete deck",
           section: "Actions",
           danger: true,
+          icon: "delete",
           action: { kind: "delete", deck: currentDeck },
         });
       }
@@ -66,6 +68,7 @@
       id: "__new",
       label: "New deck",
       section: "Actions",
+      icon: "new",
       action: { kind: "new" },
     });
 
