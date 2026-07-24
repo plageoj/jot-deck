@@ -74,9 +74,10 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_at TEXT NOT NULL
 );
 
--- MCP append_card の冪等性キー（008-mcp-server.md §5）。同一 (deck, key) の再送は
--- 新規作成せず既存カード id を返すための写像。Deck 単位でスコープする。
-CREATE TABLE IF NOT EXISTS mcp_idempotency (
+-- 冪等な append の写像（008-mcp-server.md §5）。同一 (deck, key) の再送は新規作成せず
+-- 既存カード id を返す。Deck 単位でスコープする。今は MCP append_card が使うが、機構
+-- 自体は書き込み口に依らないので caller-neutral な名前にしておく。
+CREATE TABLE IF NOT EXISTS idempotency_keys (
     deck_id TEXT NOT NULL,
     key TEXT NOT NULL,
     card_id TEXT NOT NULL,
@@ -195,7 +196,7 @@ mod tests {
         assert!(tables.contains(&"tags".to_string()));
         assert!(tables.contains(&"card_tags".to_string()));
         assert!(tables.contains(&"settings".to_string()));
-        assert!(tables.contains(&"mcp_idempotency".to_string()));
+        assert!(tables.contains(&"idempotency_keys".to_string()));
     }
 
     #[test]

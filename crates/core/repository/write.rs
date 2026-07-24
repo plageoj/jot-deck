@@ -48,7 +48,10 @@ fn visible_card(conn: &Connection, deck_id: &str, card_id: &str) -> Result<Card>
     Ok(c)
 }
 
-/// カード本文の長さ backstop を検査する（008 §5）。超過時は分割を促すエラー。
+/// カード本文の長さ backstop を検査する（008 §5）。これは**外部エージェント書き込みの
+/// 抑止**（暴走 append の backstop）であり、GUI/CLI の手編集に課す普遍的な不変条件では
+/// ない ―― だから `card::create` / `update_content_cas` ではなく、この MCP 書き込み面に
+/// 置く。超過時は分割を促すエラーを返し、エージェントを正しい振る舞いへ誘導する。
 fn ensure_card_length(content: &str) -> Result<()> {
     let len = content.chars().count();
     if len > query::MAX_CARD_LENGTH {
@@ -64,7 +67,7 @@ fn ensure_card_length(content: &str) -> Result<()> {
 fn lookup_idempotent(conn: &Connection, deck_id: &str, key: &str) -> Result<Option<String>> {
     let id: Option<String> = conn
         .query_row(
-            "SELECT card_id FROM mcp_idempotency WHERE deck_id = ?1 AND key = ?2",
+            "SELECT card_id FROM idempotency_keys WHERE deck_id = ?1 AND key = ?2",
             params![deck_id, key],
             |row| row.get(0),
         )
@@ -104,7 +107,7 @@ pub fn append_card(
     )?;
     if let Some(key) = idempotency_key {
         tx.execute(
-            "INSERT INTO mcp_idempotency (deck_id, key, card_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO idempotency_keys (deck_id, key, card_id, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![deck_id, key, created.id, Utc::now().to_rfc3339()],
         )?;
     }
@@ -158,19 +161,14 @@ pub fn move_card(
     let target_col = to_column_id.unwrap_or(&card.column_id);
     ensure_column_writable(conn, deck_id, target_col)?;
 
-    // 移動先カラムの生存カードを position 順に、移動対象を除いて列挙する。
+    // 移動先カラムの生存カードを position 順に、移動対象を除いて列挙する。card
+    // リポジトリの列挙を再利用し、順序/論理削除の規則をここに二重で持たない。
     // アンカーはこの列（＝挿入位置の基準集合）に対する index として解決する。
-    let others: Vec<String> = {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM cards
-             WHERE column_id = ?1 AND deleted_at IS NULL AND id != ?2
-             ORDER BY position ASC",
-        )?;
-        let rows = stmt
-            .query_map(params![target_col, card_id], |row| row.get(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        rows
-    };
+    let others: Vec<String> = card::get_by_column_id(conn, target_col)?
+        .into_iter()
+        .map(|c| c.id)
+        .filter(|id| id != card_id)
+        .collect();
 
     let anchor_index = |anchor: &str| -> Result<usize> {
         others
@@ -192,6 +190,8 @@ pub fn move_card(
     };
 
     // カラムを跨ぐ場合はまず移動先の末尾へ運び（採番一元化）、続いて目的 index へ寄せる。
+    // 現状は 2 つの確定トランザクション（末尾へ移動→再配置）。単一トランザクションの
+    // アンカー対応 reorder プリミティブへの集約は将来課題（中間の末尾位置が一瞬観測され得る）。
     if target_col != card.column_id {
         card::move_to_column(conn, card_id, target_col)?;
     }

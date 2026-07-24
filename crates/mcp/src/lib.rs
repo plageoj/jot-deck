@@ -191,7 +191,7 @@ impl BridgeConfig {
         Self {
             capabilities,
             max_writes_per_min,
-            connection_id: ulid::Ulid::generate().to_string(),
+            ..Default::default()
         }
     }
 }
@@ -361,17 +361,19 @@ impl Bridge {
 
     // ---- write tools (008 §4.1) ----
 
-    /// Gate a write on its capability (008 §5). Denied verbs are also hidden from
-    /// `tools/list`, but an agent may still call one — answer with a clear error.
-    fn require_capability(&self, enabled: bool, verb: &str) -> Result<(), String> {
-        if enabled {
-            Ok(())
-        } else {
-            Err(format!(
+    /// Common prelude for every write tool: enforce the verb's capability, then
+    /// the per-connection rate limit (008 §5). Centralized so the two gates and
+    /// their order never drift between tools.
+    fn begin_write(&self, enabled: bool, verb: &str) -> Result<(), String> {
+        // Denied verbs are also hidden from `tools/list`, but an agent may still
+        // call one — answer with a clear error.
+        if !enabled {
+            return Err(format!(
                 "The '{}' capability is disabled for this connection.",
                 verb
-            ))
+            ));
         }
+        self.rate_limiter.check_and_record()
     }
 
     /// Log a write to stderr for connection attribution (008 §5). stdout carries
@@ -384,8 +386,7 @@ impl Bridge {
     }
 
     fn tool_append_card(&self, args: &Value) -> Result<Value, String> {
-        self.require_capability(self.capabilities.append, "append")?;
-        self.rate_limiter.check_and_record()?;
+        self.begin_write(self.capabilities.append, "append")?;
         let column_id = require_str(args, "column_id")?;
         let content = require_str(args, "content")?;
         let idempotency_key = opt_str(args, "idempotency_key");
@@ -407,8 +408,7 @@ impl Bridge {
     }
 
     fn tool_patch_card(&self, args: &Value) -> Result<Value, String> {
-        self.require_capability(self.capabilities.edit, "edit")?;
-        self.rate_limiter.check_and_record()?;
+        self.begin_write(self.capabilities.edit, "edit")?;
         let card_id = require_str(args, "card_id")?;
         let content = require_str(args, "content")?;
         let expected = require_str(args, "expected_updated_at")?;
@@ -431,8 +431,7 @@ impl Bridge {
     }
 
     fn tool_move_card(&self, args: &Value) -> Result<Value, String> {
-        self.require_capability(self.capabilities.edit, "edit")?;
-        self.rate_limiter.check_and_record()?;
+        self.begin_write(self.capabilities.edit, "edit")?;
         let card_id = require_str(args, "card_id")?;
         let to_column_id = opt_str(args, "to_column_id");
         let before_card_id = opt_str(args, "before_card_id");
@@ -451,8 +450,7 @@ impl Bridge {
     }
 
     fn tool_delete_card(&self, args: &Value) -> Result<Value, String> {
-        self.require_capability(self.capabilities.delete, "delete")?;
-        self.rate_limiter.check_and_record()?;
+        self.begin_write(self.capabilities.delete, "delete")?;
         let card_id = require_str(args, "card_id")?;
         let card = write::delete_card(&self.conn, &self.deck_id, &card_id).map_err(|e| e.to_string())?;
         self.log_write("delete_card", &card.id);
