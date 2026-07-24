@@ -94,6 +94,8 @@ export class WasmBackend implements DatabaseBackend {
         updated_at TEXT NOT NULL,
         deleted_at TEXT,
         deleted_with_column INTEGER NOT NULL DEFAULT 0,
+        locked_by TEXT,
+        locked_at TEXT,
         FOREIGN KEY (column_id) REFERENCES columns(id)
       )
     `);
@@ -437,7 +439,7 @@ export class WasmBackend implements DatabaseBackend {
     await this.init();
     const db = this.ensureDb();
     const results = db.exec(
-      `SELECT id, column_id, content, score, position, created_at, updated_at, deleted_at, deleted_with_column
+      `SELECT id, column_id, content, score, position, created_at, updated_at, deleted_at, deleted_with_column, locked_by, locked_at
        FROM cards
        WHERE column_id = ? AND deleted_at IS NULL
        ORDER BY position ASC`,
@@ -451,7 +453,7 @@ export class WasmBackend implements DatabaseBackend {
     await this.init();
     const db = this.ensureDb();
     const results = db.exec(
-      `SELECT id, column_id, content, score, position, created_at, updated_at, deleted_at, deleted_with_column
+      `SELECT id, column_id, content, score, position, created_at, updated_at, deleted_at, deleted_with_column, locked_by, locked_at
        FROM cards WHERE id = ?`,
       [id]
     );
@@ -638,7 +640,8 @@ export class WasmBackend implements DatabaseBackend {
     const db = this.ensureDb();
     const results = db.exec(
       `SELECT c.id, c.column_id, c.content, c.score, c.position,
-              c.created_at, c.updated_at, c.deleted_at, c.deleted_with_column
+              c.created_at, c.updated_at, c.deleted_at, c.deleted_with_column,
+              c.locked_by, c.locked_at
        FROM cards c
        JOIN columns col ON c.column_id = col.id
        WHERE col.deck_id = ? AND c.deleted_at IS NOT NULL
@@ -827,6 +830,8 @@ export class WasmBackend implements DatabaseBackend {
       updated_at: row[6] as string,
       deleted_at: row[7] as string | null,
       deleted_with_column: (row[8] as number) === 1,
+      locked_by: (row[9] as string | null) ?? null,
+      locked_at: (row[10] as string | null) ?? null,
     };
   }
 }

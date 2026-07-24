@@ -108,13 +108,29 @@
     };
     window.addEventListener("keydown", actions.handleKeydown);
     await Promise.all([data.init(), settingsStore.load()]);
+    // React to writes from other processes (CLI / MCP bridge) on the shared DB.
+    void data.watchExternalChanges();
     // Non-blocking — failures surface in the banner, never throw out of mount.
     void updaterStore.check();
+  });
+
+  // Apply external-change reloads when a new tick arrives and the user isn't
+  // mid-edit. The effect also reads focusMode, so a change observed while editing
+  // is applied as soon as edit focus ends — no separate flush path. Recording the
+  // consumed tick keeps an unrelated focusMode change from re-triggering a reload.
+  let appliedExternalTick = 0;
+  $effect(() => {
+    const tick = data.externalChangeTick;
+    if (focus.focusMode === "edit") return; // defer; re-runs when focusMode changes
+    if (tick === appliedExternalTick) return;
+    appliedExternalTick = tick;
+    void data.reloadFromExternalChange();
   });
 
   onDestroy(() => {
     window.removeEventListener("keydown", actions.handleKeydown);
     actions.destroy();
+    data.stopWatchingExternalChanges();
   });
 
   let renamingDeck = $state<Deck | null>(null);

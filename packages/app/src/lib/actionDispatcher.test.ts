@@ -223,6 +223,8 @@ describe("ActionDispatcher with no columns loaded", () => {
         updated_at: "2026-01-01T00:00:00Z",
         deleted_at: "2026-05-01T00:00:00Z",
         deleted_with_column: false,
+        locked_by: null,
+        locked_at: null,
       },
     ];
 

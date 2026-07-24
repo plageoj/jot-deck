@@ -6,7 +6,7 @@ import {
   type Tag,
   type TrashItem,
 } from "$lib/types";
-import { getDatabase, type DatabaseBackend } from "$lib/db";
+import { getDatabase, isTauri, type DatabaseBackend } from "$lib/db";
 import { FocusManager } from "./focusManager.svelte";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
@@ -199,6 +199,50 @@ export class DeckData {
     } catch (e) {
       this.error = `Failed to reload columns: ${e}`;
     }
+  }
+
+  // --- External change observation (008-mcp-server.md §3) ---
+  // The Rust side polls `PRAGMA data_version` (~1s) and emits `external-db-change`
+  // when another process (CLI / MCP bridge) commits to the shared DB. Each
+  // debounced observation bumps `externalChangeTick`; a single $effect in the
+  // page reacts to that tick (and to the edit-focus state) and calls
+  // `reloadFromExternalChange` when it's safe — one reactive source of truth, so
+  // deferring during an edit and resuming after it need no separate flush path.
+
+  /** Bumped (debounced) each time an external DB change is observed. Read from a
+   * reactive $effect that decides when to actually reload. */
+  externalChangeTick = $state(0);
+  private externalUnlisten: (() => void) | null = null;
+  private externalReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Subscribe to external DB changes (Tauri only). No-op in the browser (WASM)
+   * backend, which is single-process. */
+  async watchExternalChanges(): Promise<void> {
+    if (!isTauri()) return;
+    const { listen } = await import("@tauri-apps/api/event");
+    this.externalUnlisten = await listen("external-db-change", () => {
+      if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
+      // Coalesce bursts of external commits into one tick.
+      this.externalReloadTimer = setTimeout(() => {
+        this.externalReloadTimer = null;
+        this.externalChangeTick++;
+      }, 250);
+    });
+  }
+
+  /** Re-read the current deck after an external change. */
+  async reloadFromExternalChange() {
+    await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
+    if (this.activeTagFilter) this.filterByTag(this.activeTagFilter);
+  }
+
+  stopWatchingExternalChanges() {
+    if (this.externalReloadTimer) {
+      clearTimeout(this.externalReloadTimer);
+      this.externalReloadTimer = null;
+    }
+    this.externalUnlisten?.();
+    this.externalUnlisten = null;
   }
 
   async createDeck(): Promise<Deck | null> {

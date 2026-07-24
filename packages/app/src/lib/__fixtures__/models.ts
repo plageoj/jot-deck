@@ -53,5 +53,7 @@ export function makeCard(
     updated_at: "2026-01-01T00:00:00Z",
     deleted_at: options.deletedAt ?? null,
     deleted_with_column: options.deletedWithColumn ?? false,
+    locked_by: null,
+    locked_at: null,
   };
 }
