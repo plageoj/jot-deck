@@ -11,6 +11,9 @@
     onNew: () => void;
     onRename: (deck: Deck) => void;
     onDelete: (deck: Deck) => void;
+    /** Build a paste-ready mcpServers config snippet; null when unavailable
+     * (e.g. browser backend). */
+    getMcpConfig?: (deck: Deck) => Promise<string | null>;
     onClose: () => void;
   }
 
@@ -23,6 +26,7 @@
     onNew,
     onRename,
     onDelete,
+    getMcpConfig,
     onClose,
   }: Props = $props();
 
@@ -31,20 +35,44 @@
   let inputRef = $state<HTMLInputElement | null>(null);
   let dialogRef = $state<HTMLDialogElement | null>(null);
   let listRef = $state<HTMLUListElement | null>(null);
-  let copied = $state(false);
-  let copyResetTimer: ReturnType<typeof setTimeout> | undefined;
+  let idCopied = $state(false);
+  let configCopied = $state(false);
+  let idResetTimer: ReturnType<typeof setTimeout> | undefined;
+  let configResetTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** Copy the deck's ULID to the clipboard for pasting into an mcpServers
-   * config (JOT_DECK_DECK_ID). See docs/008-mcp-server.md §4.5. */
+  async function writeClipboard(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Clipboard unavailable (e.g. permissions); report failure.
+      return false;
+    }
+  }
+
+  /** Copy the deck's ULID for pasting into JOT_DECK_DECK_ID
+   * (docs/008-mcp-server.md §4.5). */
   async function copyDeckId() {
     if (!currentDeck) return;
-    try {
-      await navigator.clipboard.writeText(currentDeck.id);
-      copied = true;
-      clearTimeout(copyResetTimer);
-      copyResetTimer = setTimeout(() => (copied = false), 1500);
-    } catch {
-      // Clipboard unavailable (e.g. permissions); leave state unchanged.
+    if (await writeClipboard(currentDeck.id)) {
+      idCopied = true;
+      clearTimeout(idResetTimer);
+      idResetTimer = setTimeout(() => (idCopied = false), 1500);
+    }
+  }
+
+  /** Copy a full, paste-ready mcpServers config snippet (bridge path + deck id).
+   * The desktop app fills in the bundled bridge path; the DB path is derived by
+   * the bridge itself (docs/008-mcp-server.md §4.6). Falls back to copying just
+   * the deck id when the full snippet is unavailable (browser backend). */
+  async function copyConfig() {
+    if (!currentDeck) return;
+    const snippet = getMcpConfig ? await getMcpConfig(currentDeck) : null;
+    const ok = await writeClipboard(snippet ?? currentDeck.id);
+    if (ok) {
+      configCopied = true;
+      clearTimeout(configResetTimer);
+      configResetTimer = setTimeout(() => (configCopied = false), 1500);
     }
   }
 
@@ -134,11 +162,11 @@
           <div class="current-actions">
             <button
               class="icon-btn"
-              title={copied ? "Copied!" : "Copy MCP deck id"}
-              aria-label="Copy MCP deck id"
-              onclick={copyDeckId}
+              title={configCopied ? "Copied!" : "Copy MCP server config"}
+              aria-label="Copy MCP server config"
+              onclick={copyConfig}
             >
-              {#if copied}
+              {#if configCopied}
                 <svg
                   width="14"
                   height="14"
@@ -230,7 +258,7 @@
         >
           <span class="deck-id-label">MCP id</span>
           <code class="deck-id-value">{currentDeck.id}</code>
-          <span class="deck-id-hint">{copied ? "Copied!" : "Copy"}</span>
+          <span class="deck-id-hint">{idCopied ? "Copied!" : "Copy"}</span>
         </button>
       </div>
     {/if}

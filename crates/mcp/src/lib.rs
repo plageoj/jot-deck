@@ -10,6 +10,8 @@
 //! `search_cards`, `recent_cards`, `describe_deck`, plus the `deck://` resources.
 //! Write tools arrive in Phase 5.
 
+use std::path::PathBuf;
+
 use jot_deck_core::{query, Connection};
 use serde_json::{json, Value};
 
@@ -17,6 +19,34 @@ use serde_json::{json, Value};
 const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
 const SERVER_NAME: &str = "jot-deck";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Tauri bundle identifier — keep in sync with packages/app/src-tauri/tauri.conf.json.
+/// The GUI stores its DB under the app data dir named by this identifier.
+pub const APP_IDENTIFIER: &str = "com.jot-deck.app";
+/// DB file name the GUI creates inside the app data dir.
+pub const DB_FILE_NAME: &str = "jot-deck.db";
+/// Env var to override the DB path (dev / non-standard installs only).
+pub const DB_PATH_ENV: &str = "JOT_DECK_DB_PATH";
+
+/// The fixed DB location the GUI uses: `<platform data dir>/<identifier>/jot-deck.db`.
+///
+/// Mirrors Tauri v2's `app_data_dir()` (which also builds on the `dirs` crate),
+/// so the bridge finds the same file the app writes without being told where it
+/// is. Returns None only when the platform has no data dir.
+pub fn default_db_path() -> Option<PathBuf> {
+    dirs::data_dir().map(|d| d.join(APP_IDENTIFIER).join(DB_FILE_NAME))
+}
+
+/// Resolve the DB path: `JOT_DECK_DB_PATH` if set (dev override), else the fixed
+/// default. The path is not required config — the default is the norm.
+pub fn resolve_db_path() -> Option<String> {
+    if let Ok(p) = std::env::var(DB_PATH_ENV) {
+        if !p.is_empty() {
+            return Some(p);
+        }
+    }
+    default_db_path().map(|p| p.to_string_lossy().into_owned())
+}
 
 /// Primer loaded into the host's system context on `initialize` (008 §4.6).
 const INSTRUCTIONS: &str = "\
@@ -405,6 +435,14 @@ mod tests {
 
     fn structured(resp: &Value) -> &Value {
         &resp["result"]["structuredContent"]
+    }
+
+    #[test]
+    fn default_db_path_uses_identifier_and_filename() {
+        // Only asserts the shape; the data dir itself is platform/host specific.
+        if let Some(path) = default_db_path() {
+            assert!(path.ends_with(format!("{}/{}", APP_IDENTIFIER, DB_FILE_NAME)));
+        }
     }
 
     #[test]

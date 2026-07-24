@@ -76,4 +76,10 @@ export interface DatabaseBackend {
   // Settings operations (key/value JSON store; null when unset)
   getSettings(key: string): Promise<string | null>;
   setSettings(key: string, value: string): Promise<void>;
+
+  // MCP operations
+  /** Generate a paste-ready `mcpServers` config snippet for the given deck.
+   * Returns null when unavailable (e.g. the browser/WASM backend, which has no
+   * bundled bridge binary or real filesystem paths). */
+  generateMcpConfig(deckId: string): Promise<string | null>;
 }

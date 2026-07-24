@@ -282,6 +282,48 @@ fn set_settings(state: State<AppState>, key: String, value: String) -> CommandRe
     setting::set(&conn, &key, &value).map_err(Into::into)
 }
 
+// ========== MCP Commands ==========
+
+/// MCP ホスト（Claude Desktop / Claude Code）の `mcpServers` に貼り付けられる
+/// 設定スニペットを生成する。ブリッジのバイナリパスはアプリだけが正確に知って
+/// いるので生成側で埋める。DB パスは本体と同じ固定の app data dir をブリッジが
+/// 自力で導出するため env には出さず、接続ごとに変わる deck id だけを渡す
+/// （008-mcp-server.md §4.6）。
+#[tauri::command]
+fn generate_mcp_config(deck_id: String) -> CommandResult<String> {
+    let bridge_path = mcp_sidecar_path().ok_or_else(|| CommandError {
+        message: "Could not resolve the bundled MCP bridge path".to_string(),
+    })?;
+
+    let config = serde_json::json!({
+        "mcpServers": {
+            "jot-deck": {
+                "command": bridge_path,
+                "env": {
+                    "JOT_DECK_DECK_ID": deck_id,
+                }
+            }
+        }
+    });
+
+    serde_json::to_string_pretty(&config).map_err(|e| CommandError {
+        message: format!("Failed to serialize MCP config: {}", e),
+    })
+}
+
+/// バンドルされた MCP ブリッジの絶対パスを解決する。Tauri は externalBin を本体
+/// 実行ファイルと同じディレクトリに配置するため、current_exe の隣を指す。
+fn mcp_sidecar_path() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let name = if cfg!(windows) {
+        "jot-deck-mcp.exe"
+    } else {
+        "jot-deck-mcp"
+    };
+    Some(dir.join(name).to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 fn get_tag_suggestions(
     state: State<AppState>,
@@ -347,6 +389,8 @@ pub fn run() {
             // Settings commands
             get_settings,
             set_settings,
+            // MCP commands
+            generate_mcp_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

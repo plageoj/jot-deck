@@ -4,9 +4,11 @@
 //! config. Configuration is passed through environment variables — the host
 //! does not hand ULIDs on argv:
 //!
-//! - `JOT_DECK_DB_PATH`  — path to the `jot-deck.db` file to open.
-//! - `JOT_DECK_DECK_ID`  — ULID of the Deck to serve (copy it from the GUI's
-//!   Deck management UI: "Copy MCP deck id").
+//! - `JOT_DECK_DECK_ID`  — ULID of the Deck to serve (required; copy it from the
+//!   GUI, which can also generate the whole config snippet).
+//! - `JOT_DECK_DB_PATH`  — optional override of the `jot-deck.db` path. The DB
+//!   lives at a fixed, identifier-based location (same as the GUI), so this is
+//!   only for dev or non-standard installs; normally it is not set.
 //!
 //! Speaks JSON-RPC 2.0 over stdio, one JSON message per line (the newline-
 //! delimited stdio transport). Reads only; write tools arrive in Phase 5.
@@ -15,13 +17,15 @@ use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
 use jot_deck_core::create_file_db;
-use jot_deck_mcp::Bridge;
+use jot_deck_mcp::{resolve_db_path, Bridge};
 
 fn main() -> ExitCode {
-    let db_path = match std::env::var("JOT_DECK_DB_PATH") {
-        Ok(p) if !p.is_empty() => p,
-        _ => {
-            eprintln!("jot-deck-mcp: JOT_DECK_DB_PATH is required (path to jot-deck.db)");
+    // DB path is not required config: default to the fixed app data dir, allow
+    // JOT_DECK_DB_PATH as a dev override (008-mcp-server.md §4.6).
+    let db_path = match resolve_db_path() {
+        Some(p) => p,
+        None => {
+            eprintln!("jot-deck-mcp: could not resolve the platform data dir; set JOT_DECK_DB_PATH");
             return ExitCode::FAILURE;
         }
     };

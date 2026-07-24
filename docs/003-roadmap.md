@@ -127,7 +127,8 @@ MCP ブリッジは CLI 同型の**別プロセスから同一 `jot-deck.db` を
 * オンボーディング面: `describe_deck` tool（＋補助の `deck://schema` resource）と MCP `instructions`
 * KB resource: `deck://{deck_id}`
 * Deck 既定スコープ（接続＝1 Deck、設定ゼロで KB）と `private` 除外による read 可視性制御
-* Deck 管理 UI に deck id の表示/コピー導線（`mcpServers` 設定の env に貼る用）
+* 本番配布: ブリッジを Tauri サイドカー（`externalBin`）として同梱。DB パスは本体と同じ固定 app data dir をブリッジが導出（env は不要）
+* Deck 管理 UI に deck id の表示/コピーと、貼り付け可能な `mcpServers` 設定スニペット生成
 
 > `search_cards` の本文検索は当面 substring 一致で動く。第一級の FTS5 インデックスは全文検索（Phase 9）で導入し、tool 面はそのままに実装だけ差し替える。
 

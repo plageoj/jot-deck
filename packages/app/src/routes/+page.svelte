@@ -234,6 +234,7 @@
     onNew={() => data.createDeck()}
     onRename={handleRenameDeck}
     onDelete={handleDeleteDeck}
+    getMcpConfig={(deck) => data.generateMcpConfig(deck.id)}
     onClose={() => focus.closePalette()}
   />
 {:else if focus.activePalette === "tag"}

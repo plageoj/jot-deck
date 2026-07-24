@@ -772,6 +772,16 @@ export class WasmBackend implements DatabaseBackend {
   }
 
   // ========================================
+  // MCP Operations
+  // ========================================
+
+  async generateMcpConfig(): Promise<string | null> {
+    // The browser backend has no bundled bridge binary or real filesystem
+    // paths, so it cannot produce a runnable config. MCP is a desktop feature.
+    return null;
+  }
+
+  // ========================================
   // Row Mappers
   // ========================================
 

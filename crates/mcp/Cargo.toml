@@ -14,3 +14,6 @@ path = "src/main.rs"
 jot-deck-core = { path = "../core" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+# Resolves the platform data dir (same crate Tauri v2 uses under the hood), so
+# the bridge derives the same fixed DB location as the GUI.
+dirs = "6"
