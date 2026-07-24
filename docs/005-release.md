@@ -62,19 +62,28 @@ packages/app/src-tauri/
 
 ## GitHub Actions ワークフロー
 
+#### 並列ビルド + assemble 方式（両チャンネル共通）
+
+3 プラットフォームのビルドは**完全並列**で走らせる。`tauri-action` の `includeUpdaterJson` は同一リリースタグ上の `latest.json` を read-modify-write するため、並列で同じタグへ書くとマニフェストが競合する。これを避けるため各プラットフォームは**自分専用の使い捨て draft staging リリース**（`<tag>-staging-<os>`）へ出力する。draft リリースは git タグを生成せずユーザーにも見えない。
+
+その後 `assemble` ジョブが 3 つの staging から生成された**プラットフォーム完結の `latest.json`** を回収し、`.platforms` をマージ + URL のタグ部分を本番タグへ書き換えて 1 本のマニフェストにまとめ、バンドルとともに本番リリースへ昇格させてから staging draft を削除する。プラットフォームキーの対応表は `tauri-action` の出力をそのまま使うため手書きしない。
+
+これにより直列（各 OS を順番にビルド）だった待ち時間が、最も遅い 1 プラットフォーム分 + assemble のみに短縮される。
+
 ### Production (`release-production.yml`)
 
 * **トリガ**: `push: tags: ['v*.*.*']`
-* **matrix**: `windows-latest` / `macos-latest` / `ubuntu-latest`
-* **action**: `tauri-apps/tauri-action`
-* **出力**: 通常 release（タグ名 = バージョン）+ `latest.json`
-* **オプション**: `includeUpdaterJson: true`, `prerelease: false`
+* **matrix**: `windows-latest` / `macos-latest` / `ubuntu-latest`（並列、staging draft へ出力）
+* **action**: `tauri-apps/tauri-action`（`includeUpdaterJson: true`, `prerelease: false`）
+* **assemble**: staging を本番タグ（= バージョン）の draft release へ昇格し `latest.json` を合成
+* **publish**: 全ビルド + assemble 成功時のみ draft を publish（`--latest`）。1 プラットフォームでも失敗すれば publish されない
 
 ### Preview (`release-preview.yml`)
 
 * **トリガ**: `push: branches: [main]`, `paths-ignore: ['docs/**', '*.md']`
-* **タグ運用**: rolling tag 方式（固定タグ `preview` を force-update）
-* **アセット命名**: `latest.json` ではなく `latest-preview.json` として配置（production と URL を分離）
+* **matrix**: 並列、`<preview-staging-os>` draft へ出力
+* **タグ運用**: rolling tag 方式（固定タグ `preview` を force-update）。タグの移動は assemble の昇格が完全成功したときのみ行い、部分ビルドを指さない
+* **assemble**: staging を `preview` リリースへ昇格。`latest.json` ではなく `latest-preview.json` として配置（production と URL を分離）。1 プラットフォームでも失敗した場合は昇格をスキップし、直近の完全ビルドを配信し続ける。旧バージョンのバンドルはこのジョブで掃除する
 * **オプション**: `prerelease: true`, `make_latest: false`
 * **バージョン採番**: base バージョンに `-<n>`（`base-version.txt` 最終更新からのコミット数）を付与。Windows MSI/WiX は pre-release 識別子が数字のみであることを要求するため、`-preview.<n>` のような非数値接頭辞は使えない
 
