@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from "svelte";
   import {
+    AboutDialog,
     Deck as DeckComponent,
     ColumnPalette,
     CommandPalette,
@@ -346,12 +347,20 @@
       focus.showSettings = false;
       focus.showKeybindings = true;
     }}
+    onOpenAbout={() => {
+      focus.showSettings = false;
+      focus.showAbout = true;
+    }}
     onClose={() => (focus.showSettings = false)}
   />
 {/if}
 
 {#if focus.showKeybindings}
   <KeybindingsDialog onClose={() => (focus.showKeybindings = false)} />
+{/if}
+
+{#if focus.showAbout}
+  <AboutDialog onClose={() => (focus.showAbout = false)} />
 {/if}
 
 <style>

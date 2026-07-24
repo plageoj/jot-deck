@@ -20,6 +20,8 @@ export const COMMANDS: Command[] = [
   { id: "settings", label: "Settings", shortcut: "Ctrl+,", action: "showSettings" },
   { id: "keybindings", label: "Customize Keybindings", action: "showKeybindings" },
   { id: "shortcuts", label: "Keyboard Shortcuts", shortcut: "?", action: "showShortcuts" },
+  { id: "check-updates", label: "Check for Updates", action: "checkForUpdates" },
+  { id: "about", label: "About Jot Deck", action: "showAbout" },
 ];
 
 export function filterCommands(query: string): Command[] {
