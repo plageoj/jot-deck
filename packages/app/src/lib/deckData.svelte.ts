@@ -249,6 +249,17 @@ export class DeckData {
     }
   }
 
+  /** Build a paste-ready mcpServers config snippet for the given deck.
+   * Returns null when unavailable (browser backend). */
+  async generateMcpConfig(deckId: string): Promise<string | null> {
+    try {
+      return await this.db.generateMcpConfig(deckId);
+    } catch (e) {
+      this.error = `Failed to generate MCP config: ${e}`;
+      return null;
+    }
+  }
+
   async renameColumn(id: string, name: string): Promise<Column | null> {
     try {
       const updated = await this.db.updateColumn(id, name);

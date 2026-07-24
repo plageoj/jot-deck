@@ -53,8 +53,18 @@ export class TauriBackend implements DatabaseBackend {
     return invoke<Column>("create_column", { params });
   }
 
-  async updateColumn(id: string, name: string): Promise<Column> {
-    return invoke<Column>("update_column", { id, name });
+  async updateColumn(
+    id: string,
+    name?: string,
+    description?: string,
+    isPrivate?: boolean
+  ): Promise<Column> {
+    return invoke<Column>("update_column", {
+      id,
+      name,
+      description,
+      private: isPrivate,
+    });
   }
 
   async moveColumn(id: string, position: number): Promise<Column> {
@@ -135,5 +145,10 @@ export class TauriBackend implements DatabaseBackend {
 
   async setSettings(key: string, value: string): Promise<void> {
     return invoke("set_settings", { key, value });
+  }
+
+  // MCP operations
+  async generateMcpConfig(deckId: string): Promise<string | null> {
+    return invoke<string>("generate_mcp_config", { deckId });
   }
 }

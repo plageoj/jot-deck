@@ -11,6 +11,12 @@ export interface Column {
   deck_id: string;
   name: string;
   position: number;
+  /** 1-line description of what goes in this column (classification axis).
+   * Improves external agent routing accuracy (008-mcp-server.md §4.6). */
+  description: string | null;
+  /** When true, this column is excluded from all external write/MCP access
+   * (008-mcp-server.md §4.5). */
+  private: boolean;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

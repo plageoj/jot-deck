@@ -91,6 +91,8 @@ pub fn create(conn: &Connection, new_column: NewColumn) -> Result<Column> {
         deck_id: new_column.deck_id,
         name,
         position,
+        description: None,
+        private: false,
         created_at: now,
         updated_at: now,
         deleted_at: None,
@@ -135,22 +137,31 @@ pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i3
         deck_id: new_column.deck_id,
         name,
         position,
+        description: None,
+        private: false,
         created_at: now,
         updated_at: now,
         deleted_at: None,
     })
 }
 
+/// 全カラム SELECT の共通カラム順。row_to_column はこの順を前提にする。
+const COLUMN_FIELDS: &str =
+    "id, deck_id, name, position, description, private, created_at, updated_at, deleted_at";
+
 fn row_to_column(row: &rusqlite::Row) -> rusqlite::Result<Column> {
-    let deleted_at_str: Option<String> = row.get(6)?;
+    let private: i32 = row.get(5)?;
+    let deleted_at_str: Option<String> = row.get(8)?;
 
     Ok(Column {
         id: row.get(0)?,
         deck_id: row.get(1)?,
         name: row.get(2)?,
         position: row.get(3)?,
-        created_at: parse_datetime(&row.get::<_, String>(4)?, 4)?,
-        updated_at: parse_datetime(&row.get::<_, String>(5)?, 5)?,
+        description: row.get(4)?,
+        private: private != 0,
+        created_at: parse_datetime(&row.get::<_, String>(6)?, 6)?,
+        updated_at: parse_datetime(&row.get::<_, String>(7)?, 7)?,
         deleted_at: deleted_at_str.and_then(|s| parse_datetime_opt(&s)),
     })
 }
@@ -158,7 +169,7 @@ fn row_to_column(row: &rusqlite::Row) -> rusqlite::Result<Column> {
 /// ID で Column を取得する
 pub fn get_by_id(conn: &Connection, id: &str) -> Result<Column> {
     conn.query_row(
-        "SELECT id, deck_id, name, position, created_at, updated_at, deleted_at FROM columns WHERE id = ?1",
+        &format!("SELECT {} FROM columns WHERE id = ?1", COLUMN_FIELDS),
         params![id],
         row_to_column,
     )
@@ -172,9 +183,10 @@ pub fn get_by_id(conn: &Connection, id: &str) -> Result<Column> {
 
 /// Deck 内の Column 一覧を取得する（削除されていないもののみ）
 pub fn get_by_deck_id(conn: &Connection, deck_id: &str) -> Result<Vec<Column>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, deck_id, name, position, created_at, updated_at, deleted_at FROM columns WHERE deck_id = ?1 AND deleted_at IS NULL ORDER BY position ASC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM columns WHERE deck_id = ?1 AND deleted_at IS NULL ORDER BY position ASC",
+        COLUMN_FIELDS,
+    ))?;
 
     let columns = stmt
         .query_map(params![deck_id], row_to_column)?
@@ -183,8 +195,18 @@ pub fn get_by_deck_id(conn: &Connection, deck_id: &str) -> Result<Vec<Column>> {
     Ok(columns)
 }
 
-/// Column を更新する
-pub fn update(conn: &Connection, id: &str, name: Option<&str>) -> Result<Column> {
+/// Column を更新する。
+///
+/// 各引数は `None` のとき現在値を据え置く。`description` は `Some(Some(s))` で
+/// 設定、`Some(None)` で NULL クリア。`private` はユーザが本体 UI で立てる
+/// MCP 可視性フラグ（008-mcp-server.md §4.5）。
+pub fn update(
+    conn: &Connection,
+    id: &str,
+    name: Option<&str>,
+    description: Option<Option<&str>>,
+    private: Option<bool>,
+) -> Result<Column> {
     let column = get_by_id(conn, id)?;
 
     if column.deleted_at.is_some() {
@@ -194,21 +216,30 @@ pub fn update(conn: &Connection, id: &str, name: Option<&str>) -> Result<Column>
     }
 
     let now = Utc::now();
-    let new_name = name.unwrap_or(&column.name);
+    let new_name = name.unwrap_or(&column.name).to_string();
+    let new_description: Option<String> = match description {
+        Some(d) => d.map(|s| s.to_string()),
+        None => column.description.clone(),
+    };
+    let new_private = private.unwrap_or(column.private);
 
     conn.execute(
-        "UPDATE columns SET name = ?1, updated_at = ?2 WHERE id = ?3",
-        params![new_name, now.to_rfc3339(), id],
+        "UPDATE columns SET name = ?1, description = ?2, private = ?3, updated_at = ?4 WHERE id = ?5",
+        params![
+            &new_name,
+            &new_description,
+            new_private as i32,
+            now.to_rfc3339(),
+            id,
+        ],
     )?;
 
     Ok(Column {
-        id: column.id,
-        deck_id: column.deck_id,
-        name: new_name.to_string(),
-        position: column.position,
-        created_at: column.created_at,
+        name: new_name,
+        description: new_description,
+        private: new_private,
         updated_at: now,
-        deleted_at: None,
+        ..column
     })
 }
 
@@ -331,9 +362,10 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Column> {
 
 /// 削除済みの Column 一覧を取得する（ゴミ箱表示用）
 pub fn get_deleted(conn: &Connection, deck_id: &str) -> Result<Vec<Column>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, deck_id, name, position, created_at, updated_at, deleted_at FROM columns WHERE deck_id = ?1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
-    )?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {} FROM columns WHERE deck_id = ?1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
+        COLUMN_FIELDS,
+    ))?;
 
     let columns = stmt
         .query_map(params![deck_id], row_to_column)?
@@ -439,6 +471,45 @@ mod tests {
 
         let columns = get_by_deck_id(&conn, &deck_id).unwrap();
         assert_eq!(columns.len(), 1);
+    }
+
+    #[test]
+    fn test_update_description_and_private() {
+        let (conn, deck_id) = setup();
+
+        let column = create(
+            &conn,
+            NewColumn {
+                deck_id: deck_id.clone(),
+                name: "Research".to_string(),
+            },
+        )
+        .unwrap();
+        assert_eq!(column.description, None);
+        assert!(!column.private);
+
+        // description と private を設定
+        let updated = update(
+            &conn,
+            &column.id,
+            None,
+            Some(Some("Papers to read")),
+            Some(true),
+        )
+        .unwrap();
+        assert_eq!(updated.name, "Research"); // name は据え置き
+        assert_eq!(updated.description.as_deref(), Some("Papers to read"));
+        assert!(updated.private);
+
+        // 再取得しても保持されている
+        let reloaded = get_by_id(&conn, &column.id).unwrap();
+        assert_eq!(reloaded.description.as_deref(), Some("Papers to read"));
+        assert!(reloaded.private);
+
+        // description を NULL クリア、private を戻す
+        let cleared = update(&conn, &column.id, None, Some(None), Some(false)).unwrap();
+        assert_eq!(cleared.description, None);
+        assert!(!cleared.private);
     }
 
     #[test]

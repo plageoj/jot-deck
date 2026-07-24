@@ -193,7 +193,7 @@ flowchart LR
 
 実効範囲 = `接続 Deck 内の private でないカラム` ∩ `allowlist（指定があれば。無指定なら全部）`。安全は必須設定ではなく **`private` ＋ カード長 backstop ＋ 論理削除アンドゥ（§5）＋ 監査**で担保する。
 
-**設定（`mcpServers`）**: 対象 Deck は当面、ブリッジを spawn する `mcpServers` エントリの**環境変数で deck id（ULID）を渡す**（例 `JOT_DECK_DECK_ID`。任意の allowlist も同様に env で）。deck id はユーザが直接目にしない ULID なので、**本体 GUI に deck id を表示/コピーする導線が要る**（Deck 管理 UI から「MCP 用 ID をコピー」等）。将来はコピー可能な設定スニペット生成まで踏み込める。
+**設定（`mcpServers`）**: 対象 Deck は、ブリッジを spawn する `mcpServers` エントリの**環境変数 `JOT_DECK_DECK_ID`（ULID）で渡す**（任意の allowlist も同様に env で）。**DB パスは本体と同じ固定の app data dir（identifier `com.jot-deck.app`）をブリッジが自力で導出する**ため env には出さない（`JOT_DECK_DB_PATH` は dev / 非標準インストール向けの任意オーバーライドに留める）。ブリッジ本体は本番では Tauri サイドカー（`externalBin`）として同梱し、パスを本体だけが知る。deck id はユーザが直接目にしない ULID なので、**本体 GUI が deck id の表示/コピーに加え、貼り付け可能な設定スニペット（ブリッジの絶対パス＋deck id を埋めた `mcpServers` エントリ）を生成する**（Deck 管理 UI の「Copy MCP server config」/「MCP id」）。バイナリパスも DB パスも本体だけが正確に知るため、ユーザに OS 別パスを推測させない。
 
 **フィルタは必ず本体（Card Repository のクエリ）側で行う。** ブリッジは spawn される補助プロセスで、その先のエージェントはプロンプトインジェクションで操作され得る。信頼境界は本体であり、ブリッジに絞り込みを委ねない。
 

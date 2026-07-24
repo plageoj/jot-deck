@@ -58,9 +58,12 @@ const mockBackend: Partial<DatabaseBackend> = {
     makeColumn(uniqueId("new-col"), params.deck_id, {
       position: params.position,
     }),
-  updateColumn: async (id, name) => ({
-    ...makeColumn(id, "deck-1"),
-    name,
+  updateColumn: async (id, name, description, isPrivate) => ({
+    ...makeColumn(id, "deck-1", {
+      description: description ?? null,
+      private: isPrivate ?? false,
+    }),
+    name: name ?? `${id}-name`,
   }),
   createCard: async (params) =>
     makeCard(uniqueId("new-card"), params.column_id, {

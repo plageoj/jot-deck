@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "test:e2e:demo": "playwright test e2e/demo.spec.ts --headed",
     "test:e2e:ui": "playwright test --ui",
+    "build:mcp-sidecar": "node ../../scripts/build-mcp-sidecar.mjs",
     "tauri": "tauri"
   },
   "license": "AGPL-3.0-only",

@@ -57,6 +57,12 @@ pub struct Column {
     pub deck_id: String,
     pub name: String,
     pub position: i32,
+    /// このカラムに何を入れるかの 1 行説明（分類軸）。外部エージェントの
+    /// 振り分け精度に効く（008-mcp-server.md §4.6）
+    pub description: Option<String>,
+    /// 非公開フラグ。true のカラムは外部の書き込み口・MCP から一切読み書き
+    /// できない（008-mcp-server.md §4.5）
+    pub private: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,

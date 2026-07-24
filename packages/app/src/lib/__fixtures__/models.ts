@@ -13,13 +13,20 @@ export function makeDeck(id: string, name = id): Deck {
 export function makeColumn(
   id: string,
   deckId: string,
-  options: { position?: number; deletedAt?: string } = {},
+  options: {
+    position?: number;
+    deletedAt?: string;
+    description?: string | null;
+    private?: boolean;
+  } = {},
 ): Column {
   return {
     id,
     deck_id: deckId,
     name: `${id}-name`,
     position: options.position ?? 0,
+    description: options.description ?? null,
+    private: options.private ?? false,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     deleted_at: options.deletedAt ?? null,
