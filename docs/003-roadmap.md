@@ -130,7 +130,7 @@ MCP ブリッジは CLI 同型の**別プロセスから同一 `jot-deck.db` を
 * 本番配布: ブリッジを Tauri サイドカー（`externalBin`）として同梱。DB パスは本体と同じ固定 app data dir をブリッジが導出（env は不要）
 * Deck 管理 UI に deck id の表示/コピーと、貼り付け可能な `mcpServers` 設定スニペット生成
 
-> `search_cards` の本文検索は当面 substring 一致で動く。第一級の FTS5 インデックスは後続フェーズで導入し、tool 面はそのままに実装だけ差し替える。
+> `search_cards` の本文検索は当面 substring 一致で動く。第一級の FTS5 インデックスは全文検索（Phase 10）で導入し、tool 面はそのままに実装だけ差し替える。
 
 > power user は手元のエージェントで清書・要約を行うため、AI 連携は自社クラウドではなく MCP 読み取り面で提供する。立ち上げコスト（Worker / 認証 / レート制限 / 推論コスト）を負わずに「Deck を AI KB として開く」狙いを最短で満たす。
 
