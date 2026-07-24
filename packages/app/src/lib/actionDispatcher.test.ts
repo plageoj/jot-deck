@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { Card, Column, Deck } from "$lib/types";
 import type { DatabaseBackend } from "$lib/db";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
+import { updaterStore } from "./updater.svelte";
 
 const state = {
   decks: [] as Deck[],
@@ -371,6 +372,24 @@ describe("ActionDispatcher.executeAction palette routing", () => {
     expect(focus.showSettings).toBe(true);
     expect(focus.activePalette).toBeNull();
     expect(focus.focusMode).not.toBe("command");
+  });
+
+  it("routes showAbout to focus.showAbout = true (no palette)", async () => {
+    await dispatcher.executeAction("showAbout");
+    expect(focus.showAbout).toBe(true);
+    expect(focus.activePalette).toBeNull();
+    expect(focus.focusMode).not.toBe("command");
+  });
+
+  it("routes checkForUpdates to open the About dialog and trigger a check", async () => {
+    const spy = vi.spyOn(updaterStore, "check");
+    try {
+      await dispatcher.executeAction("checkForUpdates");
+      expect(focus.showAbout).toBe(true);
+      expect(spy).toHaveBeenCalledTimes(1);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("Ctrl+, in card mode opens settings via the global keydown handler", () => {
@@ -950,6 +969,14 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     const event = makeKeyEvent({ key: "j" });
     dispatcher.handleKeydown(event);
     expect(event.defaultPrevented).toBe(false);
+  });
+
+  it("is a no-op while the about dialog is open", () => {
+    focus.showAbout = true;
+    const event = makeKeyEvent({ key: "j" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(focus.focusMode).toBe("column");
   });
 
   it("dispatches a bound action through the key processor", () => {
