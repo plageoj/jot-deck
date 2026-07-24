@@ -15,8 +15,13 @@ use std::path::PathBuf;
 use jot_deck_core::{query, Connection};
 use serde_json::{json, Value};
 
-/// Protocol version we advertise when the client doesn't request one.
+/// Protocol version we advertise when the client requests none, or requests one
+/// we don't support (MCP negotiation: fall back to a version we do speak).
 const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
+/// MCP revisions this bridge speaks. On `initialize` we echo the client's
+/// requested version only when it is one of these; otherwise we answer with
+/// `DEFAULT_PROTOCOL_VERSION` rather than an unknown version.
+const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_NAME: &str = "jot-deck";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -103,11 +108,13 @@ impl Bridge {
     }
 
     fn initialize(&self, params: &Value) -> Value {
-        // Echo the client's protocol version when present (they picked a version
-        // both sides understand); otherwise advertise our default.
+        // Echo the client's requested version only when we support it; for an
+        // absent or unsupported version, answer with our default (MCP requires
+        // the server to name a version it actually speaks).
         let protocol_version = params
             .get("protocolVersion")
             .and_then(Value::as_str)
+            .filter(|v| SUPPORTED_PROTOCOL_VERSIONS.contains(v))
             .unwrap_or(DEFAULT_PROTOCOL_VERSION);
         json!({
             "protocolVersion": protocol_version,
@@ -457,6 +464,17 @@ mod tests {
         assert_eq!(resp["result"]["protocolVersion"], "2025-03-26");
         assert!(resp["result"]["instructions"].as_str().unwrap().contains("knowledge base"));
         assert!(resp["result"]["capabilities"]["tools"].is_object());
+    }
+
+    #[test]
+    fn initialize_falls_back_for_unsupported_protocol_version() {
+        let (bridge, _, _) = bridge_with_data();
+        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "protocolVersion": "1999-01-01" } })
+        .to_string();
+        let resp: Value = serde_json::from_str(&bridge.handle_message(&req).unwrap()).unwrap();
+        // Unknown version ⇒ answer with a version we actually support.
+        assert_eq!(resp["result"]["protocolVersion"], DEFAULT_PROTOCOL_VERSION);
     }
 
     #[test]

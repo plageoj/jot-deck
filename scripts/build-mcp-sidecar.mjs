@@ -11,7 +11,7 @@
 // cross-compiles), otherwise the host triple from `rustc -vV`.
 
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -47,4 +47,7 @@ const destBin = join(destDir, `jot-deck-mcp-${triple}${exeSuffix}`);
 
 mkdirSync(destDir, { recursive: true });
 copyFileSync(builtBin, destBin);
+// externalBin requires the sidecar to be executable; copyFileSync inherits the
+// process umask, so restore the executable bit on Unix targets.
+if (!isWindows) chmodSync(destBin, 0o755);
 console.log(`[sidecar] staged ${destBin}`);

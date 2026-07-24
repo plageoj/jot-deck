@@ -89,12 +89,34 @@ pub fn init_db(conn: &Connection) -> Result<()> {
 fn migrate(conn: &Connection) -> Result<()> {
     // columns.description / columns.private（008-mcp-server.md §4.5 / 002 §1.2）
     if !column_exists(conn, "columns", "description")? {
-        conn.execute_batch("ALTER TABLE columns ADD COLUMN description TEXT")?;
+        add_column_ignoring_duplicate(conn, "ALTER TABLE columns ADD COLUMN description TEXT")?;
     }
     if !column_exists(conn, "columns", "private")? {
-        conn.execute_batch("ALTER TABLE columns ADD COLUMN private INTEGER NOT NULL DEFAULT 0")?;
+        add_column_ignoring_duplicate(
+            conn,
+            "ALTER TABLE columns ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
+        )?;
     }
     Ok(())
+}
+
+/// `ALTER TABLE ... ADD COLUMN` を実行し、SQLite の "duplicate column name"
+/// を成功として扱う。
+///
+/// GUI・CLI・MCP が同一ファイルを同時に開くと（`create_file_db` 参照）、両者が
+/// 列の欠落を観測してから `ALTER TABLE` を競合実行しうる。負けた側は
+/// "duplicate column name" で失敗するが、これは既に列が追加された証左なので
+/// 起動を止めるべきではない。
+fn add_column_ignoring_duplicate(conn: &Connection, sql: &str) -> Result<()> {
+    match conn.execute_batch(sql) {
+        Ok(()) => Ok(()),
+        Err(rusqlite::Error::SqliteFailure(_, Some(msg)))
+            if msg.contains("duplicate column name") =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// テーブルに指定した列が存在するか。
@@ -188,6 +210,22 @@ mod tests {
 
         // 二度目の init_db でも失敗しない（冪等）。
         init_db(&conn).unwrap();
+    }
+
+    #[test]
+    fn test_add_column_ignoring_duplicate_tolerates_race_loser() {
+        // 同時起動レースの敗者が観測する "duplicate column name" を再現する:
+        // 既に存在する列への ADD COLUMN はエラーではなく成功として扱う。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE columns (id TEXT PRIMARY KEY, private INTEGER)")
+            .unwrap();
+        // 直接 ALTER すれば "duplicate column name" になる状況。
+        assert!(conn
+            .execute_batch("ALTER TABLE columns ADD COLUMN private INTEGER")
+            .is_err());
+        // ヘルパーはそれを飲み込む。
+        add_column_ignoring_duplicate(&conn, "ALTER TABLE columns ADD COLUMN private INTEGER")
+            .unwrap();
     }
 
     #[test]
