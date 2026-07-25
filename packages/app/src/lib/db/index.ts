@@ -16,7 +16,7 @@ let initPromise: Promise<DatabaseBackend> | null = null;
 /**
  * Check if running inside Tauri
  */
-function isTauri(): boolean {
+export function isTauri(): boolean {
   return globalThis.window !== undefined && "__TAURI_INTERNALS__" in globalThis;
 }
 

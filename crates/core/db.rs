@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS cards (
     updated_at TEXT NOT NULL,
     deleted_at TEXT,
     deleted_with_column INTEGER NOT NULL DEFAULT 0,
+    locked_by TEXT,
+    locked_at TEXT,
     FOREIGN KEY (column_id) REFERENCES columns(id)
 );
 
@@ -96,6 +98,13 @@ fn migrate(conn: &Connection) -> Result<()> {
             conn,
             "ALTER TABLE columns ADD COLUMN private INTEGER NOT NULL DEFAULT 0",
         )?;
+    }
+    // cards.locked_by / cards.locked_at（002 §5 カード編集の競合制御）
+    if !column_exists(conn, "cards", "locked_by")? {
+        add_column_ignoring_duplicate(conn, "ALTER TABLE cards ADD COLUMN locked_by TEXT")?;
+    }
+    if !column_exists(conn, "cards", "locked_at")? {
+        add_column_ignoring_duplicate(conn, "ALTER TABLE cards ADD COLUMN locked_at TEXT")?;
     }
     Ok(())
 }
@@ -183,6 +192,41 @@ mod tests {
         let conn = create_in_memory().unwrap();
         assert!(column_exists(&conn, "columns", "private").unwrap());
         assert!(column_exists(&conn, "columns", "description").unwrap());
+    }
+
+    #[test]
+    fn test_cards_have_lock_columns() {
+        let conn = create_in_memory().unwrap();
+        assert!(column_exists(&conn, "cards", "locked_by").unwrap());
+        assert!(column_exists(&conn, "cards", "locked_at").unwrap());
+    }
+
+    #[test]
+    fn test_migration_adds_lock_columns_to_legacy_cards() {
+        // locked_by / locked_at を持たない旧 cards スキーマを再現する。
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE cards (
+                id TEXT PRIMARY KEY,
+                column_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                score INTEGER NOT NULL DEFAULT 0,
+                position INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                deleted_at TEXT,
+                deleted_with_column INTEGER NOT NULL DEFAULT 0
+            );",
+        )
+        .unwrap();
+        assert!(!column_exists(&conn, "cards", "locked_by").unwrap());
+
+        init_db(&conn).unwrap();
+        assert!(column_exists(&conn, "cards", "locked_by").unwrap());
+        assert!(column_exists(&conn, "cards", "locked_at").unwrap());
+
+        // 冪等。
+        init_db(&conn).unwrap();
     }
 
     #[test]

@@ -81,6 +81,11 @@ pub struct Card {
     pub deleted_at: Option<DateTime<Utc>>,
     /// Column 削除による連動削除かどうか
     pub deleted_with_column: bool,
+    /// 現在この Card を占有している編集主体（002 §5.2）。`None`＝未占有／
+    /// `"user"`＝手編集中／書き込み元識別子（AI 書き込み接続の ID 等）＝AI 編集中。
+    pub locked_by: Option<String>,
+    /// 占有ロックの取得時刻。ここから一定時間（リース）で失効する（002 §5.2）。
+    pub locked_at: Option<DateTime<Utc>>,
 }
 
 /// Tag - カード本文中の #word 形式

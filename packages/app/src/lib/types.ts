@@ -40,6 +40,11 @@ export interface Card {
   updated_at: string;
   deleted_at: string | null;
   deleted_with_column: boolean;
+  /** Editor currently occupying this card (002 §5.2): null = free,
+   * "user" = hand edit, or a writer id (e.g. an AI connection). */
+  locked_by: string | null;
+  /** When the occupancy lock was taken; it expires after a lease (002 §5.2). */
+  locked_at: string | null;
 }
 
 export type TrashItem =

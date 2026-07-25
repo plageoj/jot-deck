@@ -6,7 +6,7 @@ import {
   type Tag,
   type TrashItem,
 } from "$lib/types";
-import { getDatabase, type DatabaseBackend } from "$lib/db";
+import { getDatabase, isTauri, type DatabaseBackend } from "$lib/db";
 import { FocusManager } from "./focusManager.svelte";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
@@ -199,6 +199,80 @@ export class DeckData {
     } catch (e) {
       this.error = `Failed to reload columns: ${e}`;
     }
+  }
+
+  // --- External change observation (008-mcp-server.md §3) ---
+  // The Rust side polls `PRAGMA data_version` (~1s) and emits `external-db-change`
+  // when another process (CLI / MCP bridge) commits to the shared DB. Each
+  // debounced observation bumps `externalChangeTick`; a single $effect in the
+  // page reacts to that tick (and to the edit-focus state) and calls
+  // `reloadFromExternalChange` when it's safe — one reactive source of truth, so
+  // deferring during an edit and resuming after it need no separate flush path.
+
+  /** Bumped (debounced) each time an external DB change is observed. Read from a
+   * reactive $effect that decides when to actually reload. */
+  externalChangeTick = $state(0);
+  private externalUnlisten: (() => void) | null = null;
+  private externalReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Subscribe to external DB changes (Tauri only). No-op in the browser (WASM)
+   * backend, which is single-process. */
+  async watchExternalChanges(): Promise<void> {
+    if (!isTauri()) return;
+    const { listen } = await import("@tauri-apps/api/event");
+    this.externalUnlisten = await listen("external-db-change", () => {
+      if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
+      // Coalesce bursts of external commits into one tick.
+      this.externalReloadTimer = setTimeout(() => {
+        this.externalReloadTimer = null;
+        this.externalChangeTick++;
+      }, 250);
+    });
+    // Reconcile once right after subscribing: a commit landing between the
+    // initial load and listener registration would otherwise be missed (the
+    // backend emits its detection only once).
+    this.externalChangeTick++;
+  }
+
+  /** Re-read the current deck after an external change.
+   *
+   * Fetches everything into locals first and commits only if the selected deck
+   * hasn't changed meanwhile — a slow reload for deck A must never overwrite
+   * deck B after the user switches. */
+  async reloadFromExternalChange() {
+    const deckId = this.currentDeck?.id;
+    if (!deckId) return;
+    try {
+      const columns = await this.db.getColumnsByDeck(deckId);
+      const cardEntries = await Promise.all(
+        columns.map(async (col) => {
+          try {
+            return [col.id, await this.db.getCardsByColumn(col.id)] as const;
+          } catch (e) {
+            console.error(`Failed to load cards for column ${col.id}:`, e);
+            return [col.id, []] as const;
+          }
+        }),
+      );
+      const tags = await this.db.getTagsByDeck(deckId);
+      // The user may have switched decks while we were loading — discard if so.
+      if (this.currentDeck?.id !== deckId) return;
+      this.columns = columns;
+      this.cardsByColumn = Object.fromEntries(cardEntries);
+      this.deckTags = tags;
+      if (this.activeTagFilter) this.filterByTag(this.activeTagFilter);
+    } catch (e) {
+      this.error = `Failed to reload after external change: ${e}`;
+    }
+  }
+
+  stopWatchingExternalChanges() {
+    if (this.externalReloadTimer) {
+      clearTimeout(this.externalReloadTimer);
+      this.externalReloadTimer = null;
+    }
+    this.externalUnlisten?.();
+    this.externalUnlisten = null;
   }
 
   async createDeck(): Promise<Deck | null> {
