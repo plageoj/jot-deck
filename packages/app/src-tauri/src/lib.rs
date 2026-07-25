@@ -351,17 +351,19 @@ fn spawn_external_change_watcher(handle: tauri::AppHandle) {
         // The managed state handle is stable for the thread's lifetime — resolve
         // it once rather than looking it up in the type map every tick.
         let state = handle.state::<AppState>();
-        let mut last_version: Option<i64> = None;
+        let read_version = || -> Option<i64> {
+            state.conn.lock().ok().and_then(|conn| {
+                conn.query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
+                    .ok()
+            })
+        };
+        // Seed the baseline *before* the first sleep so a commit during startup
+        // (after the frontend's initial load) is observed on the first tick,
+        // rather than being silently folded into the baseline.
+        let mut last_version = read_version();
         loop {
             std::thread::sleep(std::time::Duration::from_secs(1));
-            let version = match state.conn.lock() {
-                Ok(conn) => conn
-                    .query_row("PRAGMA data_version", [], |row| row.get::<_, i64>(0))
-                    .ok(),
-                // Poisoned lock: skip this tick rather than crash the watcher.
-                Err(_) => continue,
-            };
-            if let Some(v) = version {
+            if let Some(v) = read_version() {
                 if last_version.is_some_and(|prev| prev != v) {
                     let _ = handle.emit(EXTERNAL_DB_CHANGE_EVENT, ());
                 }

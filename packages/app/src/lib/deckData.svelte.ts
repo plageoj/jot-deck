@@ -228,12 +228,42 @@ export class DeckData {
         this.externalChangeTick++;
       }, 250);
     });
+    // Reconcile once right after subscribing: a commit landing between the
+    // initial load and listener registration would otherwise be missed (the
+    // backend emits its detection only once).
+    this.externalChangeTick++;
   }
 
-  /** Re-read the current deck after an external change. */
+  /** Re-read the current deck after an external change.
+   *
+   * Fetches everything into locals first and commits only if the selected deck
+   * hasn't changed meanwhile — a slow reload for deck A must never overwrite
+   * deck B after the user switches. */
   async reloadFromExternalChange() {
-    await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
-    if (this.activeTagFilter) this.filterByTag(this.activeTagFilter);
+    const deckId = this.currentDeck?.id;
+    if (!deckId) return;
+    try {
+      const columns = await this.db.getColumnsByDeck(deckId);
+      const cardEntries = await Promise.all(
+        columns.map(async (col) => {
+          try {
+            return [col.id, await this.db.getCardsByColumn(col.id)] as const;
+          } catch (e) {
+            console.error(`Failed to load cards for column ${col.id}:`, e);
+            return [col.id, []] as const;
+          }
+        }),
+      );
+      const tags = await this.db.getTagsByDeck(deckId);
+      // The user may have switched decks while we were loading — discard if so.
+      if (this.currentDeck?.id !== deckId) return;
+      this.columns = columns;
+      this.cardsByColumn = Object.fromEntries(cardEntries);
+      this.deckTags = tags;
+      if (this.activeTagFilter) this.filterByTag(this.activeTagFilter);
+    } catch (e) {
+      this.error = `Failed to reload after external change: ${e}`;
+    }
   }
 
   stopWatchingExternalChanges() {

@@ -11,6 +11,13 @@ use crate::repository::tag;
 /// 防ぐ backstop。手編集側は編集継続中にロックを取り直してリースを延長する。
 pub const LOCK_LEASE_SECONDS: i64 = 120;
 
+/// 占有ロック比較用の固定幅 RFC3339（ナノ秒 9 桁, UTC）。`locked_at < cutoff` の
+/// リース判定は SQLite の TEXT 比較で行うため、`to_rfc3339()` の可変幅小数秒だと
+/// 桁数の違いで辞書順が時系列とずれ得る。書き込みと比較の両方をこの固定幅で揃える。
+fn lock_timestamp(dt: DateTime<Utc>) -> String {
+    dt.to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
+}
+
 /// RFC3339 文字列を DateTime<Utc> にパースする
 fn parse_datetime(s: &str, col_idx: usize) -> rusqlite::Result<DateTime<Utc>> {
     chrono::DateTime::parse_from_rfc3339(s)
@@ -253,12 +260,12 @@ pub fn update_content_cas(
 /// 複数プロセス間でも二重取得しない。
 pub fn acquire_lock(conn: &Connection, id: &str, locked_by_id: &str) -> Result<Card> {
     let now = Utc::now();
-    let cutoff = (now - chrono::Duration::seconds(LOCK_LEASE_SECONDS)).to_rfc3339();
+    let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
     let affected = conn.execute(
         "UPDATE cards SET locked_by = ?1, locked_at = ?2
          WHERE id = ?3 AND deleted_at IS NULL
            AND (locked_by IS NULL OR locked_by = ?1 OR locked_at IS NULL OR locked_at < ?4)",
-        params![locked_by_id, now.to_rfc3339(), id, cutoff],
+        params![locked_by_id, lock_timestamp(now), id, cutoff],
     )?;
 
     if affected == 1 {
@@ -784,7 +791,7 @@ mod tests {
 
         acquire_lock(&conn, &card.id, "user").unwrap();
         // locked_at をリースを超えて過去へ戻し、失効状態を作る。
-        let stale = (Utc::now() - chrono::Duration::seconds(LOCK_LEASE_SECONDS + 60)).to_rfc3339();
+        let stale = lock_timestamp(Utc::now() - chrono::Duration::seconds(LOCK_LEASE_SECONDS + 60));
         conn.execute(
             "UPDATE cards SET locked_at = ?1 WHERE id = ?2",
             params![stale, card.id],

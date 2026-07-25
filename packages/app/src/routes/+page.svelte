@@ -124,7 +124,10 @@
     if (focus.focusMode === "edit") return; // defer; re-runs when focusMode changes
     if (tick === appliedExternalTick) return;
     appliedExternalTick = tick;
-    void data.reloadFromExternalChange();
+    // Clamp focus after the reload: an external deletion can leave the focused
+    // column/card index out of range, and the loadedDeckId-based clamp effect
+    // doesn't run because the deck id is unchanged.
+    void data.reloadFromExternalChange().then(() => focus.clampToLoadedDeck());
   });
 
   onDestroy(() => {
