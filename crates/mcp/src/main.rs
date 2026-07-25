@@ -9,15 +9,19 @@
 //! - `JOT_DECK_DB_PATH`  — optional override of the `jot-deck.db` path. The DB
 //!   lives at a fixed, identifier-based location (same as the GUI), so this is
 //!   only for dev or non-standard installs; normally it is not set.
+//! - `JOT_DECK_DENY`     — optional comma list of write capabilities to disable
+//!   (`append`, `edit`, `delete`); all are enabled by default (008 §5).
+//! - `JOT_DECK_MAX_WRITES_PER_MIN` — optional per-connection write rate cap.
 //!
 //! Speaks JSON-RPC 2.0 over stdio, one JSON message per line (the newline-
-//! delimited stdio transport). Reads only; write tools arrive in Phase 5.
+//! delimited stdio transport). Exposes the read surface and the card write
+//! surface (append/patch/move/delete).
 
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;
 
 use jot_deck_core::create_file_db;
-use jot_deck_mcp::{resolve_db_path, Bridge};
+use jot_deck_mcp::{resolve_db_path, Bridge, BridgeConfig};
 
 fn main() -> ExitCode {
     // DB path is not required config: default to the fixed app data dir, allow
@@ -38,7 +42,7 @@ fn main() -> ExitCode {
     };
 
     // Same open path as the CLI/GUI: WAL + busy_timeout let us share the file
-    // with a running GUI. We issue only read queries.
+    // with a running GUI.
     let conn = match create_file_db(&db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -47,7 +51,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let bridge = Bridge::new(conn, deck_id);
+    let bridge = Bridge::with_config(conn, deck_id, BridgeConfig::from_env());
     serve(&bridge);
     ExitCode::SUCCESS
 }

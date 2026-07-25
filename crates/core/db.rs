@@ -73,6 +73,22 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+
+-- 冪等な append の写像（008-mcp-server.md §5）。同一 (deck, key) の再送は新規作成せず
+-- 既存カード id を返す。Deck 単位でスコープする。今は MCP append_card が使うが、機構
+-- 自体は書き込み口に依らないので caller-neutral な名前にしておく。
+-- card_id / deck_id は ON DELETE CASCADE で親に従属させる: カードの物理削除
+-- （cleanup 30 日後）や Deck 削除でキーも消え、写像が宙に浮かない＆保持が自動で
+-- 上限を持つ（PRAGMA foreign_keys = ON 前提。init_db で設定）。
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    deck_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    card_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (deck_id, key),
+    FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
+    FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
 "#;
 
 /// データベースを初期化する
@@ -185,6 +201,7 @@ mod tests {
         assert!(tables.contains(&"tags".to_string()));
         assert!(tables.contains(&"card_tags".to_string()));
         assert!(tables.contains(&"settings".to_string()));
+        assert!(tables.contains(&"idempotency_keys".to_string()));
     }
 
     #[test]

@@ -4,7 +4,7 @@ pub mod error;
 pub mod models;
 pub mod repository;
 
-pub use repository::{card, column, deck, query, setting, tag};
+pub use repository::{card, column, deck, query, setting, tag, write};
 
 pub use cleanup::run_cleanup_batch;
 pub use db::{create_file_db, create_in_memory};
