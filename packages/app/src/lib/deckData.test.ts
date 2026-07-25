@@ -97,9 +97,17 @@ const mockBackend: Partial<DatabaseBackend> = {
     [{ id: `tag-${prefix}`, name: `${prefix}-suggestion` }],
 };
 
+// Toggle the simulated Tauri environment per test (name prefixed `mock` so the
+// hoisted vi.mock factory may reference it).
+const mockEnv = { tauri: false };
+const mockListen = vi.fn(async (_event: string, _handler: () => void) => () => {});
+
 vi.mock("$lib/db", () => ({
   getDatabase: async () => mockBackend,
+  isTauri: () => mockEnv.tauri,
 }));
+
+vi.mock("@tauri-apps/api/event", () => ({ listen: mockListen }));
 
 const { DeckData } = await import("./deckData.svelte");
 const { FOCUS_STATE_PREFIX } = await import("./focusManager.svelte");
@@ -577,6 +585,143 @@ describe("DeckData CRUD", () => {
   it("reloadColumns is a no-op when no current deck", async () => {
     data.currentDeck = null;
     await expect(data.reloadColumns()).resolves.toBeUndefined();
+  });
+});
+
+describe("DeckData external changes", () => {
+  let data: InstanceType<typeof DeckData>;
+
+  beforeEach(async () => {
+    resetState();
+    mockEnv.tauri = false;
+    mockListen.mockClear();
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [makeColumn("col-active", "deck-1")];
+    state.cardsByColumn = new Map([["col-active", []]]);
+
+    data = new DeckData();
+    await data.init();
+  });
+
+  it("reloadFromExternalChange reloads columns, cards, and tags for the current deck", async () => {
+    state.columns = [makeColumn("col-x", "deck-1")];
+    state.cardsByColumn = new Map([
+      ["col-x", [makeCard("card-x", "col-x", { content: "hi" })]],
+    ]);
+    state.tagsByDeck = [{ id: "t1", name: "todo" }];
+
+    await data.reloadFromExternalChange();
+
+    expect(data.columns.map((c) => c.id)).toEqual(["col-x"]);
+    expect(data.cardsByColumn["col-x"].map((c) => c.id)).toEqual(["card-x"]);
+    expect(data.deckTags).toEqual([{ id: "t1", name: "todo" }]);
+  });
+
+  it("reloadFromExternalChange is a no-op when no current deck", async () => {
+    data.currentDeck = null;
+    await expect(data.reloadFromExternalChange()).resolves.toBeUndefined();
+  });
+
+  it("re-applies an active tag filter after an external reload", async () => {
+    state.columns = [makeColumn("col-x", "deck-1")];
+    state.cardsByColumn = new Map([
+      ["col-x", [makeCard("c1", "col-x", { content: "#todo x" })]],
+    ]);
+    data.filterByTag("todo");
+
+    await data.reloadFromExternalChange();
+
+    expect(data.activeTagFilter).toBe("todo");
+    expect(data.filteredCardIds?.has("c1")).toBe(true);
+  });
+
+  it("discards an external reload when the deck changes mid-flight", async () => {
+    const originalColumns = data.columns;
+    // deck-1's post-reload set — should NOT be committed once the deck switches.
+    state.columns = [makeColumn("col-new", "deck-1")];
+    state.cardsByColumn = new Map([["col-new", []]]);
+
+    // Flip the selected deck during the final await so the guard discards.
+    const originalGetTags = mockBackend.getTagsByDeck!;
+    mockBackend.getTagsByDeck = async () => {
+      data.currentDeck = makeDeck("deck-2");
+      return [];
+    };
+
+    await data.reloadFromExternalChange();
+    mockBackend.getTagsByDeck = originalGetTags;
+
+    // Columns were not overwritten with the stale (deck-1) fetch.
+    expect(data.columns).toBe(originalColumns);
+  });
+
+  it("watchExternalChanges is a no-op outside Tauri (no reconcile tick)", async () => {
+    await expect(data.watchExternalChanges()).resolves.toBeUndefined();
+    expect(data.externalChangeTick).toBe(0);
+    expect(mockListen).not.toHaveBeenCalled();
+  });
+
+  it("watchExternalChanges subscribes and reconciles once under Tauri", async () => {
+    mockEnv.tauri = true;
+    await data.watchExternalChanges();
+
+    expect(mockListen).toHaveBeenCalledWith(
+      "external-db-change",
+      expect.any(Function),
+    );
+    // A reconcile tick fires right after subscribing.
+    expect(data.externalChangeTick).toBe(1);
+  });
+
+  it("coalesces a burst of external events into a single debounced tick", async () => {
+    vi.useFakeTimers();
+    try {
+      mockEnv.tauri = true;
+      let handler: (() => void) | undefined;
+      mockListen.mockImplementationOnce(async (_event, h) => {
+        handler = h;
+        return () => {};
+      });
+      await data.watchExternalChanges();
+
+      const afterSubscribe = data.externalChangeTick; // 1 (reconcile)
+      handler?.();
+      handler?.();
+      handler?.(); // burst within the debounce window
+      vi.advanceTimersByTime(250);
+
+      expect(data.externalChangeTick).toBe(afterSubscribe + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stopWatchingExternalChanges clears a pending debounce and unsubscribes", async () => {
+    vi.useFakeTimers();
+    try {
+      mockEnv.tauri = true;
+      let handler: (() => void) | undefined;
+      const unlisten = vi.fn();
+      mockListen.mockImplementationOnce(async (_event, h) => {
+        handler = h;
+        return unlisten;
+      });
+      await data.watchExternalChanges();
+      const tick = data.externalChangeTick;
+
+      handler?.(); // schedule a debounced tick…
+      data.stopWatchingExternalChanges(); // …then cancel it before it fires
+      vi.advanceTimersByTime(500);
+
+      expect(data.externalChangeTick).toBe(tick); // no further tick
+      expect(unlisten).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stopWatchingExternalChanges is safe when nothing is subscribed", () => {
+    expect(() => data.stopWatchingExternalChanges()).not.toThrow();
   });
 });
 
