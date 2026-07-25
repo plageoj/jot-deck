@@ -90,10 +90,12 @@ pub fn append_card(
     ensure_column_writable(conn, deck_id, column_id)?;
     ensure_card_length(content)?;
 
-    // 冪等キーが既にあれば、その時点のカードを返す（再送＝no-op）。
+    // 冪等キーが既にあれば、その時点のカードを返す（再送＝no-op）。可視性ゲートを
+    // 通すので、写像先カードが private カラムへ移動 / 削除済みなら NotFound になり、
+    // 書き込み境界からアクセス不可な内容を漏らさない（008 §4.5）。
     if let Some(key) = idempotency_key {
         if let Some(existing) = lookup_idempotent(conn, deck_id, key)? {
-            return card::get_by_id(conn, &existing);
+            return visible_card(conn, deck_id, &existing);
         }
     }
 
@@ -106,10 +108,20 @@ pub fn append_card(
         },
     )?;
     if let Some(key) = idempotency_key {
-        tx.execute(
-            "INSERT INTO idempotency_keys (deck_id, key, card_id, created_at) VALUES (?1, ?2, ?3, ?4)",
+        // 同一キーで別プロセスが並行に先着した場合、PK 制約で例外にせず OR IGNORE で
+        // 0 行を検知し、自分が作ったカードを破棄（tx ロールバック）して先着カードを返す
+        // ―― 再送安全の約束を並行下でも保つ。
+        let inserted = tx.execute(
+            "INSERT OR IGNORE INTO idempotency_keys (deck_id, key, card_id, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![deck_id, key, created.id, Utc::now().to_rfc3339()],
         )?;
+        if inserted == 0 {
+            drop(tx); // 未 commit のまま破棄 → 作成したカードを取り消す
+            let winner = lookup_idempotent(conn, deck_id, key)?.ok_or_else(|| {
+                JotDeckError::Conflict("idempotency race left no resolvable key".to_string())
+            })?;
+            return visible_card(conn, deck_id, &winner);
+        }
     }
     tx.commit()?;
     Ok(created)
@@ -313,6 +325,33 @@ mod tests {
         assert_eq!(first.id, again.id);
         assert_eq!(again.content, "once");
         assert_eq!(card::get_by_column_id(&f.conn, &f.public_col).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn idempotent_replay_of_card_moved_to_private_is_not_found() {
+        let f = setup();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k")).unwrap();
+        // The mapped card is later moved into the private column.
+        card::move_to_column(&f.conn, &a.id, &f.private_col).unwrap();
+        // Resending to the (still writable) public column must not hand back the
+        // now-inaccessible card through the write surface.
+        let err = append_card(&f.conn, &f.deck_id, &f.public_col, "x", Some("k")).unwrap_err();
+        assert!(matches!(err, JotDeckError::NotFound(_)));
+    }
+
+    #[test]
+    fn idempotency_key_is_purged_when_card_is_physically_deleted() {
+        let f = setup();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k")).unwrap();
+        // Simulate the 30-day cleanup physically removing the card; the ON DELETE
+        // CASCADE FK drops the idempotency key with it.
+        f.conn
+            .execute("DELETE FROM cards WHERE id = ?1", params![a.id])
+            .unwrap();
+        // The same key now creates a fresh card instead of resolving to the gone one.
+        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "again", Some("k")).unwrap();
+        assert_ne!(a.id, b.id);
+        assert_eq!(b.content, "again");
     }
 
     #[test]

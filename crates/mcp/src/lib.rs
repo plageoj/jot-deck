@@ -104,7 +104,8 @@ impl Default for Capabilities {
 
 impl Capabilities {
     /// Parse a deny list like `"append, delete"` into capabilities (default all
-    /// on; unknown tokens are ignored).
+    /// on). Unknown tokens are ignored but warned on stderr — a typo in a
+    /// lockdown config must not silently leave a verb enabled.
     pub fn from_deny_list(deny: &str) -> Self {
         let mut c = Self::default();
         for tok in deny
@@ -116,7 +117,10 @@ impl Capabilities {
                 "append" => c.append = false,
                 "edit" => c.edit = false,
                 "delete" => c.delete = false,
-                _ => {}
+                other => eprintln!(
+                    "[jot-deck-mcp] JOT_DECK_DENY: ignoring unknown capability '{}' (expected append/edit/delete)",
+                    other
+                ),
             }
         }
         c
@@ -183,11 +187,17 @@ impl BridgeConfig {
         let capabilities = std::env::var("JOT_DECK_DENY")
             .map(|d| Capabilities::from_deny_list(&d))
             .unwrap_or_default();
-        let max_writes_per_min = std::env::var("JOT_DECK_MAX_WRITES_PER_MIN")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .filter(|&n| n > 0)
-            .unwrap_or(DEFAULT_MAX_WRITES_PER_MIN);
+        let max_writes_per_min = match std::env::var("JOT_DECK_MAX_WRITES_PER_MIN") {
+            Ok(raw) => raw.parse::<usize>().ok().filter(|&n| n > 0).unwrap_or_else(|| {
+                // Don't silently fall back to the permissive default on a typo.
+                eprintln!(
+                    "[jot-deck-mcp] JOT_DECK_MAX_WRITES_PER_MIN: '{}' is not a positive integer; using default {}",
+                    raw, DEFAULT_MAX_WRITES_PER_MIN
+                );
+                DEFAULT_MAX_WRITES_PER_MIN
+            }),
+            Err(_) => DEFAULT_MAX_WRITES_PER_MIN,
+        };
         Self {
             capabilities,
             max_writes_per_min,
@@ -984,6 +994,15 @@ mod tests {
             .iter()
             .map(|t| t["name"].as_str().unwrap().to_string())
             .collect()
+    }
+
+    #[test]
+    fn deny_list_parses_known_and_ignores_unknown() {
+        let c = Capabilities::from_deny_list("append, bogus, delete");
+        assert!(!c.append);
+        assert!(c.edit); // untouched
+        assert!(!c.delete);
+        // Unknown token ("bogus") is ignored (warned on stderr), not fatal.
     }
 
     #[test]
