@@ -16,10 +16,9 @@
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
 
 use crate::error::{JotDeckError, Result};
-use crate::models::{Card, Column, NewCard, NewColumn};
+use crate::models::{Card, Column, NewCard};
 use crate::repository::{card, column, query};
 
 /// 指定カラムが接続 Deck の可視・書き込み可能範囲にあることを検証する。
@@ -74,6 +73,29 @@ fn lookup_idempotent(conn: &Connection, deck_id: &str, key: &str) -> Result<Opti
         )
         .optional()?;
     Ok(id)
+}
+
+/// アンカー（`before` / `after` のどちらか一方）を、生存兄弟 id 列（移動対象を除く、
+/// position 昇順）に対する挿入 index に解決する。`before`=そのアンカーの index、
+/// `after`=+1、どちらも無し=末尾（len）。`kind` は not-found エラー文言に使う。
+/// 呼び出し側が事前に「both anchors 指定」を弾き、必要ならアンカーの可視性を検証する。
+/// move_card / move_column が共有する（アンカー→position の意味を 1 か所に持つ）。
+fn resolve_anchor_index(
+    others: &[String],
+    before: Option<&str>,
+    after: Option<&str>,
+    kind: &str,
+) -> Result<usize> {
+    let index_of = |anchor: &str| -> Result<usize> {
+        others.iter().position(|id| id == anchor).ok_or_else(|| {
+            JotDeckError::InvalidOperation(format!("Anchor {} not found: {}", kind, anchor))
+        })
+    };
+    Ok(match (before, after) {
+        (Some(b), None) => index_of(b)?,
+        (None, Some(a)) => index_of(a)? + 1,
+        _ => others.len(),
+    })
 }
 
 /// カラム末尾にカードを作成する（`append_card`）。
@@ -175,32 +197,14 @@ pub fn move_card(
     ensure_column_writable(conn, deck_id, target_col)?;
 
     // 移動先カラムの生存カードを position 順に、移動対象を除いて列挙する。card
-    // リポジトリの列挙を再利用し、順序/論理削除の規則をここに二重で持たない。
-    // アンカーはこの列（＝挿入位置の基準集合）に対する index として解決する。
+    // リポジトリの列挙を再利用し、順序/論理削除の規則をここに二重で持たない。カードは
+    // 可視カラムに属せば可視なので、アンカーの追加検証は不要（列に無ければ not-found）。
     let others: Vec<String> = card::get_by_column_id(conn, target_col)?
         .into_iter()
         .map(|c| c.id)
         .filter(|id| id != card_id)
         .collect();
-
-    let anchor_index = |anchor: &str| -> Result<usize> {
-        others
-            .iter()
-            .position(|id| id == anchor)
-            .ok_or_else(|| {
-                JotDeckError::InvalidOperation(format!(
-                    "Anchor card not found in target column: {}",
-                    anchor
-                ))
-            })
-    };
-
-    // 挿入先 index（移動対象を除いた列の 0..=len）。
-    let target_index = match (before_card_id, after_card_id) {
-        (Some(before), None) => anchor_index(before)?,
-        (None, Some(after)) => anchor_index(after)? + 1,
-        _ => others.len(),
-    };
+    let target_index = resolve_anchor_index(&others, before_card_id, after_card_id, "card")?;
 
     // カラムを跨ぐ場合はまず移動先の末尾へ運び（採番一元化）、続いて目的 index へ寄せる。
     // 現状は 2 つの確定トランザクション（末尾へ移動→再配置）。単一トランザクションの
@@ -215,26 +219,24 @@ pub fn move_card(
 // ---- 構造再編（008 §4.1）: カラムの作成/更新/並べ替え ----
 
 /// `ensure_column` の結果。`created` が true なら新規作成、false なら既存取得（get）。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone)]
 pub struct EnsureColumnResult {
     pub column: Column,
     pub created: bool,
 }
 
-/// 接続 Deck の可視範囲（非削除・非 private）で name に一致する最初のカラム id を返す。
-/// private / スコープ外の同名はヒットさせない（漏洩防止）。列は ULID キーなので見かけ上の
-/// 重複名は許容し、position 昇順の先頭を返す。
-fn find_visible_column_by_name(conn: &Connection, deck_id: &str, name: &str) -> Result<Option<String>> {
-    let id: Option<String> = conn
-        .query_row(
-            "SELECT id FROM columns
-             WHERE deck_id = ?1 AND name = ?2 AND deleted_at IS NULL AND private = 0
-             ORDER BY position ASC LIMIT 1",
-            params![deck_id, name],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(id)
+/// 接続 Deck の可視範囲（非削除・非 private）で name に一致する最初のカラムを返す。
+/// column リポジトリの列挙（非削除・position 昇順）を再利用し、非 private だけをここで
+/// 絞る ―― 可視性の SQL 述語を write.rs に二重で持たない。private / スコープ外の同名は
+/// ヒットさせない（漏洩防止）。列は ULID キーなので見かけ上の重複名は許容し、先頭を返す。
+fn find_visible_column_by_name(
+    conn: &Connection,
+    deck_id: &str,
+    name: &str,
+) -> Result<Option<Column>> {
+    Ok(column::get_by_deck_id(conn, deck_id)?
+        .into_iter()
+        .find(|c| !c.private && c.name == name))
 }
 
 /// 名前キーで get-or-create するべき等なカラム作成（`ensure_column`）。
@@ -259,7 +261,7 @@ pub fn ensure_column(
 
     if let Some(existing) = find_visible_column_by_name(conn, deck_id, name)? {
         return Ok(EnsureColumnResult {
-            column: column::get_by_id(conn, &existing)?,
+            column: existing,
             created: false,
         });
     }
@@ -271,20 +273,12 @@ pub fn ensure_column(
         )));
     }
 
-    let created = column::create(
-        conn,
-        NewColumn {
-            deck_id: deck_id.to_string(),
-            name: name.to_string(),
-        },
-    )?;
-    // description / private は作成後に反映する（NewColumn は name しか受けないため）。
     let desc_arg = if description.is_empty() {
         None
     } else {
         Some(description)
     };
-    let column = column::update(conn, &created.id, None, Some(desc_arg), Some(private))?;
+    let column = column::create_with(conn, deck_id, name, desc_arg, private)?;
     Ok(EnsureColumnResult {
         column,
         created: true,
@@ -323,6 +317,11 @@ pub fn move_column(
     }
 
     ensure_column_writable(conn, deck_id, column_id)?;
+    // アンカーは可視（非 private）カラムに限る ―― private 列を anchor に使わせない。
+    // both-anchors は上で弾いているので Some は高々 1 つ。
+    for anchor in [before_column_id, after_column_id].into_iter().flatten() {
+        ensure_column_writable(conn, deck_id, anchor)?;
+    }
 
     // Deck の生存カラムを position 順に、移動対象を除いて列挙する（column リポジトリの
     // 列挙を再利用）。move_to_position は同じ全生存集合上で index を解釈するため、その集合で
@@ -332,20 +331,7 @@ pub fn move_column(
         .map(|c| c.id)
         .filter(|id| id != column_id)
         .collect();
-
-    let anchor_index = |anchor: &str| -> Result<usize> {
-        // アンカーも可視（非 private）でなければならない。
-        ensure_column_writable(conn, deck_id, anchor)?;
-        others.iter().position(|id| id == anchor).ok_or_else(|| {
-            JotDeckError::InvalidOperation(format!("Anchor column not found in deck: {}", anchor))
-        })
-    };
-
-    let target_index = match (before_column_id, after_column_id) {
-        (Some(before), None) => anchor_index(before)?,
-        (None, Some(after)) => anchor_index(after)? + 1,
-        _ => others.len(),
-    };
+    let target_index = resolve_anchor_index(&others, before_column_id, after_column_id, "column")?;
 
     column::move_to_position(conn, column_id, target_index as i32)
 }

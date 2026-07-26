@@ -487,19 +487,12 @@ impl Bridge {
         let name = require_str(args, "name")?;
         let description = require_str(args, "description")?;
         let private = args.get("private").and_then(Value::as_bool).unwrap_or(false);
-        // create is allowed when structure is on and no write allowlist narrows the
-        // connection (008 §4.5). Allowlists aren't wired yet, so this is just the
-        // structure gate — the tool is only reachable when structure is enabled.
-        let allow_create = self.capabilities.structure;
-        let result = write::ensure_column(
-            &self.conn,
-            &self.deck_id,
-            &name,
-            &description,
-            private,
-            allow_create,
-        )
-        .map_err(|e| e.to_string())?;
+        // create is allowed when structure is on (already enforced by begin_write
+        // above) and no write allowlist narrows the connection. Allowlists aren't
+        // wired yet, so creation is unconditionally allowed here; when they land,
+        // this becomes `scope.allowed_columns.is_none()` (008 §4.5).
+        let result = write::ensure_column(&self.conn, &self.deck_id, &name, &description, private, true)
+            .map_err(|e| e.to_string())?;
         self.log_write("ensure_column", &result.column.id);
         Ok(json!({
             "column_id": result.column.id,

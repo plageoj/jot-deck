@@ -145,6 +145,55 @@ pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i3
     })
 }
 
+/// name に加えて description / private を指定して Column を末尾に作成する。
+///
+/// MCP の `ensure_column` が属性込みの作成を **1 回の INSERT** で行うために使う
+/// （name だけの `create` → `update` という 2 書き込み・非アトミックを避ける）。
+/// 空 name は自動採番にフォールバックする。
+pub fn create_with(
+    conn: &Connection,
+    deck_id: &str,
+    name: &str,
+    description: Option<&str>,
+    private: bool,
+) -> Result<Column> {
+    let id = Ulid::generate().to_string();
+    let now = Utc::now();
+    let position = get_next_position(conn, deck_id)?;
+    let name = if name.is_empty() {
+        generate_column_name(conn, deck_id)?
+    } else {
+        name.to_string()
+    };
+
+    conn.execute(
+        "INSERT INTO columns (id, deck_id, name, position, description, private, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            &id,
+            deck_id,
+            &name,
+            position,
+            description,
+            private as i32,
+            now.to_rfc3339(),
+            now.to_rfc3339(),
+        ],
+    )?;
+
+    Ok(Column {
+        id,
+        deck_id: deck_id.to_string(),
+        name,
+        position,
+        description: description.map(|s| s.to_string()),
+        private,
+        created_at: now,
+        updated_at: now,
+        deleted_at: None,
+    })
+}
+
 /// 全カラム SELECT の共通カラム順。row_to_column はこの順を前提にする。
 const COLUMN_FIELDS: &str =
     "id, deck_id, name, position, description, private, created_at, updated_at, deleted_at";
