@@ -16,10 +16,11 @@
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 
 use crate::error::{JotDeckError, Result};
-use crate::models::{Card, NewCard};
-use crate::repository::{card, query};
+use crate::models::{Card, Column, NewCard, NewColumn};
+use crate::repository::{card, column, query};
 
 /// 指定カラムが接続 Deck の可視・書き込み可能範囲にあることを検証する。
 /// 範囲外（別 Deck / private / 削除済み / 不在）なら Unauthorized。
@@ -209,6 +210,144 @@ pub fn move_card(
     }
     // このとき対象は移動先カラムに属し、全 len+1 件中の dense index を target_index にする。
     card::move_to_position(conn, card_id, target_index as i32)
+}
+
+// ---- 構造再編（008 §4.1）: カラムの作成/更新/並べ替え ----
+
+/// `ensure_column` の結果。`created` が true なら新規作成、false なら既存取得（get）。
+#[derive(Debug, Clone, Serialize)]
+pub struct EnsureColumnResult {
+    pub column: Column,
+    pub created: bool,
+}
+
+/// 接続 Deck の可視範囲（非削除・非 private）で name に一致する最初のカラム id を返す。
+/// private / スコープ外の同名はヒットさせない（漏洩防止）。列は ULID キーなので見かけ上の
+/// 重複名は許容し、position 昇順の先頭を返す。
+fn find_visible_column_by_name(conn: &Connection, deck_id: &str, name: &str) -> Result<Option<String>> {
+    let id: Option<String> = conn
+        .query_row(
+            "SELECT id FROM columns
+             WHERE deck_id = ?1 AND name = ?2 AND deleted_at IS NULL AND private = 0
+             ORDER BY position ASC LIMIT 1",
+            params![deck_id, name],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(id)
+}
+
+/// 名前キーで get-or-create するべき等なカラム作成（`ensure_column`）。
+///
+/// 接続 Deck の可視範囲に同名カラムがあればその ULID を返す（get）。無ければ末尾に作成
+/// する（create）。ただし create は `allow_create` が true のときだけ許可し、false なら
+/// `InvalidOperation`（structure 無効 / write allowlist 明示）で失敗する ―― 既存カラムの
+/// 取得は allow_create に依らず妨げない（008 §4.5）。
+pub fn ensure_column(
+    conn: &Connection,
+    deck_id: &str,
+    name: &str,
+    description: &str,
+    private: bool,
+    allow_create: bool,
+) -> Result<EnsureColumnResult> {
+    if name.trim().is_empty() {
+        return Err(JotDeckError::InvalidOperation(
+            "Column name must not be empty".to_string(),
+        ));
+    }
+
+    if let Some(existing) = find_visible_column_by_name(conn, deck_id, name)? {
+        return Ok(EnsureColumnResult {
+            column: column::get_by_id(conn, &existing)?,
+            created: false,
+        });
+    }
+
+    if !allow_create {
+        return Err(JotDeckError::InvalidOperation(format!(
+            "No column named '{}' is visible, and creating one is not allowed for this connection (structure disabled or a write allowlist is set)",
+            name
+        )));
+    }
+
+    let created = column::create(
+        conn,
+        NewColumn {
+            deck_id: deck_id.to_string(),
+            name: name.to_string(),
+        },
+    )?;
+    // description / private は作成後に反映する（NewColumn は name しか受けないため）。
+    let desc_arg = if description.is_empty() {
+        None
+    } else {
+        Some(description)
+    };
+    let column = column::update(conn, &created.id, None, Some(desc_arg), Some(private))?;
+    Ok(EnsureColumnResult {
+        column,
+        created: true,
+    })
+}
+
+/// カラムの name / description / private を更新する（`update_column`）。各引数は None で
+/// 据え置き、`description` は `Some(None)` で NULL クリア。対象は接続 Deck の可視・書き込み
+/// 可能カラムに限る（private / 別 Deck / 削除済みは Unauthorized）。
+pub fn update_column(
+    conn: &Connection,
+    deck_id: &str,
+    column_id: &str,
+    name: Option<&str>,
+    description: Option<Option<&str>>,
+    private: Option<bool>,
+) -> Result<Column> {
+    ensure_column_writable(conn, deck_id, column_id)?;
+    column::update(conn, column_id, name, description, private)
+}
+
+/// カラムを並べ替える（`move_column`）。順序は生の position ではなくアンカー
+/// （`before_column_id` / `after_column_id`, どちらか一方）で表明し、position は本体が
+/// 採番する。どちらも省略すると末尾。対象・アンカーは接続 Deck の可視カラムに限る。
+pub fn move_column(
+    conn: &Connection,
+    deck_id: &str,
+    column_id: &str,
+    before_column_id: Option<&str>,
+    after_column_id: Option<&str>,
+) -> Result<Column> {
+    if before_column_id.is_some() && after_column_id.is_some() {
+        return Err(JotDeckError::InvalidOperation(
+            "Specify only one of before_column_id / after_column_id".to_string(),
+        ));
+    }
+
+    ensure_column_writable(conn, deck_id, column_id)?;
+
+    // Deck の生存カラムを position 順に、移動対象を除いて列挙する（column リポジトリの
+    // 列挙を再利用）。move_to_position は同じ全生存集合上で index を解釈するため、その集合で
+    // アンカーの index を解決すれば整合する。
+    let others: Vec<String> = column::get_by_deck_id(conn, deck_id)?
+        .into_iter()
+        .map(|c| c.id)
+        .filter(|id| id != column_id)
+        .collect();
+
+    let anchor_index = |anchor: &str| -> Result<usize> {
+        // アンカーも可視（非 private）でなければならない。
+        ensure_column_writable(conn, deck_id, anchor)?;
+        others.iter().position(|id| id == anchor).ok_or_else(|| {
+            JotDeckError::InvalidOperation(format!("Anchor column not found in deck: {}", anchor))
+        })
+    };
+
+    let target_index = match (before_column_id, after_column_id) {
+        (Some(before), None) => anchor_index(before)?,
+        (None, Some(after)) => anchor_index(after)? + 1,
+        _ => others.len(),
+    };
+
+    column::move_to_position(conn, column_id, target_index as i32)
 }
 
 #[cfg(test)]
@@ -512,6 +651,150 @@ mod tests {
         let b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None).unwrap();
         let c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None).unwrap();
         let err = move_card(&f.conn, &f.deck_id, &a.id, None, Some(&b.id), Some(&c.id)).unwrap_err();
+        assert!(matches!(err, JotDeckError::InvalidOperation(_)));
+    }
+
+    // ---- 構造再編 ----
+
+    fn column_names(f: &Fixture) -> Vec<String> {
+        column::get_by_deck_id(&f.conn, &f.deck_id)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.name)
+            .collect()
+    }
+
+    #[test]
+    fn ensure_column_creates_when_allowed() {
+        let f = setup();
+        let r = ensure_column(&f.conn, &f.deck_id, "Research", "papers to read", false, true).unwrap();
+        assert!(r.created);
+        assert_eq!(r.column.name, "Research");
+        assert_eq!(r.column.description.as_deref(), Some("papers to read"));
+        assert!(!r.column.private);
+    }
+
+    #[test]
+    fn ensure_column_is_idempotent_by_name() {
+        let f = setup();
+        let a = ensure_column(&f.conn, &f.deck_id, "ToDo", "tasks", false, true).unwrap();
+        assert!(a.created);
+        // 同名の再呼び出しは新規作成せず既存を返す（get）。
+        let b = ensure_column(&f.conn, &f.deck_id, "ToDo", "ignored", false, true).unwrap();
+        assert!(!b.created);
+        assert_eq!(a.column.id, b.column.id);
+        assert_eq!(b.column.description.as_deref(), Some("tasks")); // 変更されない
+    }
+
+    #[test]
+    fn ensure_column_get_works_even_when_create_disallowed() {
+        let f = setup();
+        ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, true).unwrap();
+        // create 不可でも既存の取得は妨げない。
+        let got = ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, false).unwrap();
+        assert!(!got.created);
+        assert_eq!(got.column.name, "Notes");
+    }
+
+    #[test]
+    fn ensure_column_create_denied_errors() {
+        let f = setup();
+        let err = ensure_column(&f.conn, &f.deck_id, "Brand New", "x", false, false).unwrap_err();
+        assert!(matches!(err, JotDeckError::InvalidOperation(_)));
+    }
+
+    #[test]
+    fn ensure_column_does_not_match_private_same_name() {
+        let f = setup();
+        // private カラムを "Hidden" にリネームしておく。
+        column::update(&f.conn, &f.private_col, Some("Hidden"), None, None).unwrap();
+        // 同名 ensure は private をヒットさせず、新規作成する。
+        let r = ensure_column(&f.conn, &f.deck_id, "Hidden", "d", false, true).unwrap();
+        assert!(r.created);
+        assert_ne!(r.column.id, f.private_col);
+    }
+
+    #[test]
+    fn ensure_column_rejects_empty_name() {
+        let f = setup();
+        let err = ensure_column(&f.conn, &f.deck_id, "   ", "d", false, true).unwrap_err();
+        assert!(matches!(err, JotDeckError::InvalidOperation(_)));
+    }
+
+    #[test]
+    fn ensure_column_can_create_private() {
+        let f = setup();
+        let r = ensure_column(&f.conn, &f.deck_id, "Secrets", "sensitive", true, true).unwrap();
+        assert!(r.created);
+        assert!(r.column.private);
+    }
+
+    #[test]
+    fn update_column_changes_fields() {
+        let f = setup();
+        let updated = update_column(
+            &f.conn,
+            &f.deck_id,
+            &f.public_col,
+            Some("Renamed"),
+            Some(Some("new axis")),
+            None,
+        )
+        .unwrap();
+        assert_eq!(updated.name, "Renamed");
+        assert_eq!(updated.description.as_deref(), Some("new axis"));
+    }
+
+    #[test]
+    fn update_column_on_private_is_unauthorized() {
+        let f = setup();
+        let err = update_column(&f.conn, &f.deck_id, &f.private_col, Some("x"), None, None).unwrap_err();
+        assert!(matches!(err, JotDeckError::Unauthorized(_)));
+    }
+
+    #[test]
+    fn move_column_reorders_by_anchor() {
+        let f = setup();
+        // 可視カラム: public_col(A) then create B, C.
+        column::update(&f.conn, &f.public_col, Some("A"), None, None).unwrap();
+        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, true).unwrap().column;
+        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, true).unwrap().column;
+
+        // A を C の後ろへ。private_col は非表示だが position は全生存集合で一貫。
+        move_column(&f.conn, &f.deck_id, &f.public_col, None, Some(&c.id)).unwrap();
+        let names = column_names(&f);
+        // A が C の直後に来る（Secret[private] の相対位置は保存）。
+        let pos_a = names.iter().position(|n| n == "A").unwrap();
+        let pos_c = names.iter().position(|n| n == "C").unwrap();
+        assert_eq!(pos_a, pos_c + 1);
+        let _ = b;
+    }
+
+    #[test]
+    fn move_column_to_tail_without_anchor() {
+        let f = setup();
+        column::update(&f.conn, &f.public_col, Some("A"), None, None).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "B", "", false, true).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "C", "", false, true).unwrap();
+
+        move_column(&f.conn, &f.deck_id, &f.public_col, None, None).unwrap();
+        let names = column_names(&f);
+        assert_eq!(names.last().unwrap(), "A");
+    }
+
+    #[test]
+    fn move_column_on_private_is_unauthorized() {
+        let f = setup();
+        let err = move_column(&f.conn, &f.deck_id, &f.private_col, None, None).unwrap_err();
+        assert!(matches!(err, JotDeckError::Unauthorized(_)));
+    }
+
+    #[test]
+    fn move_column_rejects_both_anchors() {
+        let f = setup();
+        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, true).unwrap().column;
+        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, true).unwrap().column;
+        let err = move_column(&f.conn, &f.deck_id, &f.public_col, Some(&b.id), Some(&c.id)).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 }

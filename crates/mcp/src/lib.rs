@@ -73,10 +73,12 @@ rather than growing one. `patch_card` edits a card's content and requires \
 `expected_updated_at` (the `updated_at` you last read) so concurrent edits don't clobber \
 each other; on a conflict, re-read and retry. `move_card` reorders or moves a card by naming \
 an anchor card (before/after), not a raw position. `delete_card` soft-deletes (recoverable). \
-`#tag` markers in content are auto-extracted; column and card ids are ULIDs assigned by Jot \
-Deck — discover them via the tools, never guess them. Private columns are never visible. \
-Some connections disable write or specific capabilities; `describe_deck` reports what's \
-available.";
+To organize columns, `ensure_column` gets-or-creates a column by name (idempotent — prefer it \
+over guessing an id), `update_column` renames or re-describes one, and `move_column` reorders \
+by an anchor column. `#tag` markers in content are auto-extracted; column and card ids are \
+ULIDs assigned by Jot Deck — discover them via the tools, never guess them. Private columns \
+are never visible. Some connections disable write or specific capabilities; `describe_deck` \
+reports what's available.";
 
 /// Default per-connection write cap: writes/minute (008 §5 rate limit). Overridable
 /// via `JOT_DECK_MAX_WRITES_PER_MIN`.
@@ -84,12 +86,15 @@ const DEFAULT_MAX_WRITES_PER_MIN: usize = 120;
 
 /// Which write verbs a connection may invoke (008 §5). All default ON; a
 /// connection opts out via the `JOT_DECK_DENY` env list (e.g. `append,delete`).
-/// `move_card` is gated under `edit` (it mutates an existing card's placement).
+/// `move_card` is gated under `edit` (it mutates an existing card's placement);
+/// the column tools (`ensure_column`/`update_column`/`move_column`) are gated
+/// under `structure`.
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub append: bool,
     pub edit: bool,
     pub delete: bool,
+    pub structure: bool,
 }
 
 impl Default for Capabilities {
@@ -98,6 +103,7 @@ impl Default for Capabilities {
             append: true,
             edit: true,
             delete: true,
+            structure: true,
         }
     }
 }
@@ -117,8 +123,9 @@ impl Capabilities {
                 "append" => c.append = false,
                 "edit" => c.edit = false,
                 "delete" => c.delete = false,
+                "structure" => c.structure = false,
                 other => eprintln!(
-                    "[jot-deck-mcp] JOT_DECK_DENY: ignoring unknown capability '{}' (expected append/edit/delete)",
+                    "[jot-deck-mcp] JOT_DECK_DENY: ignoring unknown capability '{}' (expected append/edit/delete/structure)",
                     other
                 ),
             }
@@ -299,6 +306,9 @@ impl Bridge {
             "patch_card" => self.tool_patch_card(&args),
             "move_card" => self.tool_move_card(&args),
             "delete_card" => self.tool_delete_card(&args),
+            "ensure_column" => self.tool_ensure_column(&args),
+            "update_column" => self.tool_update_column(&args),
+            "move_column" => self.tool_move_column(&args),
             other => {
                 return error_response(id, -32602, &format!("Unknown tool: {}", other));
             }
@@ -359,6 +369,7 @@ impl Bridge {
             "append": self.capabilities.append,
             "edit": self.capabilities.edit,
             "delete": self.capabilities.delete,
+            "structure": self.capabilities.structure,
         });
         if let Some(obj) = v.get_mut("constraints").and_then(Value::as_object_mut) {
             obj.insert(
@@ -387,11 +398,12 @@ impl Bridge {
     }
 
     /// Log a write to stderr for connection attribution (008 §5). stdout carries
-    /// JSON-RPC, so audit lines go to stderr where MCP hosts capture them.
-    fn log_write(&self, tool: &str, card_id: &str) {
+    /// JSON-RPC, so audit lines go to stderr where MCP hosts capture them. `target`
+    /// is the affected card or column ULID.
+    fn log_write(&self, tool: &str, target: &str) {
         eprintln!(
-            "[jot-deck-mcp] conn={} deck={} {} card={}",
-            self.connection_id, self.deck_id, tool, card_id
+            "[jot-deck-mcp] conn={} deck={} {} target={}",
+            self.connection_id, self.deck_id, tool, target
         );
     }
 
@@ -466,6 +478,80 @@ impl Bridge {
         self.log_write("delete_card", &card.id);
         let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
         Ok(json!({ "card_id": card.id, "deleted_at": deleted_at }))
+    }
+
+    // ---- structure tools (008 §4.1) ----
+
+    fn tool_ensure_column(&self, args: &Value) -> Result<Value, String> {
+        self.begin_write(self.capabilities.structure, "structure")?;
+        let name = require_str(args, "name")?;
+        let description = require_str(args, "description")?;
+        let private = args.get("private").and_then(Value::as_bool).unwrap_or(false);
+        // create is allowed when structure is on and no write allowlist narrows the
+        // connection (008 §4.5). Allowlists aren't wired yet, so this is just the
+        // structure gate — the tool is only reachable when structure is enabled.
+        let allow_create = self.capabilities.structure;
+        let result = write::ensure_column(
+            &self.conn,
+            &self.deck_id,
+            &name,
+            &description,
+            private,
+            allow_create,
+        )
+        .map_err(|e| e.to_string())?;
+        self.log_write("ensure_column", &result.column.id);
+        Ok(json!({
+            "column_id": result.column.id,
+            "name": result.column.name,
+            "position": result.column.position,
+            "created": result.created,
+        }))
+    }
+
+    fn tool_update_column(&self, args: &Value) -> Result<Value, String> {
+        self.begin_write(self.capabilities.structure, "structure")?;
+        let column_id = require_str(args, "column_id")?;
+        let name = opt_str(args, "name");
+        // Distinguish absent (leave) from present-empty (clear) for description.
+        let description = args
+            .get("description")
+            .and_then(Value::as_str)
+            .map(|s| if s.is_empty() { None } else { Some(s) });
+        let private = args.get("private").and_then(Value::as_bool);
+        let column = write::update_column(
+            &self.conn,
+            &self.deck_id,
+            &column_id,
+            name.as_deref(),
+            description,
+            private,
+        )
+        .map_err(|e| e.to_string())?;
+        self.log_write("update_column", &column.id);
+        Ok(json!({
+            "column_id": column.id,
+            "name": column.name,
+            "description": column.description,
+            "private": column.private,
+        }))
+    }
+
+    fn tool_move_column(&self, args: &Value) -> Result<Value, String> {
+        self.begin_write(self.capabilities.structure, "structure")?;
+        let column_id = require_str(args, "column_id")?;
+        let before_column_id = opt_str(args, "before_column_id");
+        let after_column_id = opt_str(args, "after_column_id");
+        let column = write::move_column(
+            &self.conn,
+            &self.deck_id,
+            &column_id,
+            before_column_id.as_deref(),
+            after_column_id.as_deref(),
+        )
+        .map_err(|e| e.to_string())?;
+        self.log_write("move_column", &column.id);
+        Ok(json!({ "column_id": column.id, "position": column.position }))
     }
 
     // ---- resources ----
@@ -559,6 +645,11 @@ impl Bridge {
         }
         if self.capabilities.delete {
             defs.push(delete_card_def());
+        }
+        if self.capabilities.structure {
+            defs.push(ensure_column_def());
+            defs.push(update_column_def());
+            defs.push(move_column_def());
         }
         defs
     }
@@ -681,6 +772,58 @@ fn delete_card_def() -> Value {
                 "card_id": { "type": "string", "description": "Card ULID to delete." }
             },
             "required": ["card_id"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn ensure_column_def() -> Value {
+    json!({
+        "name": "ensure_column",
+        "description": "Get-or-create a column by name in this deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. Give a one-line `description` of what belongs in the column — it sharpens where cards get routed. Prefer this over guessing a column id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Column name (the get-or-create key)." },
+                "description": { "type": "string", "description": "One-line description of what belongs in this column (classification axis)." },
+                "private": { "type": "boolean", "description": "Create it hidden from all connections (default false)." }
+            },
+            "required": ["name", "description"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn update_column_def() -> Value {
+    json!({
+        "name": "update_column",
+        "description": "Update a column's name, description, and/or private flag (only the fields you pass). Use to rename a column or rewrite what it's for during a re-org. An empty description clears it.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "column_id": { "type": "string", "description": "Column ULID to update." },
+                "name": { "type": "string", "description": "New name." },
+                "description": { "type": "string", "description": "New one-line description; empty string clears it." },
+                "private": { "type": "boolean", "description": "Hide the column from all connections." }
+            },
+            "required": ["column_id"],
+            "additionalProperties": false,
+        },
+    })
+}
+
+fn move_column_def() -> Value {
+    json!({
+        "name": "move_column",
+        "description": "Reorder a column within the deck. Express intent with an anchor — before_column_id or after_column_id (at most one), not a raw position; omit both to move it to the end.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "column_id": { "type": "string", "description": "Column ULID to move." },
+                "before_column_id": { "type": "string", "description": "Place it immediately before this column." },
+                "after_column_id": { "type": "string", "description": "Place it immediately after this column." }
+            },
+            "required": ["column_id"],
             "additionalProperties": false,
         },
     })
@@ -1127,6 +1270,89 @@ mod tests {
         let caps = &structured(&resp)["capabilities"];
         assert_eq!(caps["append"], true);
         assert_eq!(caps["delete"], false);
+        assert_eq!(caps["structure"], true);
         assert!(structured(&resp)["constraints"]["max_writes_per_min"].is_number());
+    }
+
+    // ---- structure tools ----
+
+    #[test]
+    fn tools_list_exposes_structure_surface_by_default() {
+        let (bridge, _, _) = bridge_with_data();
+        let names = tool_names(&bridge);
+        for expected in ["ensure_column", "update_column", "move_column"] {
+            assert!(names.contains(&expected.to_string()), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn ensure_column_creates_then_gets() {
+        let (bridge, _, _) = bridge_with_data();
+        let created = call(
+            &bridge,
+            1,
+            "ensure_column",
+            json!({ "name": "Tasks", "description": "things to do" }),
+        );
+        assert_eq!(created["result"]["isError"], false);
+        assert_eq!(structured(&created)["created"], true);
+        let col_id = structured(&created)["column_id"].as_str().unwrap().to_string();
+
+        // Same name again → get (created:false), same id.
+        let got = call(
+            &bridge,
+            2,
+            "ensure_column",
+            json!({ "name": "Tasks", "description": "ignored" }),
+        );
+        assert_eq!(structured(&got)["created"], false);
+        assert_eq!(structured(&got)["column_id"], col_id);
+    }
+
+    #[test]
+    fn update_column_changes_name_and_description() {
+        let (bridge, col_id, _) = bridge_with_data();
+        let resp = call(
+            &bridge,
+            1,
+            "update_column",
+            json!({ "column_id": col_id, "name": "Renamed", "description": "new axis" }),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(structured(&resp)["name"], "Renamed");
+        assert_eq!(structured(&resp)["description"], "new axis");
+    }
+
+    #[test]
+    fn move_column_returns_position() {
+        let (bridge, col_id, _) = bridge_with_data();
+        // Create a second column, then move the first after it.
+        let b = call(&bridge, 1, "ensure_column", json!({ "name": "B", "description": "b" }));
+        let b_id = structured(&b)["column_id"].as_str().unwrap().to_string();
+        let resp = call(
+            &bridge,
+            2,
+            "move_column",
+            json!({ "column_id": col_id, "after_column_id": b_id }),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+        assert!(structured(&resp)["position"].is_number());
+    }
+
+    #[test]
+    fn denied_structure_hides_column_tools_and_errors() {
+        let mut config = BridgeConfig::default();
+        config.capabilities.structure = false;
+        let (bridge, _col) = bridge_with_config(config);
+
+        let names = tool_names(&bridge);
+        for hidden in ["ensure_column", "update_column", "move_column"] {
+            assert!(!names.contains(&hidden.to_string()), "{hidden} should be hidden");
+        }
+        // Card writes remain available.
+        assert!(names.contains(&"append_card".to_string()));
+        // A direct structure call still fails cleanly.
+        let resp = call(&bridge, 1, "ensure_column", json!({ "name": "X", "description": "y" }));
+        assert_eq!(resp["result"]["isError"], true);
     }
 }
