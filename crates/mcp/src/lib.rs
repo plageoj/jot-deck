@@ -790,14 +790,14 @@ fn ensure_column_def() -> Value {
 fn update_column_def() -> Value {
     json!({
         "name": "update_column",
-        "description": "Update a column's name, description, and/or private flag (only the fields you pass). Use to rename a column or rewrite what it's for during a re-org. An empty description clears it.",
+        "description": "Update a column's name, description, and/or private flag (only the fields you pass). Use to rename a column or rewrite what it's for during a re-org. An empty description clears it. Setting private:true is a one-way door — a private column is invisible to this connection, so you cannot later update, move, or re-find it; only the user can un-private it in the app.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "column_id": { "type": "string", "description": "Column ULID to update." },
                 "name": { "type": "string", "description": "New name." },
                 "description": { "type": "string", "description": "New one-line description; empty string clears it." },
-                "private": { "type": "boolean", "description": "Hide the column from all connections." }
+                "private": { "type": "boolean", "description": "Hide the column from all connections. Irreversible from this connection — you won't be able to touch the column afterward." }
             },
             "required": ["column_id"],
             "additionalProperties": false,

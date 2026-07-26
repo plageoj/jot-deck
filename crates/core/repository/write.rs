@@ -239,6 +239,18 @@ fn find_visible_column_by_name(
         .find(|c| !c.private && c.name == name))
 }
 
+/// カラム名を正規化（前後空白を除去）して返す。空（空白のみ含む）は拒否する。
+/// `ensure_column` の lookup/作成キーと `update_column` の改名でこの規則を共有する。
+fn normalize_column_name(name: &str) -> Result<&str> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(JotDeckError::InvalidOperation(
+            "Column name must not be empty".to_string(),
+        ));
+    }
+    Ok(trimmed)
+}
+
 /// 名前キーで get-or-create するべき等なカラム作成（`ensure_column`）。
 ///
 /// 接続 Deck の可視範囲に同名カラムがあればその ULID を返す（get）。無ければ末尾に作成
@@ -253,11 +265,8 @@ pub fn ensure_column(
     private: bool,
     allow_create: bool,
 ) -> Result<EnsureColumnResult> {
-    if name.trim().is_empty() {
-        return Err(JotDeckError::InvalidOperation(
-            "Column name must not be empty".to_string(),
-        ));
-    }
+    // 正規化した名前で lookup も作成も行う（raw と trimmed が食い違わないように）。
+    let name = normalize_column_name(name)?;
 
     if let Some(existing) = find_visible_column_by_name(conn, deck_id, name)? {
         return Ok(EnsureColumnResult {
@@ -297,6 +306,8 @@ pub fn update_column(
     private: Option<bool>,
 ) -> Result<Column> {
     ensure_column_writable(conn, deck_id, column_id)?;
+    // 改名する場合は ensure_column と同じ正規化・空名拒否を適用する。
+    let name = name.map(normalize_column_name).transpose()?;
     column::update(conn, column_id, name, description, private)
 }
 
@@ -704,6 +715,26 @@ mod tests {
     fn ensure_column_rejects_empty_name() {
         let f = setup();
         let err = ensure_column(&f.conn, &f.deck_id, "   ", "d", false, true).unwrap_err();
+        assert!(matches!(err, JotDeckError::InvalidOperation(_)));
+    }
+
+    #[test]
+    fn ensure_column_normalizes_name_for_lookup_and_create() {
+        let f = setup();
+        // Create with surrounding whitespace → stored trimmed.
+        let a = ensure_column(&f.conn, &f.deck_id, "  Ideas  ", "d", false, true).unwrap();
+        assert!(a.created);
+        assert_eq!(a.column.name, "Ideas");
+        // A differently-padded spelling resolves to the same column (get, not create).
+        let b = ensure_column(&f.conn, &f.deck_id, "Ideas", "d", false, true).unwrap();
+        assert!(!b.created);
+        assert_eq!(a.column.id, b.column.id);
+    }
+
+    #[test]
+    fn update_column_rejects_whitespace_name() {
+        let f = setup();
+        let err = update_column(&f.conn, &f.deck_id, &f.public_col, Some("   "), None, None).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
