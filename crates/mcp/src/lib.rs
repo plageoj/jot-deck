@@ -109,17 +109,19 @@ impl Default for Capabilities {
     }
 }
 
+/// Split a comma-separated env value into trimmed, non-empty tokens. Shared by
+/// the deny-list and write-allowlist parsers.
+fn split_env_list(raw: &str) -> impl Iterator<Item = &str> {
+    raw.split(',').map(str::trim).filter(|s| !s.is_empty())
+}
+
 impl Capabilities {
     /// Parse a deny list like `"append, delete"` into capabilities (default all
     /// on). Unknown tokens are ignored but warned on stderr — a typo in a
     /// lockdown config must not silently leave a verb enabled.
     pub fn from_deny_list(deny: &str) -> Self {
         let mut c = Self::default();
-        for tok in deny
-            .split(',')
-            .map(|s| s.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty())
-        {
+        for tok in split_env_list(deny).map(|s| s.to_ascii_lowercase()) {
             match tok.as_str() {
                 "append" => c.append = false,
                 "edit" => c.edit = false,
@@ -173,12 +175,7 @@ impl RateLimiter {
 /// Parse a comma-separated `JOT_DECK_WRITE_COLUMNS` list of column ULIDs into a
 /// write scope. Empty / all-blank → unrestricted (writes to any visible column).
 fn parse_write_scope(raw: &str) -> WriteScope {
-    let cols: Vec<String> = raw
-        .split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
+    let cols: Vec<String> = split_env_list(raw).map(str::to_string).collect();
     if cols.is_empty() {
         WriteScope::unrestricted()
     } else {
@@ -521,18 +518,15 @@ impl Bridge {
         let name = require_str(args, "name")?;
         let description = require_str(args, "description")?;
         let private = args.get("private").and_then(Value::as_bool).unwrap_or(false);
-        // create is allowed when structure is on (already enforced by begin_write
-        // above) AND no write allowlist narrows the connection — an allowlist is a
-        // fixed set, exclusive with spawning new columns (008 §4.5). Existing
-        // in-scope columns are still returned (get) regardless.
-        let allow_create = self.write_scope.is_unrestricted();
+        // structure is already enforced by begin_write above; whether a *new*
+        // column may be created is derived inside ensure_column from the write
+        // scope (an allowlist forbids creation → 008 §4.5).
         let result = write::ensure_column(
             &self.conn,
             &self.deck_id,
             &name,
             &description,
             private,
-            allow_create,
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;

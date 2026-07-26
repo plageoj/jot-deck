@@ -74,7 +74,8 @@ impl WriteScope {
 }
 
 /// 指定カラムが接続 Deck の可視範囲（非 private・非削除・当 Deck）にあることを検証する。
-/// 範囲外なら Unauthorized。write allowlist は見ない（アンカーの可視性等に使う）。
+/// 範囲外なら Unauthorized。write allowlist は見ない ―― `ensure_column_writable` が
+/// これに allowlist チェックを重ねる、可視性ステージ（NotFound ではなく権限拒否）。
 fn ensure_column_visible(conn: &Connection, deck_id: &str, column_id: &str) -> Result<()> {
     if query::is_column_visible(conn, deck_id, column_id)? {
         Ok(())
@@ -354,17 +355,17 @@ fn normalize_column_name(name: &str) -> Result<&str> {
 /// 名前キーで get-or-create するべき等なカラム作成（`ensure_column`）。
 ///
 /// 書き込みスコープ内に同名カラムがあればそれを返す（get）。無ければ末尾に作成する
-/// （create）。create は `allow_create` が true のときだけ許可し、false なら
-/// `InvalidOperation`（structure 無効 / write allowlist 明示）で失敗する ―― allowlist は
-/// 固定集合の意図なので新規作成と排他（008 §4.5）。既存カラムの get はスコープ内で解決し、
-/// allow_create に依らず妨げない。
+/// （create）。ただし **write allowlist を明示した接続では create は不可**（固定集合の
+/// 意図と排他 → 008 §4.5）で `InvalidOperation` を返す ―― この可否は `scope` から導出し、
+/// 呼び出し側が別引数で渡さない（両者が食い違い「書けないカラムを作る」不整合を防ぐ）。
+/// 既存カラムの get はスコープ内で解決し、allowlist の有無に依らず妨げない。structure
+/// capability の deny は bridge が tool を封じるため、ここへは到達しない。
 pub fn ensure_column(
     conn: &Connection,
     deck_id: &str,
     name: &str,
     description: &str,
     private: bool,
-    allow_create: bool,
     scope: &WriteScope,
 ) -> Result<EnsureColumnResult> {
     // 正規化した名前で lookup も作成も行う（raw と trimmed が食い違わないように）。
@@ -377,9 +378,10 @@ pub fn ensure_column(
         });
     }
 
-    if !allow_create {
+    // allowlist を持つ接続は固定集合の意図なので新規作成しない。
+    if !scope.is_unrestricted() {
         return Err(JotDeckError::InvalidOperation(format!(
-            "No column named '{}' is visible, and creating one is not allowed for this connection (structure disabled or a write allowlist is set)",
+            "No column named '{}' is writable, and this connection's write allowlist forbids creating one",
             name
         )));
     }
@@ -773,7 +775,7 @@ mod tests {
     #[test]
     fn ensure_column_creates_when_allowed() {
         let f = setup();
-        let r = ensure_column(&f.conn, &f.deck_id, "Research", "papers to read", false, true, &sc()).unwrap();
+        let r = ensure_column(&f.conn, &f.deck_id, "Research", "papers to read", false, &sc()).unwrap();
         assert!(r.created);
         assert_eq!(r.column.name, "Research");
         assert_eq!(r.column.description.as_deref(), Some("papers to read"));
@@ -783,31 +785,27 @@ mod tests {
     #[test]
     fn ensure_column_is_idempotent_by_name() {
         let f = setup();
-        let a = ensure_column(&f.conn, &f.deck_id, "ToDo", "tasks", false, true, &sc()).unwrap();
+        let a = ensure_column(&f.conn, &f.deck_id, "ToDo", "tasks", false, &sc()).unwrap();
         assert!(a.created);
         // 同名の再呼び出しは新規作成せず既存を返す（get）。
-        let b = ensure_column(&f.conn, &f.deck_id, "ToDo", "ignored", false, true, &sc()).unwrap();
+        let b = ensure_column(&f.conn, &f.deck_id, "ToDo", "ignored", false, &sc()).unwrap();
         assert!(!b.created);
         assert_eq!(a.column.id, b.column.id);
         assert_eq!(b.column.description.as_deref(), Some("tasks")); // 変更されない
     }
 
     #[test]
-    fn ensure_column_get_works_even_when_create_disallowed() {
+    fn ensure_column_second_call_is_a_get() {
         let f = setup();
-        ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, true, &sc()).unwrap();
-        // create 不可でも既存の取得は妨げない。
-        let got = ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, false, &sc()).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc()).unwrap();
+        // 二度目は新規作成せず既存を返す（get）。
+        let got = ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc()).unwrap();
         assert!(!got.created);
         assert_eq!(got.column.name, "Notes");
     }
 
-    #[test]
-    fn ensure_column_create_denied_errors() {
-        let f = setup();
-        let err = ensure_column(&f.conn, &f.deck_id, "Brand New", "x", false, false, &sc()).unwrap_err();
-        assert!(matches!(err, JotDeckError::InvalidOperation(_)));
-    }
+    // create の不可（write allowlist 明示時）は allowlist 節のテストで担保する
+    // ―― allow_create は scope から導出するようになり、独立引数では作れない。
 
     #[test]
     fn ensure_column_does_not_match_private_same_name() {
@@ -815,7 +813,7 @@ mod tests {
         // private カラムを "Hidden" にリネームしておく。
         column::update(&f.conn, &f.private_col, Some("Hidden"), None, None).unwrap();
         // 同名 ensure は private をヒットさせず、新規作成する。
-        let r = ensure_column(&f.conn, &f.deck_id, "Hidden", "d", false, true, &sc()).unwrap();
+        let r = ensure_column(&f.conn, &f.deck_id, "Hidden", "d", false, &sc()).unwrap();
         assert!(r.created);
         assert_ne!(r.column.id, f.private_col);
     }
@@ -823,7 +821,7 @@ mod tests {
     #[test]
     fn ensure_column_rejects_empty_name() {
         let f = setup();
-        let err = ensure_column(&f.conn, &f.deck_id, "   ", "d", false, true, &sc()).unwrap_err();
+        let err = ensure_column(&f.conn, &f.deck_id, "   ", "d", false, &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
@@ -831,11 +829,11 @@ mod tests {
     fn ensure_column_normalizes_name_for_lookup_and_create() {
         let f = setup();
         // Create with surrounding whitespace → stored trimmed.
-        let a = ensure_column(&f.conn, &f.deck_id, "  Ideas  ", "d", false, true, &sc()).unwrap();
+        let a = ensure_column(&f.conn, &f.deck_id, "  Ideas  ", "d", false, &sc()).unwrap();
         assert!(a.created);
         assert_eq!(a.column.name, "Ideas");
         // A differently-padded spelling resolves to the same column (get, not create).
-        let b = ensure_column(&f.conn, &f.deck_id, "Ideas", "d", false, true, &sc()).unwrap();
+        let b = ensure_column(&f.conn, &f.deck_id, "Ideas", "d", false, &sc()).unwrap();
         assert!(!b.created);
         assert_eq!(a.column.id, b.column.id);
     }
@@ -850,7 +848,7 @@ mod tests {
     #[test]
     fn ensure_column_can_create_private() {
         let f = setup();
-        let r = ensure_column(&f.conn, &f.deck_id, "Secrets", "sensitive", true, true, &sc()).unwrap();
+        let r = ensure_column(&f.conn, &f.deck_id, "Secrets", "sensitive", true, &sc()).unwrap();
         assert!(r.created);
         assert!(r.column.private);
     }
@@ -884,8 +882,8 @@ mod tests {
         let f = setup();
         // 可視カラム: public_col(A) then create B, C.
         column::update(&f.conn, &f.public_col, Some("A"), None, None).unwrap();
-        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, true, &sc()).unwrap().column;
-        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, true, &sc()).unwrap().column;
+        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc()).unwrap().column;
+        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc()).unwrap().column;
 
         // A を C の後ろへ。private_col は非表示だが position は全生存集合で一貫。
         move_column(&f.conn, &f.deck_id, &f.public_col, None, Some(&c.id), &sc()).unwrap();
@@ -901,8 +899,8 @@ mod tests {
     fn move_column_to_tail_without_anchor() {
         let f = setup();
         column::update(&f.conn, &f.public_col, Some("A"), None, None).unwrap();
-        ensure_column(&f.conn, &f.deck_id, "B", "", false, true, &sc()).unwrap();
-        ensure_column(&f.conn, &f.deck_id, "C", "", false, true, &sc()).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc()).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc()).unwrap();
 
         move_column(&f.conn, &f.deck_id, &f.public_col, None, None, &sc()).unwrap();
         let names = column_names(&f);
@@ -919,8 +917,8 @@ mod tests {
     #[test]
     fn move_column_rejects_both_anchors() {
         let f = setup();
-        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, true, &sc()).unwrap().column;
-        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, true, &sc()).unwrap().column;
+        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc()).unwrap().column;
+        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc()).unwrap().column;
         let err = move_column(&f.conn, &f.deck_id, &f.public_col, Some(&b.id), Some(&c.id), &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
@@ -1004,11 +1002,11 @@ mod tests {
         column::update(&f.conn, &f.public_col, Some("Inbox"), None, None).unwrap();
         let scope = only(&f.public_col);
         // allow_create=false (bridge derives it from the allowlist); in-scope get works.
-        let got = ensure_column(&f.conn, &f.deck_id, "Inbox", "d", false, false, &scope).unwrap();
+        let got = ensure_column(&f.conn, &f.deck_id, "Inbox", "d", false, &scope).unwrap();
         assert!(!got.created);
         assert_eq!(got.column.id, f.public_col);
         // A name not resolvable in scope cannot be created.
-        let err = ensure_column(&f.conn, &f.deck_id, "BrandNew", "d", false, false, &scope).unwrap_err();
+        let err = ensure_column(&f.conn, &f.deck_id, "BrandNew", "d", false, &scope).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
@@ -1018,7 +1016,7 @@ mod tests {
         // A visible column named "Shared" that is NOT in the allowlist.
         make_column(&f, "Shared");
         // get must not resolve to it; with create disabled → InvalidOperation.
-        let err = ensure_column(&f.conn, &f.deck_id, "Shared", "d", false, false, &only(&f.public_col))
+        let err = ensure_column(&f.conn, &f.deck_id, "Shared", "d", false, &only(&f.public_col))
             .unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
