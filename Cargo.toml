@@ -3,5 +3,6 @@ resolver = "2"
 members = [
     "crates/core",
     "crates/mcp",
+    "crates/reporter-host",
     "packages/app/src-tauri",
 ]

@@ -213,20 +213,33 @@ export class DeckData {
    * reactive $effect that decides when to actually reload. */
   externalChangeTick = $state(0);
   private externalUnlisten: (() => void) | null = null;
+  private reporterUnlisten: (() => void) | null = null;
   private externalReloadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Coalesce a burst of change signals into one `externalChangeTick` bump. */
+  private scheduleExternalReload(): void {
+    if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
+    this.externalReloadTimer = setTimeout(() => {
+      this.externalReloadTimer = null;
+      this.externalChangeTick++;
+    }, 250);
+  }
 
   /** Subscribe to external DB changes (Tauri only). No-op in the browser (WASM)
    * backend, which is single-process. */
   async watchExternalChanges(): Promise<void> {
     if (!isTauri()) return;
     const { listen } = await import("@tauri-apps/api/event");
+    // Other processes (CLI / MCP bridge) committing to the shared DB, detected
+    // by the `data_version` poller.
     this.externalUnlisten = await listen("external-db-change", () => {
-      if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
-      // Coalesce bursts of external commits into one tick.
-      this.externalReloadTimer = setTimeout(() => {
-        this.externalReloadTimer = null;
-        this.externalChangeTick++;
-      }, 250);
+      this.scheduleExternalReload();
+    });
+    // A spawned Reporter committing a write (007-reporter-protocol.md). A Reporter
+    // shares the GUI's own connection, so its writes never bump `data_version`
+    // and the host signals them explicitly — funnel into the same reload path.
+    this.reporterUnlisten = await listen("reporter-change", () => {
+      this.scheduleExternalReload();
     });
     // Reconcile once right after subscribing: a commit landing between the
     // initial load and listener registration would otherwise be missed (the
@@ -273,6 +286,8 @@ export class DeckData {
     }
     this.externalUnlisten?.();
     this.externalUnlisten = null;
+    this.reporterUnlisten?.();
+    this.reporterUnlisten = null;
   }
 
   async createDeck(): Promise<Deck | null> {

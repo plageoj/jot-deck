@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Mutex, MutexGuard};
 use tauri::{Emitter, Manager, State};
 
+mod reporter;
+
 /// Tauri event emitted when another process (CLI / MCP bridge) commits to the
 /// shared DB, so the GUI can re-read the visible cards (008-mcp-server.md §3).
 const EXTERNAL_DB_CHANGE_EVENT: &str = "external-db-change";
@@ -391,6 +393,7 @@ pub fn run() {
             app.manage(AppState {
                 conn: Mutex::new(conn),
             });
+            app.manage(reporter::ReporterRegistry::default());
 
             spawn_external_change_watcher(app.handle().clone());
 
@@ -432,6 +435,12 @@ pub fn run() {
             set_settings,
             // MCP commands
             generate_mcp_config,
+            // Reporter host commands (007-reporter-protocol.md)
+            reporter::list_reporters,
+            reporter::add_reporter,
+            reporter::remove_reporter,
+            reporter::start_reporter,
+            reporter::stop_reporter,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

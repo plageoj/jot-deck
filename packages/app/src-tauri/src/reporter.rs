@@ -1,0 +1,319 @@
+//! Reporter host layer (007-reporter-protocol.md §2.2, Phase 1).
+//!
+//! Jot Deck spawns each configured Reporter as a child process and **owns the
+//! stdio pipe** (the inverse of the MCP bridge, which Claude spawns). This module
+//! is the thin Tauri half: it spawns children, pumps the bidirectional stdio, and
+//! turns committed writes into a frontend change event. The transport-agnostic
+//! core — JSON-RPC dispatch onto `jot_deck_core::write`/`query` and the
+//! per-Reporter scope — lives in the `jot-deck-reporter-host` crate.
+//!
+//! Lifecycle is subordinate to the parent (007 §2.2): children spawn with
+//! `kill_on_drop`, and a stop aborts the pump task, which drops the child and
+//! kills the process. The confirmed channel only (Phase 1); the ephemeral stream
+//! (`card.stream.*`) is Phase 2.
+
+use std::collections::HashMap;
+use std::process::Stdio;
+use std::sync::Mutex;
+
+use jot_deck_core::repository::setting;
+use jot_deck_reporter_host::{handle_message, Capabilities, Committed, ReporterScope};
+use serde::{Deserialize, Serialize};
+use tauri::async_runtime::JoinHandle;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command as TokioCommand;
+
+use crate::{get_conn, AppState, CommandError, CommandResult};
+
+/// Tauri event emitted after a Reporter commits a write, so the frontend reloads
+/// the affected column (or the column set for a structural change). Distinct
+/// from `external-db-change`: those come from *other* processes via the
+/// `data_version` poller, but a Reporter shares the GUI's own connection, so its
+/// writes never bump `data_version` and must be signalled explicitly.
+const REPORTER_CHANGE_EVENT: &str = "reporter-change";
+
+/// Persisted registration for one Reporter, stored as a JSON array under the
+/// settings key `reporters:{deck_id}`. `command` is the absolute binary path the
+/// power-user registers (007 §2.2); `deny`/`max_writes_per_min`/`allowed_columns`
+/// carry the per-Reporter auth scope (007 §10).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReporterConfig {
+    /// Stable id (ULID) assigned on add; also the occupancy-lock holder in Phase 2.
+    #[serde(default)]
+    pub reporter_id: String,
+    /// Human-readable label shown in the registration UI.
+    pub name: String,
+    /// Absolute path to the Reporter binary.
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    /// Capabilities to disable (`append`/`edit`/`delete`/`structure`).
+    #[serde(default)]
+    pub deny: Vec<String>,
+    /// Per-Reporter write rate cap; `None` uses the host default.
+    #[serde(default)]
+    pub max_writes_per_min: Option<usize>,
+    /// Optional write allowlist by column ULID; `None` = the whole Deck.
+    #[serde(default)]
+    pub allowed_columns: Option<Vec<String>>,
+}
+
+impl ReporterConfig {
+    /// Build the runtime auth scope this registration authorizes.
+    fn to_scope(&self) -> ReporterScope {
+        let capabilities = Capabilities::from_deny_list(&self.deny.join(","));
+        let max = self
+            .max_writes_per_min
+            .unwrap_or(jot_deck_reporter_host::DEFAULT_MAX_WRITES_PER_MIN);
+        ReporterScope::new(
+            capabilities,
+            max,
+            self.allowed_columns.clone(),
+            self.reporter_id.clone(),
+        )
+    }
+}
+
+/// A running Reporter: just the pump task's abort handle. Aborting it drops the
+/// owned child, and `kill_on_drop` kills the OS process — so the registry needs
+/// nothing more than this to enforce the parent-subordinate lifecycle.
+struct RunningReporter {
+    pump: JoinHandle<()>,
+}
+
+/// Managed state: which Reporters are currently running, keyed by `reporter_id`.
+#[derive(Default)]
+pub struct ReporterRegistry {
+    running: Mutex<HashMap<String, RunningReporter>>,
+}
+
+/// The settings key holding a deck's Reporter registrations.
+fn config_key(deck_id: &str) -> String {
+    format!("reporters:{}", deck_id)
+}
+
+/// Load a deck's Reporter registrations (empty when unset).
+fn load_configs(state: &State<AppState>, deck_id: &str) -> CommandResult<Vec<ReporterConfig>> {
+    let conn = get_conn(state)?;
+    let raw = setting::get(&conn, &config_key(deck_id)).map_err(CommandError::from)?;
+    match raw {
+        None => Ok(Vec::new()),
+        Some(json) => serde_json::from_str(&json).map_err(|e| CommandError {
+            message: format!("Corrupt reporter config for deck {}: {}", deck_id, e),
+        }),
+    }
+}
+
+/// Persist a deck's Reporter registrations.
+fn save_configs(
+    state: &State<AppState>,
+    deck_id: &str,
+    configs: &[ReporterConfig],
+) -> CommandResult<()> {
+    let json = serde_json::to_string(configs).map_err(|e| CommandError {
+        message: format!("Failed to serialize reporter config: {}", e),
+    })?;
+    let conn = get_conn(state)?;
+    setting::set(&conn, &config_key(deck_id), &json).map_err(CommandError::from)
+}
+
+/// List a deck's registered Reporters.
+#[tauri::command]
+pub fn list_reporters(
+    state: State<AppState>,
+    deck_id: String,
+) -> CommandResult<Vec<ReporterConfig>> {
+    load_configs(&state, &deck_id)
+}
+
+/// Register a new Reporter for a deck; assigns and returns a `reporter_id`.
+#[tauri::command]
+pub fn add_reporter(
+    state: State<AppState>,
+    deck_id: String,
+    mut config: ReporterConfig,
+) -> CommandResult<ReporterConfig> {
+    if config.reporter_id.is_empty() {
+        config.reporter_id = ulid::Ulid::generate().to_string();
+    }
+    let mut configs = load_configs(&state, &deck_id)?;
+    configs.push(config.clone());
+    save_configs(&state, &deck_id, &configs)?;
+    Ok(config)
+}
+
+/// Remove a Reporter registration (stopping it first if running).
+#[tauri::command]
+pub fn remove_reporter(
+    app: AppHandle,
+    state: State<AppState>,
+    registry: State<ReporterRegistry>,
+    deck_id: String,
+    reporter_id: String,
+) -> CommandResult<()> {
+    stop_running(&registry, &reporter_id);
+    let _ = app; // reserved for future teardown signalling
+    let mut configs = load_configs(&state, &deck_id)?;
+    configs.retain(|c| c.reporter_id != reporter_id);
+    save_configs(&state, &deck_id, &configs)
+}
+
+/// Abort a running Reporter's pump task (dropping the child → `kill_on_drop`).
+fn stop_running(registry: &State<ReporterRegistry>, reporter_id: &str) {
+    let mut running = registry
+        .running
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(r) = running.remove(reporter_id) {
+        r.pump.abort();
+    }
+}
+
+/// Stop a running Reporter.
+#[tauri::command]
+pub fn stop_reporter(registry: State<ReporterRegistry>, reporter_id: String) -> CommandResult<()> {
+    stop_running(&registry, &reporter_id);
+    Ok(())
+}
+
+/// Spawn a registered Reporter and start pumping its stdio.
+#[tauri::command]
+pub fn start_reporter(
+    app: AppHandle,
+    state: State<AppState>,
+    registry: State<ReporterRegistry>,
+    deck_id: String,
+    reporter_id: String,
+) -> CommandResult<()> {
+    {
+        // Idempotent: a Reporter already running is a no-op success.
+        let running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
+        if running.contains_key(&reporter_id) {
+            return Ok(());
+        }
+    }
+
+    let config = load_configs(&state, &deck_id)?
+        .into_iter()
+        .find(|c| c.reporter_id == reporter_id)
+        .ok_or_else(|| CommandError {
+            message: format!("No reporter registered with id {}", reporter_id),
+        })?;
+
+    let scope = std::sync::Arc::new(config.to_scope());
+    let handle = app.clone();
+    let deck_id_task = deck_id.clone();
+    let reporter_id_task = reporter_id.clone();
+
+    // The child is spawned *inside* the async task (tokio::process needs the
+    // runtime context); a oneshot reports spawn success/failure back so the
+    // command can surface a bad binary path to the user synchronously.
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+
+    let pump = tauri::async_runtime::spawn(async move {
+        let mut cmd = TokioCommand::new(&config.command);
+        cmd.args(&config.args)
+            .envs(&config.env)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Reporter diagnostics flow to the host's stderr for audit.
+            .stderr(Stdio::inherit())
+            // Parent-subordinate lifecycle: dropping the child kills it (007 §2.2).
+            .kill_on_drop(true);
+
+        let mut child = match cmd.spawn() {
+            Ok(c) => {
+                let _ = tx.send(Ok(()));
+                c
+            }
+            Err(e) => {
+                let _ = tx.send(Err(format!("Failed to spawn reporter: {}", e)));
+                return;
+            }
+        };
+
+        let stdout = child.stdout.take().expect("stdout piped");
+        let mut stdin = child.stdin.take().expect("stdin piped");
+        let mut lines = BufReader::new(stdout).lines();
+
+        // Read one JSON message per line; dispatch on the shared GUI connection;
+        // write the response back to the child's stdin.
+        loop {
+            let line = match lines.next_line().await {
+                Ok(Some(l)) => l,
+                // EOF or read error: the child closed its stdout — stop pumping.
+                Ok(None) | Err(_) => break,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+
+            let handle_blocking = handle.clone();
+            let deck_blocking = deck_id_task.clone();
+            let scope_blocking = scope.clone();
+            // The DB call is synchronous rusqlite behind a std Mutex; run it on a
+            // blocking thread so the async worker isn't stalled while it holds the
+            // lock. handle_message never awaits, so holding the lock here is safe.
+            let handled = tauri::async_runtime::spawn_blocking(move || {
+                let state = handle_blocking.state::<AppState>();
+                let conn = state.conn.lock().unwrap_or_else(|e| e.into_inner());
+                handle_message(&conn, &deck_blocking, &scope_blocking, &line)
+            })
+            .await;
+
+            let handled = match handled {
+                Ok(h) => h,
+                Err(_) => break, // blocking task panicked/cancelled
+            };
+
+            if let Some(resp) = handled.response {
+                if stdin.write_all(resp.as_bytes()).await.is_err()
+                    || stdin.write_all(b"\n").await.is_err()
+                    || stdin.flush().await.is_err()
+                {
+                    break; // child closed stdin
+                }
+            }
+
+            if let Some(committed) = handled.committed {
+                emit_committed(&handle, &reporter_id_task, committed);
+            }
+        }
+
+        // Child exited or pipe closed: drop our registry entry so the UI can
+        // reflect that it's no longer running. (A stop_reporter abort removes the
+        // entry itself; this covers self-termination.)
+        if let Some(registry) = handle.try_state::<ReporterRegistry>() {
+            let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
+            running.remove(&reporter_id_task);
+        }
+    });
+
+    // Wait for the spawn attempt to report before storing the handle.
+    match tauri::async_runtime::block_on(rx) {
+        Ok(Ok(())) => {
+            let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
+            running.insert(reporter_id, RunningReporter { pump });
+            Ok(())
+        }
+        Ok(Err(msg)) => Err(CommandError { message: msg }),
+        Err(_) => Err(CommandError {
+            message: "Reporter task ended before reporting spawn status".to_string(),
+        }),
+    }
+}
+
+/// Emit the frontend change event describing what a committed write touched.
+fn emit_committed(app: &AppHandle, reporter_id: &str, committed: Committed) {
+    let column_id = match committed {
+        Committed::Card { column_id } => Some(column_id),
+        Committed::Structure => None,
+    };
+    let _ = app.emit(
+        REPORTER_CHANGE_EVENT,
+        serde_json::json!({ "reporter_id": reporter_id, "column_id": column_id }),
+    );
+}
