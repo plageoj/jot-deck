@@ -10,12 +10,16 @@
 //!   lives at a fixed, identifier-based location (same as the GUI), so this is
 //!   only for dev or non-standard installs; normally it is not set.
 //! - `JOT_DECK_DENY`     — optional comma list of write capabilities to disable
-//!   (`append`, `edit`, `delete`); all are enabled by default (008 §5).
+//!   (`append`, `edit`, `delete`, `structure`); all are enabled by default (008 §5).
 //! - `JOT_DECK_MAX_WRITES_PER_MIN` — optional per-connection write rate cap.
+//! - `JOT_DECK_WRITE_COLUMNS` — optional comma list of column ULIDs the connection
+//!   may write to (write allowlist). Unset = every visible column is writable;
+//!   setting it also disables `ensure_column` creation (008 §4.5). Reads are not
+//!   restricted.
 //!
 //! Speaks JSON-RPC 2.0 over stdio, one JSON message per line (the newline-
-//! delimited stdio transport). Exposes the read surface and the card write
-//! surface (append/patch/move/delete).
+//! delimited stdio transport). Exposes the read surface and the write surface
+//! (cards: append/patch/move/delete; columns: ensure/update/move).
 
 use std::io::{self, BufRead, Write};
 use std::process::ExitCode;

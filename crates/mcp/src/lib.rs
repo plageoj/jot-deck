@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use jot_deck_core::write::WriteScope;
 use jot_deck_core::{query, write, Connection};
 use serde_json::{json, Value};
 
@@ -77,8 +78,8 @@ To organize columns, `ensure_column` gets-or-creates a column by name (idempoten
 over guessing an id), `update_column` renames or re-describes one, and `move_column` reorders \
 by an anchor column. `#tag` markers in content are auto-extracted; column and card ids are \
 ULIDs assigned by Jot Deck — discover them via the tools, never guess them. Private columns \
-are never visible. Some connections disable write or specific capabilities; `describe_deck` \
-reports what's available.";
+are never visible. Some connections disable write capabilities or restrict writes to specific \
+columns (reads stay open); `describe_deck` reports exactly what's available.";
 
 /// Default per-connection write cap: writes/minute (008 §5 rate limit). Overridable
 /// via `JOT_DECK_MAX_WRITES_PER_MIN`.
@@ -108,17 +109,19 @@ impl Default for Capabilities {
     }
 }
 
+/// Split a comma-separated env value into trimmed, non-empty tokens. Shared by
+/// the deny-list and write-allowlist parsers.
+fn split_env_list(raw: &str) -> impl Iterator<Item = &str> {
+    raw.split(',').map(str::trim).filter(|s| !s.is_empty())
+}
+
 impl Capabilities {
     /// Parse a deny list like `"append, delete"` into capabilities (default all
     /// on). Unknown tokens are ignored but warned on stderr — a typo in a
     /// lockdown config must not silently leave a verb enabled.
     pub fn from_deny_list(deny: &str) -> Self {
         let mut c = Self::default();
-        for tok in deny
-            .split(',')
-            .map(|s| s.trim().to_ascii_lowercase())
-            .filter(|s| !s.is_empty())
-        {
+        for tok in split_env_list(deny).map(|s| s.to_ascii_lowercase()) {
             match tok.as_str() {
                 "append" => c.append = false,
                 "edit" => c.edit = false,
@@ -169,10 +172,23 @@ impl RateLimiter {
     }
 }
 
+/// Parse a comma-separated `JOT_DECK_WRITE_COLUMNS` list of column ULIDs into a
+/// write scope. Empty / all-blank → unrestricted (writes to any visible column).
+fn parse_write_scope(raw: &str) -> WriteScope {
+    let cols: Vec<String> = split_env_list(raw).map(str::to_string).collect();
+    if cols.is_empty() {
+        WriteScope::unrestricted()
+    } else {
+        WriteScope::allowlist(cols)
+    }
+}
+
 /// Per-connection policy the bridge applies on top of the core trust boundary.
 pub struct BridgeConfig {
     pub capabilities: Capabilities,
     pub max_writes_per_min: usize,
+    /// Columns this connection may write to (008 §4.5). Unrestricted by default.
+    pub write_scope: WriteScope,
     /// Opaque id identifying this connection in write-attribution logs (008 §5).
     pub connection_id: String,
 }
@@ -182,14 +198,16 @@ impl Default for BridgeConfig {
         Self {
             capabilities: Capabilities::default(),
             max_writes_per_min: DEFAULT_MAX_WRITES_PER_MIN,
+            write_scope: WriteScope::unrestricted(),
             connection_id: ulid::Ulid::generate().to_string(),
         }
     }
 }
 
 impl BridgeConfig {
-    /// Build the connection policy from the bridge's environment:
-    /// `JOT_DECK_DENY` (capability opt-out) and `JOT_DECK_MAX_WRITES_PER_MIN`.
+    /// Build the connection policy from the bridge's environment: `JOT_DECK_DENY`
+    /// (capability opt-out), `JOT_DECK_MAX_WRITES_PER_MIN`, and
+    /// `JOT_DECK_WRITE_COLUMNS` (write allowlist).
     pub fn from_env() -> Self {
         let capabilities = std::env::var("JOT_DECK_DENY")
             .map(|d| Capabilities::from_deny_list(&d))
@@ -205,9 +223,13 @@ impl BridgeConfig {
             }),
             Err(_) => DEFAULT_MAX_WRITES_PER_MIN,
         };
+        let write_scope = std::env::var("JOT_DECK_WRITE_COLUMNS")
+            .map(|raw| parse_write_scope(&raw))
+            .unwrap_or_else(|_| WriteScope::unrestricted());
         Self {
             capabilities,
             max_writes_per_min,
+            write_scope,
             ..Default::default()
         }
     }
@@ -219,6 +241,7 @@ pub struct Bridge {
     deck_id: String,
     capabilities: Capabilities,
     rate_limiter: RateLimiter,
+    write_scope: WriteScope,
     connection_id: String,
 }
 
@@ -229,13 +252,14 @@ impl Bridge {
     }
 
     /// Build a bridge with an explicit connection policy (capabilities, rate
-    /// limit, connection id).
+    /// limit, write scope, connection id).
     pub fn with_config(conn: Connection, deck_id: String, config: BridgeConfig) -> Self {
         Self {
             conn,
             deck_id,
             capabilities: config.capabilities,
             rate_limiter: RateLimiter::new(config.max_writes_per_min),
+            write_scope: config.write_scope,
             connection_id: config.connection_id,
         }
     }
@@ -370,6 +394,9 @@ impl Bridge {
             "edit": self.capabilities.edit,
             "delete": self.capabilities.delete,
             "structure": self.capabilities.structure,
+            // null = every visible column is writable; a list = only these
+            // column ULIDs (write allowlist → 008 §4.5). Reads are never restricted.
+            "write_columns": self.write_scope.allowed_columns(),
         });
         if let Some(obj) = v.get_mut("constraints").and_then(Value::as_object_mut) {
             obj.insert(
@@ -418,6 +445,7 @@ impl Bridge {
             &column_id,
             &content,
             idempotency_key.as_deref(),
+            &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
         self.log_write("append_card", &card.id);
@@ -446,6 +474,7 @@ impl Bridge {
             &card_id,
             &content,
             expected_updated_at,
+            &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
         self.log_write("patch_card", &card.id);
@@ -465,6 +494,7 @@ impl Bridge {
             to_column_id.as_deref(),
             before_card_id.as_deref(),
             after_card_id.as_deref(),
+            &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
         self.log_write("move_card", &card.id);
@@ -474,7 +504,8 @@ impl Bridge {
     fn tool_delete_card(&self, args: &Value) -> Result<Value, String> {
         self.begin_write(self.capabilities.delete, "delete")?;
         let card_id = require_str(args, "card_id")?;
-        let card = write::delete_card(&self.conn, &self.deck_id, &card_id).map_err(|e| e.to_string())?;
+        let card = write::delete_card(&self.conn, &self.deck_id, &card_id, &self.write_scope)
+            .map_err(|e| e.to_string())?;
         self.log_write("delete_card", &card.id);
         let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
         Ok(json!({ "card_id": card.id, "deleted_at": deleted_at }))
@@ -487,12 +518,18 @@ impl Bridge {
         let name = require_str(args, "name")?;
         let description = require_str(args, "description")?;
         let private = args.get("private").and_then(Value::as_bool).unwrap_or(false);
-        // create is allowed when structure is on (already enforced by begin_write
-        // above) and no write allowlist narrows the connection. Allowlists aren't
-        // wired yet, so creation is unconditionally allowed here; when they land,
-        // this becomes `scope.allowed_columns.is_none()` (008 §4.5).
-        let result = write::ensure_column(&self.conn, &self.deck_id, &name, &description, private, true)
-            .map_err(|e| e.to_string())?;
+        // structure is already enforced by begin_write above; whether a *new*
+        // column may be created is derived inside ensure_column from the write
+        // scope (an allowlist forbids creation → 008 §4.5).
+        let result = write::ensure_column(
+            &self.conn,
+            &self.deck_id,
+            &name,
+            &description,
+            private,
+            &self.write_scope,
+        )
+        .map_err(|e| e.to_string())?;
         self.log_write("ensure_column", &result.column.id);
         Ok(json!({
             "column_id": result.column.id,
@@ -519,6 +556,7 @@ impl Bridge {
             name.as_deref(),
             description,
             private,
+            &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
         self.log_write("update_column", &column.id);
@@ -541,6 +579,7 @@ impl Bridge {
             &column_id,
             before_column_id.as_deref(),
             after_column_id.as_deref(),
+            &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
         self.log_write("move_column", &column.id);
@@ -1347,5 +1386,91 @@ mod tests {
         // A direct structure call still fails cleanly.
         let resp = call(&bridge, 1, "ensure_column", json!({ "name": "X", "description": "y" }));
         assert_eq!(resp["result"]["isError"], true);
+    }
+
+    // ---- write allowlist ----
+
+    #[test]
+    fn parse_write_scope_blank_is_unrestricted_list_is_allowlist() {
+        assert!(parse_write_scope("").is_unrestricted());
+        assert!(parse_write_scope("  , ,  ").is_unrestricted());
+        let scope = parse_write_scope("colA, colB");
+        assert_eq!(
+            scope.allowed_columns(),
+            Some(vec!["colA".to_string(), "colB".to_string()])
+        );
+    }
+
+    /// A deck with two visible columns; the connection's write allowlist contains
+    /// only the first. Returns (bridge, allowed_col, other_col).
+    fn bridge_with_allowlist() -> (Bridge, String, String) {
+        let conn = create_in_memory().unwrap();
+        let d = deck::create(
+            &conn,
+            NewDeck {
+                name: "KB".to_string(),
+                sort_order: SortOrder::default(),
+            },
+        )
+        .unwrap();
+        let allowed = column::create(
+            &conn,
+            NewColumn {
+                deck_id: d.id.clone(),
+                name: "Inbox".to_string(),
+            },
+        )
+        .unwrap();
+        let other = column::create(
+            &conn,
+            NewColumn {
+                deck_id: d.id.clone(),
+                name: "Other".to_string(),
+            },
+        )
+        .unwrap();
+        let config = BridgeConfig {
+            write_scope: WriteScope::allowlist([allowed.id.clone()]),
+            ..BridgeConfig::default()
+        };
+        (Bridge::with_config(conn, d.id, config), allowed.id, other.id)
+    }
+
+    #[test]
+    fn allowlist_gates_append_target() {
+        let (bridge, allowed, other) = bridge_with_allowlist();
+        let ok = call(&bridge, 1, "append_card", json!({ "column_id": allowed, "content": "x" }));
+        assert_eq!(ok["result"]["isError"], false);
+        // Visible but not allowlisted → tool error.
+        let no = call(&bridge, 2, "append_card", json!({ "column_id": other, "content": "y" }));
+        assert_eq!(no["result"]["isError"], true);
+    }
+
+    #[test]
+    fn allowlist_disables_ensure_column_create() {
+        let (bridge, _allowed, _other) = bridge_with_allowlist();
+        // Creating a brand-new column is disabled under an allowlist.
+        let resp = call(&bridge, 1, "ensure_column", json!({ "name": "Fresh", "description": "d" }));
+        assert_eq!(resp["result"]["isError"], true);
+        // Getting an in-allowlist column by name still works.
+        let got = call(&bridge, 2, "ensure_column", json!({ "name": "Inbox", "description": "d" }));
+        assert_eq!(got["result"]["isError"], false);
+        assert_eq!(structured(&got)["created"], false);
+    }
+
+    #[test]
+    fn describe_deck_reports_write_columns() {
+        let (bridge, allowed, _other) = bridge_with_allowlist();
+        let resp = call(&bridge, 1, "describe_deck", json!({}));
+        let cols = structured(&resp)["capabilities"]["write_columns"].as_array().unwrap();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0], allowed);
+    }
+
+    #[test]
+    fn describe_deck_write_columns_null_when_unrestricted() {
+        let (bridge, _, _) = bridge_with_data();
+        let resp = call(&bridge, 1, "describe_deck", json!({}));
+        assert!(structured(&resp)["capabilities"]["write_columns"].is_null());
     }
 }
