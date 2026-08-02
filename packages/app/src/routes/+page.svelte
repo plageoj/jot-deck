@@ -226,13 +226,18 @@
       focusedColumnIndex={focus.focusedColumnIndex}
       focusedCardIndex={focus.focusMode === "card" ? focus.focusedCardIndex : -1}
       editingCardId={focus.editingCardId}
+      streamingText={data.streamingText}
       onAddCard={async (columnId) => {
         const card = await data.createCard(columnId);
         if (card) focus.editingCardId = card.id;
       }}
       onSaveCard={(cardId, content) => data.saveCard(cardId, content)}
       onCancelEdit={() => focus.cancelEdit()}
-      onStartEdit={(cardId) => focus.startEdit(cardId)}
+      onStartEdit={(cardId) => {
+        // A card being streamed by a Reporter is read-only (007 §7).
+        if (data.isStreaming(cardId)) return;
+        focus.startEdit(cardId);
+      }}
       onExitEdit={() => focus.exitEdit()}
       filteredCardIds={data.filteredCardIds}
       activeTag={data.activeTagFilter}

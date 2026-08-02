@@ -11,6 +11,10 @@
     editing?: boolean;
     dimmed?: boolean;
     activeTag?: string | null;
+    /** In-progress streamed text from a Reporter (007 §6.2). When non-null the
+     * card is read-only and shows an "AI generating" affordance; the streamed
+     * text is displayed instead of the committed content. */
+    streamingText?: string | null;
     onSave?: (content: string) => void;
     onCancelEdit?: () => void;
     onStartEdit?: () => void;
@@ -26,6 +30,7 @@
     editing = false,
     dimmed = false,
     activeTag = null,
+    streamingText = null,
     onSave,
     onCancelEdit,
     onStartEdit,
@@ -34,6 +39,11 @@
     onTagClick,
     onTagSuggestions,
   }: Props = $props();
+
+  // A card receiving a stream is read-only: never mount the editor, and show
+  // the streamed text instead of the committed content (007 §7 / §8).
+  let streaming = $derived(streamingText !== null && streamingText !== undefined);
+  let displayContent = $derived(streaming ? (streamingText ?? "") : card.content);
 
   function handleSave(content: string) {
     onSave?.(content);
@@ -44,6 +54,11 @@
   }
 
   function handleClick() {
+    // A streaming card is read-only — focus it but don't enter edit mode.
+    if (streaming) {
+      onFocusCard?.();
+      return;
+    }
     if (!editing) {
       // Focus the card first, then start editing
       onFocusCard?.();
@@ -55,14 +70,15 @@
 <div
   class="card"
   class:focused
-  class:editing
+  class:editing={editing && !streaming}
   class:dimmed
+  class:streaming
   role="button"
   tabindex={focused ? 0 : -1}
   onclick={handleClick}
   onkeydown={() => {}}
 >
-  {#if editing}
+  {#if editing && !streaming}
     <CardEditor
       content={card.content}
       onSave={handleSave}
@@ -72,22 +88,26 @@
     />
   {:else}
     <div class="card-content" class:markdown={settingsStore.state.markdownEnabled}>
-      {#if card.content}
+      {#if displayContent}
         {#if settingsStore.state.markdownEnabled}
           <MarkdownContent
-            content={card.content}
+            content={displayContent}
             {activeTag}
             {onTagClick}
           />
         {:else}
-          <TagHighlight content={card.content} {activeTag} {onTagClick} />
+          <TagHighlight content={displayContent} {activeTag} {onTagClick} />
         {/if}
+      {:else if streaming}
+        <span class="stream-placeholder">…</span>
       {:else}
         (empty)
       {/if}
     </div>
   {/if}
-  {#if card.score !== 0}
+  {#if streaming}
+    <span class="card-streaming" title="A Reporter is generating this card">◍ AI generating</span>
+  {:else if card.score !== 0}
     <span class="card-score">{card.score}</span>
   {/if}
 </div>
@@ -124,6 +144,28 @@
 
   .card.dimmed {
     opacity: 0.25;
+  }
+
+  .card.streaming {
+    cursor: default;
+    box-shadow: 0 0 0 2px var(--card-streaming-ring, rgba(96, 165, 250, 0.45));
+  }
+
+  .card-streaming {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    padding: 0.125rem 0.375rem;
+    background-color: var(--card-streaming-badge, #2563eb);
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: #fff;
+    white-space: nowrap;
+  }
+
+  .stream-placeholder {
+    opacity: 0.5;
   }
 
   .card-content {

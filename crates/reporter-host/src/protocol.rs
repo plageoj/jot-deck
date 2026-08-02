@@ -179,6 +179,31 @@ pub struct UpdateColumnParams {
     pub private: Option<bool>,
 }
 
+/// `card.stream.begin` — acquire the occupancy lock on an existing card so the
+/// Reporter owns it for the duration of the stream (007 §6.2 / §7).
+#[derive(Debug, Deserialize)]
+pub struct StreamBeginParams {
+    pub card_id: String,
+}
+
+/// `card.stream.end` — commit the final text and release the lock. No
+/// `expected_updated_at`: the occupancy lock (not CAS) is the concurrency
+/// control while streaming.
+#[derive(Debug, Deserialize)]
+pub struct StreamEndParams {
+    pub card_id: String,
+    pub content: String,
+}
+
+/// `card.stream.delta` — a mid-stream chunk. Ephemeral: it never touches the DB,
+/// so it is parsed by `peek_ephemeral` and pushed straight to the frontend
+/// overlay rather than going through `dispatch` (007 §4 / §8.2).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamDelta {
+    pub card_id: String,
+    pub chunk: String,
+}
+
 /// `column.move` — reorder by an anchor (`before`/`after`, one of them; omit for
 /// the deck's end). The host assigns the position value.
 #[derive(Debug, Deserialize)]

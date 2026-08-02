@@ -14,7 +14,8 @@ use serde_json::{json, Value};
 
 use crate::protocol::{
     parse_params, AppendParams, EnsureColumnParams, MoveColumnParams, PatchParams, ReadParams,
-    RecentCardsParams, RpcError, SearchCardsParams, UpdateColumnParams, METHOD_NOT_FOUND,
+    RecentCardsParams, RpcError, SearchCardsParams, StreamBeginParams, StreamEndParams,
+    UpdateColumnParams, METHOD_NOT_FOUND,
 };
 use crate::scope::ReporterScope;
 
@@ -25,6 +26,18 @@ pub enum Committed {
     Card { column_id: String },
     /// Columns changed structurally (ensure/update/move) — reload the column set.
     Structure,
+    /// A stream opened on a card — the frontend shows it as AI-generating and
+    /// blocks editing (007 §7).
+    StreamBegin {
+        card_id: String,
+        column_id: String,
+    },
+    /// A stream committed on a card — the frontend reloads it and drops the
+    /// overlay.
+    StreamEnd {
+        card_id: String,
+        column_id: String,
+    },
 }
 
 /// The result of a dispatched method: the JSON result value plus, for writes,
@@ -75,6 +88,11 @@ pub fn dispatch(
         "column.ensure" => column_ensure(conn, deck_id, scope, params),
         "column.update" => column_update(conn, deck_id, scope, params),
         "column.move" => column_move(conn, deck_id, scope, params),
+
+        // ---- stream lifecycle (007 §6.2). delta is ephemeral and handled by
+        // peek_ephemeral before it reaches dispatch, so only begin/end land here. ----
+        "card.stream.begin" => card_stream_begin(conn, deck_id, scope, params),
+        "card.stream.end" => card_stream_end(conn, deck_id, scope, params),
 
         // ---- reads (deck.query, concretized) ----
         "card.read" => card_read(conn, deck_id, params),
@@ -166,6 +184,53 @@ fn card_patch(
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
         Committed::Card {
+            column_id: card.column_id,
+        },
+    ))
+}
+
+fn card_stream_begin(
+    conn: &Connection,
+    deck_id: &str,
+    scope: &ReporterScope,
+    params: &Value,
+) -> Result<DispatchOutcome, RpcError> {
+    // A stream is a form of edit — gate it under the `edit` capability.
+    scope.begin_write(scope.capabilities().edit, "edit")?;
+    let p: StreamBeginParams = parse_params(params)?;
+    // Resolve the card's column for the allowlist check (read_card hides
+    // out-of-scope cards as NotFound, same as card.patch).
+    let existing = query::read_card(conn, deck_id, &p.card_id)?;
+    scope.ensure_column_allowed(&existing.column_id)?;
+    let card = write::begin_card_stream(conn, deck_id, &p.card_id, &scope.reporter_id)?;
+    Ok(DispatchOutcome::wrote(
+        json!({
+            "card_id": card.id,
+            "column_id": card.column_id,
+            "locked_by": card.locked_by,
+        }),
+        Committed::StreamBegin {
+            card_id: card.id.clone(),
+            column_id: card.column_id,
+        },
+    ))
+}
+
+fn card_stream_end(
+    conn: &Connection,
+    deck_id: &str,
+    scope: &ReporterScope,
+    params: &Value,
+) -> Result<DispatchOutcome, RpcError> {
+    scope.begin_write(scope.capabilities().edit, "edit")?;
+    let p: StreamEndParams = parse_params(params)?;
+    let existing = query::read_card(conn, deck_id, &p.card_id)?;
+    scope.ensure_column_allowed(&existing.column_id)?;
+    let card = write::end_card_stream(conn, deck_id, &p.card_id, &scope.reporter_id, &p.content)?;
+    Ok(DispatchOutcome::wrote(
+        json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
+        Committed::StreamEnd {
+            card_id: card.id.clone(),
             column_id: card.column_id,
         },
     ))

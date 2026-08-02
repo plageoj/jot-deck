@@ -499,7 +499,8 @@ export class ActionDispatcher {
 
   private cardStartEdit() {
     const card = this.focusedCard;
-    if (card) this.focus.startEdit(card.id);
+    // A card being streamed by a Reporter is read-only (007 §7).
+    if (card && !this.data.isStreaming(card.id)) this.focus.startEdit(card.id);
   }
 
   private async cardCreate(position: number) {

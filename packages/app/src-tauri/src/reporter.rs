@@ -17,7 +17,9 @@ use std::process::Stdio;
 use std::sync::Mutex;
 
 use jot_deck_core::repository::setting;
-use jot_deck_reporter_host::{handle_message, Capabilities, Committed, ReporterScope};
+use jot_deck_reporter_host::{
+    handle_message, peek_ephemeral, Capabilities, Committed, ReporterScope,
+};
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -32,6 +34,12 @@ use crate::{get_conn, AppState, CommandError, CommandResult};
 /// `data_version` poller, but a Reporter shares the GUI's own connection, so its
 /// writes never bump `data_version` and must be signalled explicitly.
 const REPORTER_CHANGE_EVENT: &str = "reporter-change";
+
+/// Tauri event carrying the ephemeral stream lifecycle (007 §6.2): `begin` /
+/// `delta` / `end`. Distinct from `reporter-change` (committed reloads): deltas
+/// are high-frequency, never hit the DB, and must not trigger a column reload —
+/// the frontend applies them to an in-memory overlay (007 §4 / §8).
+const REPORTER_STREAM_EVENT: &str = "reporter-stream";
 
 /// Persisted registration for one Reporter, stored as a JSON array under the
 /// settings key `reporters:{deck_id}`. `command` is the absolute binary path the
@@ -251,6 +259,22 @@ pub fn start_reporter(
                 continue;
             }
 
+            // Ephemeral fast path: a stream delta never touches the DB (007 §8.2),
+            // so recognize it here and push it straight to the overlay without
+            // taking the connection lock or the blocking pool. High-frequency
+            // deltas must not queue behind DB work.
+            if let Some(delta) = peek_ephemeral(&line) {
+                let _ = handle.emit(
+                    REPORTER_STREAM_EVENT,
+                    serde_json::json!({
+                        "kind": "delta",
+                        "card_id": delta.card_id,
+                        "chunk": delta.chunk,
+                    }),
+                );
+                continue;
+            }
+
             let handle_blocking = handle.clone();
             let deck_blocking = deck_id_task.clone();
             let scope_blocking = scope.clone();
@@ -306,14 +330,39 @@ pub fn start_reporter(
     }
 }
 
-/// Emit the frontend change event describing what a committed write touched.
+/// Emit the frontend event describing what a committed call touched. Card /
+/// structure writes go on `reporter-change` (a debounced column reload); stream
+/// begin/end go on `reporter-stream` alongside deltas so the overlay lifecycle
+/// stays on one channel.
 fn emit_committed(app: &AppHandle, reporter_id: &str, committed: Committed) {
-    let column_id = match committed {
-        Committed::Card { column_id } => Some(column_id),
-        Committed::Structure => None,
-    };
-    let _ = app.emit(
-        REPORTER_CHANGE_EVENT,
-        serde_json::json!({ "reporter_id": reporter_id, "column_id": column_id }),
-    );
+    match committed {
+        Committed::Card { column_id } => {
+            let _ = app.emit(
+                REPORTER_CHANGE_EVENT,
+                serde_json::json!({ "reporter_id": reporter_id, "column_id": column_id }),
+            );
+        }
+        Committed::Structure => {
+            let _ = app.emit(
+                REPORTER_CHANGE_EVENT,
+                serde_json::json!({ "reporter_id": reporter_id, "column_id": null }),
+            );
+        }
+        Committed::StreamBegin { card_id, column_id } => {
+            let _ = app.emit(
+                REPORTER_STREAM_EVENT,
+                serde_json::json!({
+                    "kind": "begin", "card_id": card_id, "column_id": column_id,
+                }),
+            );
+        }
+        Committed::StreamEnd { card_id, column_id } => {
+            let _ = app.emit(
+                REPORTER_STREAM_EVENT,
+                serde_json::json!({
+                    "kind": "end", "card_id": card_id, "column_id": column_id,
+                }),
+            );
+        }
+    }
 }

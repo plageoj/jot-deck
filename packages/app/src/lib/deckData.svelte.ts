@@ -23,6 +23,12 @@ export class DeckData {
   deckTags = $state<Tag[]>([]);
   activeTagFilter = $state<string | null>(null);
   filteredCardIds = $state<Set<string> | null>(null);
+  // Ephemeral streaming overlay (007-reporter-protocol.md §4 / §8): card_id →
+  // in-progress text pushed by a Reporter's `card.stream.delta`. Kept separate
+  // from `cardsByColumn` so DB-backed cards stay untouched — deltas never hit
+  // SQLite. A card with an entry here renders the streamed text read-only and
+  // shows an "AI generating" affordance until `card.stream.end` commits.
+  streamingText = $state<Record<string, string>>({});
   // Set after columns finish loading for currentDeck. Use this — not
   // currentDeck — to drive logic that depends on the column list being ready.
   loadedDeckId = $state<string | null>(null);
@@ -214,7 +220,13 @@ export class DeckData {
   externalChangeTick = $state(0);
   private externalUnlisten: (() => void) | null = null;
   private reporterUnlisten: (() => void) | null = null;
+  private reporterStreamUnlisten: (() => void) | null = null;
   private externalReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  // Per-card buffer of delta chunks not yet flushed to `streamingText`, plus the
+  // single pending animation-frame handle that flushes them (007 §8.1: coalesce
+  // many deltas into one repaint, never 1 delta = 1 render).
+  private pendingDeltas: Record<string, string> = {};
+  private deltaFlushHandle: number | null = null;
 
   /** Coalesce a burst of change signals into one `externalChangeTick` bump. */
   private scheduleExternalReload(): void {
@@ -241,10 +253,83 @@ export class DeckData {
     this.reporterUnlisten = await listen("reporter-change", () => {
       this.scheduleExternalReload();
     });
+    // A Reporter's ephemeral stream (007 §6.2): begin/delta/end. These drive the
+    // in-memory overlay, NOT the debounced DB reload — deltas never touch SQLite.
+    this.reporterStreamUnlisten = await listen<{
+      kind: "begin" | "delta" | "end";
+      card_id: string;
+      column_id?: string;
+      chunk?: string;
+    }>("reporter-stream", ({ payload }) => {
+      this.handleStreamEvent(payload);
+    });
     // Reconcile once right after subscribing: a commit landing between the
     // initial load and listener registration would otherwise be missed (the
     // backend emits its detection only once).
     this.externalChangeTick++;
+  }
+
+  /** Route one `reporter-stream` event to the overlay lifecycle. */
+  private handleStreamEvent(e: {
+    kind: "begin" | "delta" | "end";
+    card_id: string;
+    column_id?: string;
+    chunk?: string;
+  }): void {
+    switch (e.kind) {
+      case "begin":
+        // Open the overlay so the card renders as AI-generating immediately,
+        // even before the first delta arrives.
+        this.streamingText[e.card_id] = "";
+        break;
+      case "delta":
+        this.bufferDelta(e.card_id, e.chunk ?? "");
+        break;
+      case "end":
+        void this.endStream(e.card_id, e.column_id);
+        break;
+    }
+  }
+
+  /** Buffer a delta chunk and schedule a single per-frame flush (007 §8.1). */
+  private bufferDelta(cardId: string, chunk: string): void {
+    this.pendingDeltas[cardId] = (this.pendingDeltas[cardId] ?? "") + chunk;
+    if (this.deltaFlushHandle !== null) return;
+    this.deltaFlushHandle = requestAnimationFrame(() => {
+      this.deltaFlushHandle = null;
+      const pending = this.pendingDeltas;
+      this.pendingDeltas = {};
+      for (const [id, text] of Object.entries(pending)) {
+        // Ignore deltas for a card whose stream already ended (overlay dropped).
+        if (this.streamingText[id] === undefined) continue;
+        this.streamingText[id] += text;
+      }
+    });
+  }
+
+  /** Commit a stream: reload the affected column so the DB-backed card carries
+   * the final text, then drop the overlay (revealing it without a flash). */
+  private async endStream(cardId: string, columnId?: string): Promise<void> {
+    try {
+      if (columnId && this.cardsByColumn[columnId]) {
+        const cards = await this.db.getCardsByColumn(columnId);
+        if (this.cardsByColumn[columnId]) this.cardsByColumn[columnId] = cards;
+        await this.loadDeckTags();
+      } else {
+        // No column hint (or column not loaded): fall back to a full reconcile.
+        this.scheduleExternalReload();
+      }
+    } catch (e) {
+      console.error(`Failed to reload after stream end for ${cardId}:`, e);
+    } finally {
+      delete this.streamingText[cardId];
+      delete this.pendingDeltas[cardId];
+    }
+  }
+
+  /** Whether a card is currently receiving a Reporter stream (read-only). */
+  isStreaming(cardId: string): boolean {
+    return this.streamingText[cardId] !== undefined;
   }
 
   /** Re-read the current deck after an external change.
@@ -288,6 +373,13 @@ export class DeckData {
     this.externalUnlisten = null;
     this.reporterUnlisten?.();
     this.reporterUnlisten = null;
+    this.reporterStreamUnlisten?.();
+    this.reporterStreamUnlisten = null;
+    if (this.deltaFlushHandle !== null) {
+      cancelAnimationFrame(this.deltaFlushHandle);
+      this.deltaFlushHandle = null;
+    }
+    this.pendingDeltas = {};
   }
 
   async createDeck(): Promise<Deck | null> {

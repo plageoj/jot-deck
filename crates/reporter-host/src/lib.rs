@@ -19,11 +19,26 @@ mod protocol;
 mod scope;
 
 pub use dispatch::{dispatch, Committed, DispatchOutcome};
-pub use protocol::RpcError;
+pub use protocol::{RpcError, StreamDelta};
 pub use scope::{Capabilities, ReporterScope, DEFAULT_MAX_WRITES_PER_MIN};
 
 use jot_deck_core::Connection;
 use serde_json::Value;
+
+/// Peek at a raw line for an ephemeral `card.stream.delta` before it reaches the
+/// DB path. Deltas never touch SQLite (007 §4 / §8.2), so the host recognizes
+/// them here and pushes the chunk straight to the frontend overlay — no
+/// connection lock, no dispatch. Returns `None` for any other method (which then
+/// goes through `handle_message`). A delta may carry an `id` or not; either way
+/// it is fire-and-forget and never answered.
+pub fn peek_ephemeral(line: &str) -> Option<StreamDelta> {
+    let msg: Value = serde_json::from_str(line).ok()?;
+    if msg.get("method").and_then(Value::as_str)? != "card.stream.delta" {
+        return None;
+    }
+    let params = msg.get("params")?;
+    serde_json::from_value(params.clone()).ok()
+}
 
 /// The outcome of handling one line: the response to write back (always present
 /// in Phase 1 — every committed-channel method is request/response), plus what
@@ -341,5 +356,119 @@ mod tests {
         let req = json!({ "jsonrpc": "2.0", "method": "ping" }).to_string();
         let handled = handle_message(&conn, &deck_id, &ReporterScope::default(), &req);
         assert!(handled.response.is_none());
+    }
+
+    // ---- stream lifecycle (007 §6.2) ----
+
+    #[test]
+    fn stream_begin_locks_and_end_commits() {
+        let (conn, deck_id, _col, _, card_id) = deck_with_data();
+        // One Reporter = one scope for its whole lifetime: begin and end must
+        // present the same holder id, or end sees the lock as someone else's.
+        let scope = ReporterScope::new(
+            Capabilities::default(),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            "reporter:1".to_string(),
+        );
+        let (begin, committed) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope,
+            "card.stream.begin",
+            json!({ "card_id": card_id }),
+        );
+        assert_eq!(begin["result"]["card_id"], card_id);
+        assert!(matches!(committed, Some(Committed::StreamBegin { .. })));
+
+        let (end, committed_end) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope,
+            "card.stream.end",
+            json!({ "card_id": card_id, "content": "final #done" }),
+        );
+        assert_eq!(end["result"]["card_id"], card_id);
+        assert!(matches!(committed_end, Some(Committed::StreamEnd { .. })));
+
+        // The committed text is now readable and the lock is cleared.
+        let (read, _) = call(&conn, &deck_id, "card.read", json!({ "card_id": card_id }));
+        assert_eq!(read["result"]["content"], "final #done");
+        assert!(read["result"]["locked_by"].is_null());
+    }
+
+    #[test]
+    fn stream_begin_conflicts_when_held_by_another_reporter() {
+        let (conn, deck_id, _col, _, card_id) = deck_with_data();
+        let scope_a = ReporterScope::new(
+            Capabilities::default(),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            "reporter:a".to_string(),
+        );
+        let scope_b = ReporterScope::new(
+            Capabilities::default(),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            "reporter:b".to_string(),
+        );
+        let (ok, _) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope_a,
+            "card.stream.begin",
+            json!({ "card_id": card_id }),
+        );
+        assert!(ok["result"]["card_id"].is_string());
+        let (conflict, committed) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope_b,
+            "card.stream.begin",
+            json!({ "card_id": card_id }),
+        );
+        assert_eq!(conflict["error"]["code"], protocol::CONFLICT);
+        assert!(committed.is_none());
+    }
+
+    #[test]
+    fn stream_begin_denied_when_edit_capability_off() {
+        let (conn, deck_id, _col, _, card_id) = deck_with_data();
+        let scope = ReporterScope::new(
+            Capabilities::from_deny_list("edit"),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            "r1".to_string(),
+        );
+        let (resp, _) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope,
+            "card.stream.begin",
+            json!({ "card_id": card_id }),
+        );
+        assert_eq!(resp["error"]["code"], protocol::POLICY_DENIED);
+    }
+
+    #[test]
+    fn peek_ephemeral_extracts_delta_and_ignores_others() {
+        let delta = json!({
+            "jsonrpc": "2.0", "method": "card.stream.delta",
+            "params": { "card_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "chunk": "hi" }
+        })
+        .to_string();
+        let parsed = peek_ephemeral(&delta).expect("delta should parse");
+        assert_eq!(parsed.card_id, "01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        assert_eq!(parsed.chunk, "hi");
+
+        // A committed-channel method is not ephemeral.
+        let append = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "card.append",
+            "params": { "column_id": "c", "content": "x" }
+        })
+        .to_string();
+        assert!(peek_ephemeral(&append).is_none());
+        // Garbage is not ephemeral.
+        assert!(peek_ephemeral("not json").is_none());
     }
 }
