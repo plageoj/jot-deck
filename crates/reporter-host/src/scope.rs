@@ -20,10 +20,10 @@ use crate::protocol::RpcError;
 pub const DEFAULT_MAX_WRITES_PER_MIN: usize = 120;
 
 /// Which write verbs a Reporter may invoke. All default ON; a registration opts
-/// out per verb. `card.append` → `append`, `card.patch` → `edit`, the
-/// `column.*` structure methods → `structure`. `delete` has no committed-channel
-/// method in Phase 1 (Reporter is append-mostly, 007 §1.3) but is kept so the
-/// scope contract matches the MCP surface (008 §5) one-for-one.
+/// out per verb. `card.append` → `append`; `card.patch` / `card.move` /
+/// `card.stream.*` → `edit`; `card.delete` → `delete`; the `column.*` structure
+/// methods → `structure`. Matches the MCP surface's verb mapping (008 §5)
+/// one-for-one.
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub append: bool,

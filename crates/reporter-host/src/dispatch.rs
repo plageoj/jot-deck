@@ -13,9 +13,9 @@ use jot_deck_core::{query, write, Connection};
 use serde_json::{json, Value};
 
 use crate::protocol::{
-    parse_params, AppendParams, EnsureColumnParams, MoveColumnParams, PatchParams, ReadParams,
-    RecentCardsParams, RpcError, SearchCardsParams, StreamBeginParams, StreamEndParams,
-    UpdateColumnParams, METHOD_NOT_FOUND,
+    parse_params, AppendParams, DeleteParams, EnsureColumnParams, MoveCardParams, MoveColumnParams,
+    PatchParams, ReadParams, RecentCardsParams, RpcError, SearchCardsParams, StreamBeginParams,
+    StreamEndParams, UpdateColumnParams, METHOD_NOT_FOUND,
 };
 use crate::scope::ReporterScope;
 
@@ -65,11 +65,12 @@ impl DispatchOutcome {
 
 /// Route one Reporter method to the core write/query surface under `scope`.
 ///
-/// Faithful to 007 §6.1's committed channel: `card.append`, `card.patch`
-/// (alias `card.commit`), `card.read`, the `deck.*` queries (the concretized
-/// `deck.query`), and `column.ensure`/`update`/`move`. `card.move` / `card.delete`
-/// are intentionally absent — the Reporter is append-mostly (007 §1.3) and those
-/// belong to the general-agent MCP surface (008), not this transport.
+/// Covers 007 §6.1's committed channel: `card.append`, `card.patch`
+/// (alias `card.commit`), `card.move`, `card.delete`, `card.read`, the `deck.*`
+/// queries (the concretized `deck.query`), and `column.ensure`/`update`/`move`.
+/// (`card.move` / `card.delete` are the same core ops the general-agent MCP
+/// surface exposes — 008 §4.1 — reused here so a Reporter can re-file and remove
+/// cards, not only append.)
 pub fn dispatch(
     conn: &Connection,
     deck_id: &str,
@@ -85,6 +86,8 @@ pub fn dispatch(
         // ---- committed writes ----
         "card.append" => card_append(conn, deck_id, scope, params),
         "card.patch" | "card.commit" => card_patch(conn, deck_id, scope, params),
+        "card.move" => card_move(conn, deck_id, scope, params),
+        "card.delete" => card_delete(conn, deck_id, scope, params),
         "column.ensure" => column_ensure(conn, deck_id, scope, params),
         "column.update" => column_update(conn, deck_id, scope, params),
         "column.move" => column_move(conn, deck_id, scope, params),
@@ -183,6 +186,63 @@ fn card_patch(
     let card = write::patch_card(conn, deck_id, &p.card_id, &p.content, expected_updated_at)?;
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
+        Committed::Card {
+            column_id: card.column_id,
+        },
+    ))
+}
+
+fn card_move(
+    conn: &Connection,
+    deck_id: &str,
+    scope: &ReporterScope,
+    params: &Value,
+) -> Result<DispatchOutcome, RpcError> {
+    // Moving an existing card is an edit of its placement (008 §5 gates move
+    // under `edit`).
+    scope.begin_write(scope.capabilities().edit, "edit")?;
+    let p: MoveCardParams = parse_params(params)?;
+    // Both the source column (the card's current column) and the destination
+    // must be within the write allowlist — a move writes to both sides.
+    let existing = query::read_card(conn, deck_id, &p.card_id)?;
+    scope.ensure_column_allowed(&existing.column_id)?;
+    if let Some(dest) = p.to_column_id.as_deref() {
+        scope.ensure_column_allowed(dest)?;
+    }
+    let card = write::move_card(
+        conn,
+        deck_id,
+        &p.card_id,
+        p.to_column_id.as_deref(),
+        p.before_card_id.as_deref(),
+        p.after_card_id.as_deref(),
+    )?;
+    Ok(DispatchOutcome::wrote(
+        json!({
+            "card_id": card.id,
+            "column_id": card.column_id,
+            "position": card.position,
+        }),
+        Committed::Card {
+            column_id: card.column_id,
+        },
+    ))
+}
+
+fn card_delete(
+    conn: &Connection,
+    deck_id: &str,
+    scope: &ReporterScope,
+    params: &Value,
+) -> Result<DispatchOutcome, RpcError> {
+    scope.begin_write(scope.capabilities().delete, "delete")?;
+    let p: DeleteParams = parse_params(params)?;
+    let existing = query::read_card(conn, deck_id, &p.card_id)?;
+    scope.ensure_column_allowed(&existing.column_id)?;
+    let card = write::delete_card(conn, deck_id, &p.card_id)?;
+    let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
+    Ok(DispatchOutcome::wrote(
+        json!({ "card_id": card.id, "deleted_at": deleted_at }),
         Committed::Card {
             column_id: card.column_id,
         },

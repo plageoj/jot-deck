@@ -128,6 +128,26 @@ pub struct ReadParams {
     pub card_id: String,
 }
 
+/// `card.move` — move / reorder a card by an anchor. `to_column_id` omitted means
+/// reorder within the current column; `before`/`after` omitted means the target
+/// column's end. The host assigns the position value.
+#[derive(Debug, Deserialize)]
+pub struct MoveCardParams {
+    pub card_id: String,
+    #[serde(default)]
+    pub to_column_id: Option<String>,
+    #[serde(default)]
+    pub before_card_id: Option<String>,
+    #[serde(default)]
+    pub after_card_id: Option<String>,
+}
+
+/// `card.delete` — soft-delete a card (recoverable via the user's delete stack).
+#[derive(Debug, Deserialize)]
+pub struct DeleteParams {
+    pub card_id: String,
+}
+
 /// `deck.recent_cards` — the query-less "what happened lately" path.
 #[derive(Debug, Deserialize)]
 pub struct RecentCardsParams {

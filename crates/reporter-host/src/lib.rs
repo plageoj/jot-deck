@@ -344,6 +344,79 @@ mod tests {
     }
 
     #[test]
+    fn move_card_reorders_and_signals_committed() {
+        let (conn, deck_id, col_id, _, card_id) = deck_with_data();
+        // Add a second card so there's an anchor to move before.
+        let (appended, _) = call(
+            &conn,
+            &deck_id,
+            "card.append",
+            json!({ "column_id": col_id, "content": "second" }),
+        );
+        let second_id = appended["result"]["card_id"].as_str().unwrap().to_string();
+        // Move the second card before the first.
+        let (resp, committed) = call(
+            &conn,
+            &deck_id,
+            "card.move",
+            json!({ "card_id": second_id, "before_card_id": card_id }),
+        );
+        assert_eq!(resp["result"]["position"], 0);
+        assert!(matches!(committed, Some(Committed::Card { .. })));
+    }
+
+    #[test]
+    fn delete_card_soft_deletes_and_delete_capability_gates_it() {
+        let (conn, deck_id, _col, _, card_id) = deck_with_data();
+        // With `delete` denied, the call is refused.
+        let denied = ReporterScope::new(
+            Capabilities::from_deny_list("delete"),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            "r1".to_string(),
+        );
+        let (blocked, committed) = call_scoped(
+            &conn,
+            &deck_id,
+            &denied,
+            "card.delete",
+            json!({ "card_id": card_id }),
+        );
+        assert_eq!(blocked["error"]["code"], protocol::POLICY_DENIED);
+        assert!(committed.is_none());
+
+        // Default scope (delete enabled) soft-deletes it.
+        let (resp, committed) = call(&conn, &deck_id, "card.delete", json!({ "card_id": card_id }));
+        assert_eq!(resp["result"]["card_id"], card_id);
+        assert!(resp["result"]["deleted_at"].as_str().is_some_and(|s| !s.is_empty()));
+        assert!(matches!(committed, Some(Committed::Card { .. })));
+        // The card now reads back as gone (soft-deleted).
+        let (read, _) = call(&conn, &deck_id, "card.read", json!({ "card_id": card_id }));
+        assert_eq!(read["error"]["code"], protocol::NOT_FOUND);
+    }
+
+    #[test]
+    fn move_card_outside_write_allowlist_is_unauthorized() {
+        let (conn, deck_id, col_id, _, card_id) = deck_with_data();
+        // Allowlist names only the visible column; moving to a made-up column id
+        // outside it is rejected.
+        let scope = ReporterScope::new(
+            Capabilities::default(),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            Some(vec![col_id]),
+            "r1".to_string(),
+        );
+        let (resp, _) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope,
+            "card.move",
+            json!({ "card_id": card_id, "to_column_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV" }),
+        );
+        assert_eq!(resp["error"]["code"], protocol::UNAUTHORIZED);
+    }
+
+    #[test]
     fn unknown_method_is_method_not_found() {
         let (conn, deck_id, _, _, _) = deck_with_data();
         let (resp, _) = call(&conn, &deck_id, "card.explode", json!({}));

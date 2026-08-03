@@ -151,13 +151,15 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 |:---|:---|:---|
 | `card.append` | Reporter → 本体 | カード新規作成。本体が採番し **ULID を返す**。Reporter は以降この id を握る。 |
 | `card.patch` / `card.commit` | Reporter → 本体 | 確定 edit。永続 + 同期に乗る。 |
+| `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先は接続 Deck 内のカラムに限る。 |
+| `card.delete` | Reporter → 本体 | カードを論理削除（復元可能）。物理削除・復元はユーザの削除スタックと cleanup に委ねる。 |
 | `card.read` | Reporter → 本体 | 既存カードの読み返し（文脈把握・過去カードの更新対象特定）。 |
 | `deck.query` | Reporter → 本体 | カラム構成・直近カード等の問い合わせ。 |
 | `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等）。可視範囲に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ column_id, name, position, created }`）。 |
 | `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ）。 |
 | `column.move` | Reporter → 本体 | カラムの並べ替え。アンカー（`before_column_id` / `after_column_id`、どちらか一方。省略時は末尾）で意図を表明し、position は本体が採番。 |
 
-`card.append` / `card.patch` / `column.*` はいずれも request/response で、**ID / position の採番は本体が一元化**（§7）。カラムの順序は生の position ではなく「どのカラムの前/後」という**アンカー**で表明する。
+`card.*` / `column.*` はいずれも request/response で、**ID / position の採番は本体が一元化**（§7）。カード・カラムの順序は生の position ではなく「どのカード/カラムの前/後」という**アンカー**で表明する。Reporter は append を主としつつ（§1.3 の append-mostly）、既存カードの再配置（`card.move`）と論理削除（`card.delete`）も行える ―― これらは姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `move_card` / `delete_card` と**同じ core を 007 トランスポートで叩く**（§2.1 の共有 core）。書き込みスコープ（§10）は `card.delete` を独立の権限として扱える。
 
 #### 6.1.1 構造メソッド（カラムの作成 / 再編）
 
