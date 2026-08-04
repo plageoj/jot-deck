@@ -438,9 +438,11 @@ pub fn run() {
             // Reporter host commands (007-reporter-protocol.md)
             reporter::list_reporters,
             reporter::add_reporter,
+            reporter::update_reporter,
             reporter::remove_reporter,
             reporter::start_reporter,
             reporter::stop_reporter,
+            reporter::list_running_reporters,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

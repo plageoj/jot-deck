@@ -116,6 +116,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Settings
   { sequence: "Ctrl+,", action: "showSettings", modes: ["column", "card"], description: "Open settings" },
+
+  // Common - Reporters
+  { sequence: "gr", action: "showReporters", modes: ["column", "card"], description: "Manage reporters" },
 ];
 
 /**

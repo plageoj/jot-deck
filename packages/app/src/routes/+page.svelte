@@ -10,6 +10,7 @@
     KeybindingCheatsheet,
     KeybindingsDialog,
     RenameDialog,
+    ReportersDialog,
     SettingsDialog,
     TagFilterBar,
     TagPalette,
@@ -188,6 +189,11 @@
     >
     <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
       >New Column</button
+    >
+    <button
+      onclick={() => (focus.showReporters = true)}
+      disabled={!data.currentDeck}
+      title="Manage Reporters (g r)">Reporters</button
     >
     <button
       class="header-spacer"
@@ -404,6 +410,20 @@
 
 {#if focus.showAbout}
   <AboutDialog onClose={() => (focus.showAbout = false)} />
+{/if}
+
+{#if focus.showReporters && data.currentDeck}
+  <ReportersDialog
+    deckId={data.currentDeck.id}
+    listReporters={(deckId) => data.listReporters(deckId)}
+    listRunning={() => data.listRunningReporters()}
+    onAdd={(deckId, config) => data.addReporter(deckId, config)}
+    onUpdate={(deckId, config) => data.updateReporter(deckId, config)}
+    onRemove={(deckId, reporterId) => data.removeReporter(deckId, reporterId)}
+    onStart={(deckId, reporterId) => data.startReporter(deckId, reporterId)}
+    onStop={(reporterId) => data.stopReporter(reporterId)}
+    onClose={() => (focus.showReporters = false)}
+  />
 {/if}
 
 <style>

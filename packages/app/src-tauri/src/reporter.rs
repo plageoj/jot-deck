@@ -41,6 +41,12 @@ const REPORTER_CHANGE_EVENT: &str = "reporter-change";
 /// the frontend applies them to an in-memory overlay (007 §4 / §8).
 const REPORTER_STREAM_EVENT: &str = "reporter-stream";
 
+/// Tauri event emitted when a running Reporter's child process ends on its own
+/// (self-termination, crash, or pipe close) — as opposed to an explicit
+/// `stop_reporter`. The registration UI listens for this to drop the Reporter's
+/// "Running" badge without polling.
+const REPORTER_EXIT_EVENT: &str = "reporter-exit";
+
 /// Persisted registration for one Reporter, stored as a JSON array under the
 /// settings key `reporters:{deck_id}`. `command` is the absolute binary path the
 /// power-user registers (007 §2.2); `deny`/`max_writes_per_min`/`allowed_columns`
@@ -151,6 +157,35 @@ pub fn add_reporter(
     configs.push(config.clone());
     save_configs(&state, &deck_id, &configs)?;
     Ok(config)
+}
+
+/// Update an existing Reporter registration in place (matched by `reporter_id`,
+/// which is preserved). Edits to `command`/`args`/`env` take effect on the next
+/// `start_reporter`; a currently running child is not restarted here.
+#[tauri::command]
+pub fn update_reporter(
+    state: State<AppState>,
+    deck_id: String,
+    config: ReporterConfig,
+) -> CommandResult<ReporterConfig> {
+    let mut configs = load_configs(&state, &deck_id)?;
+    let slot = configs
+        .iter_mut()
+        .find(|c| c.reporter_id == config.reporter_id)
+        .ok_or_else(|| CommandError {
+            message: format!("No reporter registered with id {}", config.reporter_id),
+        })?;
+    *slot = config.clone();
+    save_configs(&state, &deck_id, &configs)?;
+    Ok(config)
+}
+
+/// List the ids of Reporters currently running. The registry spans decks, so the
+/// caller intersects this with its own deck's registrations.
+#[tauri::command]
+pub fn list_running_reporters(registry: State<ReporterRegistry>) -> CommandResult<Vec<String>> {
+    let running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(running.keys().cloned().collect())
 }
 
 /// Remove a Reporter registration (stopping it first if running).
@@ -336,7 +371,14 @@ pub fn start_reporter(
         // entry itself; this covers self-termination.)
         if let Some(registry) = handle.try_state::<ReporterRegistry>() {
             let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
-            running.remove(&reporter_id_task);
+            // Only signal an exit the UI didn't ask for: if the entry is already
+            // gone, a stop_reporter aborted us and the UI knows.
+            if running.remove(&reporter_id_task).is_some() {
+                let _ = handle.emit(
+                    REPORTER_EXIT_EVENT,
+                    serde_json::json!({ "reporter_id": reporter_id_task }),
+                );
+            }
         }
     });
 

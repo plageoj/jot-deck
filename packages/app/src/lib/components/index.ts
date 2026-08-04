@@ -12,6 +12,7 @@ export { default as KeybindingsDialog } from "./KeybindingsDialog.svelte";
 export { default as MarkdownContent } from "./MarkdownContent.svelte";
 export { default as PaletteDialog } from "./PaletteDialog.svelte";
 export { default as RenameDialog } from "./RenameDialog.svelte";
+export { default as ReportersDialog } from "./ReportersDialog.svelte";
 export { default as SettingsDialog } from "./SettingsDialog.svelte";
 export { default as TagFilterBar } from "./TagFilterBar.svelte";
 export { default as TagHighlight } from "./TagHighlight.svelte";

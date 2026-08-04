@@ -47,6 +47,31 @@ export interface Card {
   locked_at: string | null;
 }
 
+/** A registered Reporter (007-reporter-protocol.md §2.2): an external input
+ * adapter the host spawns as a child process and pipes over stdio. Field names
+ * are snake_case because this object is serialized straight into the Rust
+ * `ReporterConfig` struct via Tauri. The auth-scope fields (`deny`,
+ * `max_writes_per_min`, `allowed_columns`, 007 §10) are carried but not yet
+ * editable in the UI — they are sent as defaults. */
+export interface ReporterConfig {
+  /** Stable ULID assigned by the host on add; empty when creating a new one. */
+  reporter_id: string;
+  /** Human-readable label shown in the registration UI. */
+  name: string;
+  /** Absolute path to the Reporter binary. */
+  command: string;
+  /** Command-line arguments passed to the binary. */
+  args: string[];
+  /** Extra environment variables for the child process. */
+  env: Record<string, string>;
+  /** Capabilities to disable (`append`/`edit`/`delete`/`structure`). */
+  deny: string[];
+  /** Per-Reporter write rate cap; null uses the host default. */
+  max_writes_per_min: number | null;
+  /** Write allowlist by column ULID; null = the whole deck. */
+  allowed_columns: string[] | null;
+}
+
 export type TrashItem =
   | { type: "column"; id: string; column: Column; deletedAt: string }
   | {

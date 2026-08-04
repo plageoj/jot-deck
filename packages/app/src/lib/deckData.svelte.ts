@@ -5,6 +5,7 @@ import {
   type Card,
   type Tag,
   type TrashItem,
+  type ReporterConfig,
 } from "$lib/types";
 import { getDatabase, isTauri, type DatabaseBackend } from "$lib/db";
 import { FocusManager } from "./focusManager.svelte";
@@ -486,6 +487,45 @@ export class DeckData {
       this.error = `Failed to generate MCP config: ${e}`;
       return null;
     }
+  }
+
+  // ============================================
+  // Reporter host (007-reporter-protocol.md)
+  // ============================================
+  // Thin pass-throughs to the backend. Unlike most DeckData methods these
+  // re-throw instead of funnelling into `this.error`, so the registration
+  // dialog can surface failures inline per Reporter row rather than as a
+  // board-wide error banner.
+
+  listReporters(deckId: string): Promise<ReporterConfig[]> {
+    return this.db.listReporters(deckId);
+  }
+
+  addReporter(deckId: string, config: ReporterConfig): Promise<ReporterConfig> {
+    return this.db.addReporter(deckId, config);
+  }
+
+  updateReporter(
+    deckId: string,
+    config: ReporterConfig,
+  ): Promise<ReporterConfig> {
+    return this.db.updateReporter(deckId, config);
+  }
+
+  removeReporter(deckId: string, reporterId: string): Promise<void> {
+    return this.db.removeReporter(deckId, reporterId);
+  }
+
+  startReporter(deckId: string, reporterId: string): Promise<void> {
+    return this.db.startReporter(deckId, reporterId);
+  }
+
+  stopReporter(reporterId: string): Promise<void> {
+    return this.db.stopReporter(reporterId);
+  }
+
+  listRunningReporters(): Promise<string[]> {
+    return this.db.listRunningReporters();
   }
 
   async renameColumn(id: string, name: string): Promise<Column | null> {

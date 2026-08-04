@@ -6,7 +6,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
-import type { Deck, Column, Card, Tag } from "../types";
+import type { Deck, Column, Card, Tag, ReporterConfig } from "../types";
 import type {
   DatabaseBackend,
   CreateDeckParams,
@@ -150,5 +150,40 @@ export class TauriBackend implements DatabaseBackend {
   // MCP operations
   async generateMcpConfig(deckId: string): Promise<string | null> {
     return invoke<string>("generate_mcp_config", { deckId });
+  }
+
+  // Reporter host operations
+  async listReporters(deckId: string): Promise<ReporterConfig[]> {
+    return invoke<ReporterConfig[]>("list_reporters", { deckId });
+  }
+
+  async addReporter(
+    deckId: string,
+    config: ReporterConfig
+  ): Promise<ReporterConfig> {
+    return invoke<ReporterConfig>("add_reporter", { deckId, config });
+  }
+
+  async updateReporter(
+    deckId: string,
+    config: ReporterConfig
+  ): Promise<ReporterConfig> {
+    return invoke<ReporterConfig>("update_reporter", { deckId, config });
+  }
+
+  async removeReporter(deckId: string, reporterId: string): Promise<void> {
+    return invoke("remove_reporter", { deckId, reporterId });
+  }
+
+  async startReporter(deckId: string, reporterId: string): Promise<void> {
+    return invoke("start_reporter", { deckId, reporterId });
+  }
+
+  async stopReporter(reporterId: string): Promise<void> {
+    return invoke("stop_reporter", { reporterId });
+  }
+
+  async listRunningReporters(): Promise<string[]> {
+    return invoke<string[]>("list_running_reporters");
   }
 }
