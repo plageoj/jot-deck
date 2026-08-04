@@ -165,7 +165,7 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 `column.ensure` / `column.update` / `column.move` は、姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `ensure_column` / `update_column` / `move_column` と**対**であり、**同じ core（`jot_deck_core::write`）を 007 トランスポートで叩く**（§2.1 の共有 core・DB。到達経路＝spawn 主体だけが違う）。
 
-- **`column.ensure` が Reporter の自前プロビジョニングを可能にする。** name キーの get-or-create なので、Reporter はテンプレートのカラム（§9：会議議事録なら `決定事項` `ToDo` 等）を**起動時に自分で用意**できる。従来の「設定時に別途プロビジョニングする」前提（→ 10 章）はこの一次メソッドに畳める。再送・再起動でも同名は既存を返すため列が重複しない。
+- **`column.ensure` が Reporter の自前プロビジョニングを可能にする。** name キーの get-or-create なので、Reporter はテンプレートのカラム（§9：会議議事録なら `決定事項` `ToDo` 等）を**起動時に自分で用意**する。再送・再起動でも同名は既存を返すため列が重複しない。
 - **構造再編もランタイムで行える。** 分類軸の変更（`column.update` の `description` 書き換え）やカラム順の入れ替え（`column.move`）を、カード追記と同じ確定チャネルで表明する。
 - **008 の外部エージェント向け絞り込みは持ち込まない。** `idempotency_key`（§5）・write allowlist・capability といった 008 §4.5/§5 の防具は汎用エージェント境界の関心事。Reporter は本体 spawn の信頼境界内で動く（§3.1）ため、これらはメソッド引数に出さない。ただし**サードパーティ Reporter の per-Reporter 書き込みスコープ（§10 の認証スコープ）は、カード書き込みと同様この構造メソッドにも本体側で適用される** ―― `private` カラムへの読み書き禁止を含む（§10）。
 

@@ -45,8 +45,13 @@ impl Default for Capabilities {
 
 impl Capabilities {
     /// Parse a deny list like `"append, delete"` into capabilities (default all
-    /// on). Unknown tokens are ignored — a lockdown config with a typo must not
-    /// silently leave a verb enabled, so it is reported to the caller.
+    /// on). An unknown token is logged to the host's stderr (audited via the
+    /// spawned child's inherited stderr) and otherwise ignored — the mistyped
+    /// verb keeps its default-on state. The registration is authored by the
+    /// power-user who owns the host (007 §2.2), so a typo is a diagnosable
+    /// operator mistake, not an untrusted input; fail-closed rejection (returning
+    /// the unknown tokens so a caller can refuse the registration) is a possible
+    /// future hardening once deny lists are surfaced in the registration UI.
     pub fn from_deny_list(deny: &str) -> Self {
         let mut c = Self::default();
         for tok in deny

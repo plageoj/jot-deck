@@ -23,7 +23,7 @@ use jot_deck_reporter_host::{
 use serde::{Deserialize, Serialize};
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command as TokioCommand;
 
 use crate::{get_conn, AppState, CommandError, CommandResult};
@@ -197,7 +197,9 @@ pub fn start_reporter(
     reporter_id: String,
 ) -> CommandResult<()> {
     {
-        // Idempotent: a Reporter already running is a no-op success.
+        // Fast path: a Reporter already running is a no-op success (avoids
+        // spawning a child we'd immediately abort). The *authoritative* dedup is
+        // the reserve-under-lock below — this check alone would be a TOCTOU.
         let running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
         if running.contains_key(&reporter_id) {
             return Ok(());
@@ -245,17 +247,37 @@ pub fn start_reporter(
 
         let stdout = child.stdout.take().expect("stdout piped");
         let mut stdin = child.stdin.take().expect("stdin piped");
-        let mut lines = BufReader::new(stdout).lines();
+        // Cap one JSON message so a Reporter that never emits a newline cannot
+        // grow the host's read buffer without bound. The per-Reporter write rate
+        // limit (scope) caps committed writes, not bytes read, so it does not
+        // cover this path.
+        const MAX_LINE_BYTES: u64 = 1 << 20; // 1 MiB
+        let mut reader = BufReader::new(stdout);
+        let mut buf = String::new();
 
         // Read one JSON message per line; dispatch on the shared GUI connection;
         // write the response back to the child's stdin.
         loop {
-            let line = match lines.next_line().await {
-                Ok(Some(l)) => l,
-                // EOF or read error: the child closed its stdout — stop pumping.
-                Ok(None) | Err(_) => break,
+            buf.clear();
+            // Bound each read so one line can't exceed the cap. A fresh `take`
+            // per iteration makes the limit per-message, not cumulative.
+            let n = match (&mut reader).take(MAX_LINE_BYTES).read_line(&mut buf).await {
+                // EOF or read error (incl. invalid UTF-8): the child closed its
+                // stdout — stop pumping.
+                Ok(0) | Err(_) => break,
+                Ok(n) => n,
             };
-            if line.trim().is_empty() {
+            // A full-cap read with no terminating newline means the Reporter is
+            // emitting an unbounded line; drop the connection rather than buffer it.
+            if n as u64 == MAX_LINE_BYTES && !buf.ends_with('\n') {
+                eprintln!(
+                    "[jot-deck-reporter-host] reporter {} sent a line exceeding {} bytes; dropping it",
+                    reporter_id_task, MAX_LINE_BYTES
+                );
+                break;
+            }
+            let line = buf.trim();
+            if line.is_empty() {
                 continue;
             }
 
@@ -263,7 +285,7 @@ pub fn start_reporter(
             // so recognize it here and push it straight to the overlay without
             // taking the connection lock or the blocking pool. High-frequency
             // deltas must not queue behind DB work.
-            if let Some(delta) = peek_ephemeral(&line) {
+            if let Some(delta) = peek_ephemeral(line) {
                 let _ = handle.emit(
                     REPORTER_STREAM_EVENT,
                     serde_json::json!({
@@ -275,6 +297,8 @@ pub fn start_reporter(
                 continue;
             }
 
+            // spawn_blocking needs a 'static owned message (it can't borrow `buf`).
+            let line_owned = line.to_string();
             let handle_blocking = handle.clone();
             let deck_blocking = deck_id_task.clone();
             let scope_blocking = scope.clone();
@@ -284,7 +308,7 @@ pub fn start_reporter(
             let handled = tauri::async_runtime::spawn_blocking(move || {
                 let state = handle_blocking.state::<AppState>();
                 let conn = state.conn.lock().unwrap_or_else(|e| e.into_inner());
-                handle_message(&conn, &deck_blocking, &scope_blocking, &line)
+                handle_message(&conn, &deck_blocking, &scope_blocking, &line_owned)
             })
             .await;
 
@@ -316,17 +340,36 @@ pub fn start_reporter(
         }
     });
 
-    // Wait for the spawn attempt to report before storing the handle.
-    match tauri::async_runtime::block_on(rx) {
-        Ok(Ok(())) => {
-            let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
-            running.insert(reporter_id, RunningReporter { pump });
-            Ok(())
+    // Reserve the id under one lock acquisition, holding the pump's abort handle.
+    // If a concurrent start_reporter won the race (or it started running between
+    // the fast-path check and here), abort our duplicate pump so its child is
+    // killed by kill_on_drop, and report idempotent success. This closes the
+    // check/insert TOCTOU: two pumps must never exist for one id — the loser's
+    // JoinHandle would otherwise be dropped, and dropping a Tokio handle does NOT
+    // abort the task, leaving an unreachable pump that keeps its child alive.
+    {
+        let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
+        if running.contains_key(&reporter_id) {
+            pump.abort();
+            return Ok(());
         }
-        Ok(Err(msg)) => Err(CommandError { message: msg }),
-        Err(_) => Err(CommandError {
-            message: "Reporter task ended before reporting spawn status".to_string(),
-        }),
+        running.insert(reporter_id.clone(), RunningReporter { pump });
+    }
+
+    // Wait for the spawn attempt. On failure the child never started (the task
+    // returns before its own registry cleanup runs), so roll back the reservation.
+    match tauri::async_runtime::block_on(rx) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(msg)) => {
+            stop_running(&registry, &reporter_id);
+            Err(CommandError { message: msg })
+        }
+        Err(_) => {
+            stop_running(&registry, &reporter_id);
+            Err(CommandError {
+                message: "Reporter task ended before reporting spawn status".to_string(),
+            })
+        }
     }
 }
 

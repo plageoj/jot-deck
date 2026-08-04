@@ -274,9 +274,11 @@ pub fn begin_card_stream(
 /// ストリーム終了 ―― 最終テキストを commit しロックを解放する（`card.stream.end`, 007 §6.2）。
 ///
 /// ストリーム中は占有ロックが排他制御なので、CAS（`patch_card` の `expected_updated_at`）は
-/// 取らない ―― ただし**まだ `holder` がロックを保持していること**を確認する。リース失効で
-/// 他者に奪取されていたら `Conflict` を返し、書きかけを黙って上書きさせない。確認後に content を
-/// 確定書き込みし、ロックを解放して commit 済みカードを返す。
+/// 取らない ―― 代わりに **`holder` がロックを保持している間だけ書く**。確認・書き込み・解放を
+/// `card::commit_stream_and_release` が 1 本の条件付き UPDATE で原子的に行うため、判定と
+/// 書き込みの隙に他プロセスがリース失効ロックを奪って書きかけを上書きする TOCTOU が起きない。
+/// 失効・奪取済みなら `Conflict`（削除済みなら `InvalidOperation`）を返し、書きかけを黙って
+/// 上書きさせない。
 pub fn end_card_stream(
     conn: &Connection,
     deck_id: &str,
@@ -284,18 +286,9 @@ pub fn end_card_stream(
     holder: &str,
     content: &str,
 ) -> Result<Card> {
-    let card = visible_card(conn, deck_id, card_id)?;
+    visible_card(conn, deck_id, card_id)?;
     ensure_card_length(content)?;
-    // 失効・奪取の検出: end 時点でロックが自分のものでなければ確定させない。
-    if card.locked_by.as_deref() != Some(holder) {
-        return Err(JotDeckError::Conflict(format!(
-            "Stream lock for card {} is no longer held by {} (lease expired or taken over)",
-            card_id, holder
-        )));
-    }
-    card::update_content(conn, card_id, content)?;
-    // Return the post-release card so the caller sees the lock cleared.
-    card::release_lock(conn, card_id, holder)
+    card::commit_stream_and_release(conn, card_id, holder, content)
 }
 
 /// カードを論理削除する（`delete_card`）。物理削除・復元はエージェントに公開せず、
@@ -1147,6 +1140,12 @@ mod tests {
         // reporter:1 can no longer commit its stream — the lock moved on.
         let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "x").unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
+        // The conflicting end must NOT have overwritten content or stolen the
+        // lock: the atomic `WHERE locked_by = holder` guard leaves reporter:2's
+        // takeover intact (the whole point of the single-statement commit).
+        let after = card::get_by_id(&f.conn, &card.id).unwrap();
+        assert_eq!(after.content, "draft");
+        assert_eq!(after.locked_by.as_deref(), Some("reporter:2"));
     }
 
     #[test]

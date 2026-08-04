@@ -281,6 +281,42 @@ pub fn acquire_lock(conn: &Connection, id: &str, locked_by_id: &str) -> Result<C
     }))
 }
 
+/// ストリーム終了時の確定書き込み（`card.stream.end`, 007 §6.2 / 002 §5.2）。
+///
+/// `locked_by` が `holder` のときだけ content を書き、**同じ 1 本の条件付き UPDATE で
+/// ロックも解放する**。判定（誰が持っているか）と書き込み・解放を分けると、その隙に別
+/// プロセスがリース失効ロックを奪って自分の書きかけを持つ状況で、こちらの古い content が
+/// 相手の作業を黙って上書きしてしまう（TOCTOU）。1 文に畳むことで、複数プロセスが同一
+/// ファイルを開いていても取り違えない。0 行更新なら失効・奪取・削除として区別して返す。
+pub fn commit_stream_and_release(
+    conn: &Connection,
+    id: &str,
+    holder: &str,
+    content: &str,
+) -> Result<Card> {
+    let now = Utc::now();
+    let affected = conn.execute(
+        "UPDATE cards SET content = ?1, updated_at = ?2, locked_by = NULL, locked_at = NULL
+         WHERE id = ?3 AND locked_by = ?4 AND deleted_at IS NULL",
+        params![content, now.to_rfc3339(), id, holder],
+    )?;
+
+    if affected == 1 {
+        tag::sync_card_tags(conn, id, content)?;
+        return get_by_id(conn, id);
+    }
+
+    // 0 行更新: 存在しない/削除済み or リース失効・他者奪取で holder が保持していない。
+    Err(classify_write_failure(conn, id, "Cannot update deleted card", |card| {
+        format!(
+            "Stream lock for card {} is no longer held by {} (now: {})",
+            id,
+            holder,
+            card.locked_by.as_deref().unwrap_or("released")
+        )
+    }))
+}
+
 /// 占有ロックを解放する（002 §5.2）。`locked_by_id` が現在の所有者と一致するときだけ
 /// `locked_by`/`locked_at` をクリアする。所有者でなければ何もしない（既に失効・他者が
 /// 奪取済みのケースを冪等に扱う）。

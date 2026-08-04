@@ -227,6 +227,15 @@ export class DeckData {
   // many deltas into one repaint, never 1 delta = 1 render).
   private pendingDeltas: Record<string, string> = {};
   private deltaFlushHandle: number | null = null;
+  // Per-card inactivity timer. A stream overlay is opened on `begin` and normally
+  // dropped on `end`; if a Reporter dies between the two (crash, killed, pipe
+  // closed), no `end` ever arrives and the card would stay stuck read-only. Each
+  // begin/delta re-arms this timer; if it fires, the stale overlay is evicted so
+  // the card becomes editable again. A late `end` still reconciles via reload, so
+  // eviction is safe. (007 §5 keeps streams short-lived, so silence this long
+  // means the Reporter is gone.)
+  private streamTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  private static readonly STREAM_INACTIVITY_MS = 30_000;
 
   /** Coalesce a burst of change signals into one `externalChangeTick` bump. */
   private scheduleExternalReload(): void {
@@ -281,14 +290,45 @@ export class DeckData {
         // Open the overlay so the card renders as AI-generating immediately,
         // even before the first delta arrives.
         this.streamingText[e.card_id] = "";
+        this.armStreamTimeout(e.card_id);
         break;
       case "delta":
         this.bufferDelta(e.card_id, e.chunk ?? "");
+        this.armStreamTimeout(e.card_id);
         break;
       case "end":
         void this.endStream(e.card_id, e.column_id);
         break;
     }
+  }
+
+  /** (Re)arm the per-card inactivity timer: if no delta/end arrives within the
+   * window, evict the stale overlay so a dead Reporter can't leave the card
+   * stuck read-only. */
+  private armStreamTimeout(cardId: string): void {
+    const existing = this.streamTimers[cardId];
+    if (existing) clearTimeout(existing);
+    this.streamTimers[cardId] = setTimeout(() => {
+      this.evictStalledStream(cardId);
+    }, DeckData.STREAM_INACTIVITY_MS);
+  }
+
+  /** Clear the inactivity timer for a card, if any. */
+  private clearStreamTimeout(cardId: string): void {
+    const timer = this.streamTimers[cardId];
+    if (timer) {
+      clearTimeout(timer);
+      delete this.streamTimers[cardId];
+    }
+  }
+
+  /** Drop a stalled stream's overlay without committing (no `end` arrived).
+   * The DB-backed card is untouched, so it simply reverts to its last committed
+   * text and becomes editable again. */
+  private evictStalledStream(cardId: string): void {
+    delete this.streamTimers[cardId];
+    delete this.streamingText[cardId];
+    delete this.pendingDeltas[cardId];
   }
 
   /** Buffer a delta chunk and schedule a single per-frame flush (007 §8.1). */
@@ -322,6 +362,7 @@ export class DeckData {
     } catch (e) {
       console.error(`Failed to reload after stream end for ${cardId}:`, e);
     } finally {
+      this.clearStreamTimeout(cardId);
       delete this.streamingText[cardId];
       delete this.pendingDeltas[cardId];
     }
@@ -379,7 +420,13 @@ export class DeckData {
       cancelAnimationFrame(this.deltaFlushHandle);
       this.deltaFlushHandle = null;
     }
+    // After the listeners are gone no `end` event can arrive, so any open stream
+    // overlay would be permanently stale. Cancel pending timers and drop all
+    // overlay state (deltas + streaming text) so nothing stays stuck read-only.
+    for (const timer of Object.values(this.streamTimers)) clearTimeout(timer);
+    this.streamTimers = {};
     this.pendingDeltas = {};
+    this.streamingText = {};
   }
 
   async createDeck(): Promise<Deck | null> {
