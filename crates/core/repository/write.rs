@@ -1149,6 +1149,26 @@ mod tests {
     }
 
     #[test]
+    fn end_stream_conflicts_after_own_lease_expiry() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
+        // Expire reporter:1's own lease with nobody taking over. An expired lease
+        // is no longer exclusive (acquire_lock would let another editor in), so
+        // the holder loses the right to commit — content must stay untouched.
+        f.conn
+            .execute(
+                "UPDATE cards SET locked_at = '2000-01-01T00:00:00.000000000Z' WHERE id = ?1",
+                params![card.id],
+            )
+            .unwrap();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "late").unwrap_err();
+        assert!(matches!(err, JotDeckError::Conflict(_)));
+        let after = card::get_by_id(&f.conn, &card.id).unwrap();
+        assert_eq!(after.content, "draft");
+    }
+
+    #[test]
     fn end_stream_rejects_too_long_content() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
