@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use jot_deck_core::repository::setting;
@@ -91,17 +92,22 @@ impl ReporterConfig {
     }
 }
 
-/// A running Reporter: just the pump task's abort handle. Aborting it drops the
-/// owned child, and `kill_on_drop` kills the OS process — so the registry needs
-/// nothing more than this to enforce the parent-subordinate lifecycle.
+/// A running Reporter: the pump task's abort handle, plus the id of *this* run.
+/// Aborting the pump drops the owned child, and `kill_on_drop` kills the OS
+/// process — so the registry needs nothing more to enforce the parent-subordinate
+/// lifecycle. The `run_id` distinguishes successive runs of the same Reporter, so
+/// an exiting pump can only ever clear its own entry (see `start_reporter`).
 struct RunningReporter {
     pump: JoinHandle<()>,
+    run_id: u64,
 }
 
 /// Managed state: which Reporters are currently running, keyed by `reporter_id`.
 #[derive(Default)]
 pub struct ReporterRegistry {
     running: Mutex<HashMap<String, RunningReporter>>,
+    /// Monotonic source of `RunningReporter::run_id`, unique per spawn attempt.
+    next_run_id: AtomicU64,
 }
 
 /// The settings key holding a deck's Reporter registrations.
@@ -257,8 +263,18 @@ pub fn start_reporter(
     // runtime context); a oneshot reports spawn success/failure back so the
     // command can surface a bad binary path to the user synchronously.
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    // Gate: the pump does nothing until the reservation below hands it its
+    // `run_id`. Without this the child could exit — and run its registry cleanup
+    // — before the entry it is supposed to clear even exists, leaving a finished
+    // task registered as running forever (and `start_reporter` short-circuiting
+    // on it). A dropped sender means we lost the dedup race or the reservation
+    // rolled back, so the pump exits without spawning anything.
+    let (registered_tx, registered_rx) = tokio::sync::oneshot::channel::<u64>();
 
     let pump = tauri::async_runtime::spawn(async move {
+        let Ok(run_id) = registered_rx.await else {
+            return;
+        };
         let mut cmd = TokioCommand::new(&config.command);
         cmd.args(&config.args)
             .envs(&config.env)
@@ -371,9 +387,17 @@ pub fn start_reporter(
         // entry itself; this covers self-termination.)
         if let Some(registry) = handle.try_state::<ReporterRegistry>() {
             let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
+            // Clear the entry only if it is still *our* run: a stop-and-restart
+            // can register a fresh pump under the same id while this one is
+            // winding down, and removing that would orphan a live child (the UI
+            // would show it stopped and `stop_reporter` would no longer reach it).
+            let ours = running
+                .get(&reporter_id_task)
+                .is_some_and(|r| r.run_id == run_id);
             // Only signal an exit the UI didn't ask for: if the entry is already
             // gone, a stop_reporter aborted us and the UI knows.
-            if running.remove(&reporter_id_task).is_some() {
+            if ours {
+                running.remove(&reporter_id_task);
                 let _ = handle.emit(
                     REPORTER_EXIT_EVENT,
                     serde_json::json!({ "reporter_id": reporter_id_task }),
@@ -389,14 +413,19 @@ pub fn start_reporter(
     // check/insert TOCTOU: two pumps must never exist for one id — the loser's
     // JoinHandle would otherwise be dropped, and dropping a Tokio handle does NOT
     // abort the task, leaving an unreachable pump that keeps its child alive.
-    {
+    let run_id = {
         let mut running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
         if running.contains_key(&reporter_id) {
             pump.abort();
             return Ok(());
         }
-        running.insert(reporter_id.clone(), RunningReporter { pump });
-    }
+        let run_id = registry.next_run_id.fetch_add(1, Ordering::Relaxed);
+        running.insert(reporter_id.clone(), RunningReporter { pump, run_id });
+        run_id
+    };
+    // Reservation is visible; release the gate so the pump may spawn its child.
+    // From here the pump's cleanup can only ever remove this run's entry.
+    let _ = registered_tx.send(run_id);
 
     // Wait for the spawn attempt. On failure the child never started (the task
     // returns before its own registry cleanup runs), so roll back the reservation.

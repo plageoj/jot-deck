@@ -76,7 +76,10 @@ async function fillForm(name: string, command: string) {
 
 beforeEach(() => {
   mockEnv.tauri = false;
-  mockListen.mockClear();
+  // Reset the implementation too, not just the calls: the Tauri case installs a
+  // persistent one, which would otherwise leak into later tests.
+  mockListen.mockReset();
+  mockListen.mockImplementation(async () => () => {});
 });
 
 afterEach(() => {
@@ -141,7 +144,7 @@ describe("ReportersDialog start/stop", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
     expect(props.onStart).toHaveBeenCalledWith("deck-1", "r1");
-    await waitFor(() => expect(screen.getByText("Running")).toBeTruthy());
+    expect(await screen.findByText("Running")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
   });
 
@@ -154,7 +157,7 @@ describe("ReportersDialog start/stop", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
     expect(props.onStop).toHaveBeenCalledWith("r1");
-    await waitFor(() => expect(screen.getByText("Stopped")).toBeTruthy());
+    expect(await screen.findByText("Stopped")).toBeTruthy();
   });
 
   it("shows a spawn failure on the row and leaves it stopped", async () => {
@@ -167,7 +170,7 @@ describe("ReportersDialog start/stop", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-    await waitFor(() => expect(screen.getByText(/ENOENT/)).toBeTruthy());
+    expect(await screen.findByText(/ENOENT/)).toBeTruthy();
     expect(screen.getByText("Stopped")).toBeTruthy();
     // The row stays actionable so the user can fix the path and retry.
     expect(
@@ -186,7 +189,7 @@ describe("ReportersDialog start/stop", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Stop" }));
 
-    await waitFor(() => expect(screen.getByText(/no such process/)).toBeTruthy());
+    expect(await screen.findByText(/no such process/)).toBeTruthy();
     expect(screen.getByText("Running")).toBeTruthy();
   });
 
@@ -208,7 +211,7 @@ describe("ReportersDialog start/stop", () => {
       ).toBe(true),
     );
     release();
-    await waitFor(() => expect(screen.getByText("Running")).toBeTruthy());
+    expect(await screen.findByText("Running")).toBeTruthy();
   });
 
   it("clears a previous row error when the action is retried", async () => {
@@ -222,11 +225,11 @@ describe("ReportersDialog start/stop", () => {
     });
 
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
-    await waitFor(() => expect(screen.getByText(/ENOENT/)).toBeTruthy());
+    expect(await screen.findByText(/ENOENT/)).toBeTruthy();
 
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-    await waitFor(() => expect(screen.getByText("Running")).toBeTruthy());
+    expect(await screen.findByText("Running")).toBeTruthy();
     expect(screen.queryByText(/ENOENT/)).toBeNull();
   });
 });
@@ -267,11 +270,9 @@ describe("ReportersDialog removal", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
     expect(props.onRemove).toHaveBeenCalledWith("deck-1", "r1");
-    await waitFor(() =>
-      expect(
-        screen.getByText("No reporters registered for this deck yet."),
-      ).toBeTruthy(),
-    );
+    expect(
+      await screen.findByText("No reporters registered for this deck yet."),
+    ).toBeTruthy();
   });
 
   it("keeps the row and reports the failure when removal fails", async () => {
@@ -285,7 +286,7 @@ describe("ReportersDialog removal", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
-    await waitFor(() => expect(screen.getByText(/registry locked/)).toBeTruthy());
+    expect(await screen.findByText(/registry locked/)).toBeTruthy();
     // Confirmation is dismissed, the reporter is still listed.
     expect(screen.queryByText("Remove?")).toBeNull();
     expect(screen.getByText("r1-name")).toBeTruthy();
@@ -343,9 +344,9 @@ describe("ReportersDialog add/edit form", () => {
       allowed_columns: null,
     });
     // The form closes once the registration lands.
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "+ Add reporter" })).toBeTruthy(),
-    );
+    expect(
+      await screen.findByRole("button", { name: "+ Add reporter" }),
+    ).toBeTruthy();
   });
 
   it("rejects an env line without KEY=VALUE", async () => {
@@ -389,11 +390,9 @@ describe("ReportersDialog add/edit form", () => {
     await fillForm("Minutes", "/opt/whisper");
     await fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(/Failed to save reporter:.*disk full/),
-      ).toBeTruthy(),
-    );
+    expect(
+      await screen.findByText(/Failed to save reporter:.*disk full/),
+    ).toBeTruthy();
     // Still editable, so the draft isn't lost.
     expect(screen.getByLabelText("Name")).toBeTruthy();
   });
@@ -537,11 +536,29 @@ describe("ReportersDialog under Tauri", () => {
     expect(screen.getByText("Running")).toBeTruthy();
     emitExit?.({ payload: { reporter_id: "r1" } });
 
-    await waitFor(() => expect(screen.getByText("Stopped")).toBeTruthy());
+    expect(await screen.findByText("Stopped")).toBeTruthy();
   });
 
   it("does not subscribe to reporter-exit outside Tauri", async () => {
     await renderDialog();
     expect(mockListen).not.toHaveBeenCalled();
+  });
+
+  it("drops a subscription that resolves after the dialog is closed", async () => {
+    mockEnv.tauri = true;
+    const unlisten = vi.fn();
+    let resolveListen: (fn: () => void) => void = () => {};
+    mockListen.mockImplementation(
+      () => new Promise<() => void>((resolve) => (resolveListen = resolve)),
+    );
+
+    const { unmount } = render(ReportersDialog, { props: makeProps() });
+    await waitFor(() => expect(mockListen).toHaveBeenCalled());
+    // Close while listen() is still pending, then let it settle.
+    unmount();
+    resolveListen(unlisten);
+
+    // Nothing is left listening for a component that is already gone.
+    await waitFor(() => expect(unlisten).toHaveBeenCalled());
   });
 });

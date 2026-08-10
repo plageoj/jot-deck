@@ -45,6 +45,14 @@
     }
   });
 
+  // The Reporters dialog is per-deck, so it unmounts if the deck disappears
+  // (deleting the last deck) — without ever running its onClose. The flag would
+  // stay set, and ActionDispatcher suppresses every board keybinding while it
+  // is, leaving the board deaf with no dialog to take the keys. Clear it here.
+  $effect(() => {
+    if (!data.currentDeck) focus.showReporters = false;
+  });
+
   // Persist & restore focus state per deck. Switching the deck reassigns
   // FocusManager's persistence target (saving prior state, then loading the
   // new deck's saved state). Clamping to actual column/card counts waits for

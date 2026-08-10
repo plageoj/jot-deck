@@ -63,6 +63,11 @@
   let preservedAllowedColumns = $state<string[] | null>(null);
 
   let reporterExitUnlisten: (() => void) | null = null;
+  // `listen()` is awaited after mount, so the dialog can be closed before the
+  // subscription exists. Without this flag the late subscription would outlive
+  // the component — open/close cycles would pile up listeners mutating state
+  // nobody renders.
+  let destroyed = false;
 
   const isRunning = (id: string) => running.includes(id);
 
@@ -89,16 +94,21 @@
     // A child process ending on its own emits `reporter-exit`; drop its badge.
     if (isTauri()) {
       const { listen } = await import("@tauri-apps/api/event");
-      reporterExitUnlisten = await listen<{ reporter_id: string }>(
+      const unlisten = await listen<{ reporter_id: string }>(
         "reporter-exit",
         ({ payload }) => {
           running = running.filter((id) => id !== payload.reporter_id);
         },
       );
+      // Closed while we were subscribing: drop it immediately instead of
+      // handing it to a component that will never run onDestroy again.
+      if (destroyed) unlisten();
+      else reporterExitUnlisten = unlisten;
     }
   });
 
   onDestroy(() => {
+    destroyed = true;
     reporterExitUnlisten?.();
     reporterExitUnlisten = null;
   });
