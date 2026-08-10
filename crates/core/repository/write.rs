@@ -266,8 +266,9 @@ pub fn begin_card_stream(
     deck_id: &str,
     card_id: &str,
     holder: &str,
+    scope: &WriteScope,
 ) -> Result<Card> {
-    visible_card(conn, deck_id, card_id)?;
+    writable_card(conn, deck_id, card_id, scope)?;
     card::acquire_lock(conn, card_id, holder)
 }
 
@@ -285,8 +286,9 @@ pub fn end_card_stream(
     card_id: &str,
     holder: &str,
     content: &str,
+    scope: &WriteScope,
 ) -> Result<Card> {
-    visible_card(conn, deck_id, card_id)?;
+    writable_card(conn, deck_id, card_id, scope)?;
     ensure_card_length(content)?;
     card::commit_stream_and_release(conn, card_id, holder, content)
 }
@@ -1080,7 +1082,7 @@ mod tests {
     fn begin_stream_locks_visible_card() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
-        let locked = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
+        let locked = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         assert_eq!(locked.locked_by.as_deref(), Some("reporter:1"));
         assert!(locked.locked_at.is_some());
     }
@@ -1097,7 +1099,7 @@ mod tests {
             },
         )
         .unwrap();
-        let err = begin_card_stream(&f.conn, &f.deck_id, &hidden.id, "reporter:1").unwrap_err();
+        let err = begin_card_stream(&f.conn, &f.deck_id, &hidden.id, "reporter:1", &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::NotFound(_)));
     }
 
@@ -1105,8 +1107,8 @@ mod tests {
     fn begin_stream_conflicts_when_held_by_another() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
-        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
-        let err = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:2").unwrap_err();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        let err = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:2", &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
     }
 
@@ -1114,9 +1116,9 @@ mod tests {
     fn end_stream_commits_content_and_releases_lock() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
-        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         let committed =
-            end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "final text #done").unwrap();
+            end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "final text #done", &sc()).unwrap();
         assert_eq!(committed.content, "final text #done");
         assert!(committed.locked_by.is_none());
         assert!(committed.locked_at.is_none());
@@ -1127,7 +1129,7 @@ mod tests {
     fn end_stream_conflicts_after_lease_takeover() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
-        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         // Expire reporter:1's lease so a second holder can take over (as the lock
         // primitive tests do), then reporter:2 acquires.
         f.conn
@@ -1138,7 +1140,7 @@ mod tests {
             .unwrap();
         card::acquire_lock(&f.conn, &card.id, "reporter:2").unwrap();
         // reporter:1 can no longer commit its stream — the lock moved on.
-        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "x").unwrap_err();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "x", &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
         // The conflicting end must NOT have overwritten content or stolen the
         // lock: the atomic `WHERE locked_by = holder` guard leaves reporter:2's
@@ -1151,8 +1153,8 @@ mod tests {
     #[test]
     fn end_stream_conflicts_after_own_lease_expiry() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None).unwrap();
-        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         // Expire reporter:1's own lease with nobody taking over. An expired lease
         // is no longer exclusive (acquire_lock would let another editor in), so
         // the holder loses the right to commit — content must stay untouched.
@@ -1162,7 +1164,7 @@ mod tests {
                 params![card.id],
             )
             .unwrap();
-        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "late").unwrap_err();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "late", &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
         let after = card::get_by_id(&f.conn, &card.id).unwrap();
         assert_eq!(after.content, "draft");
@@ -1172,9 +1174,9 @@ mod tests {
     fn end_stream_rejects_too_long_content() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
-        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1").unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         let long = "a".repeat(query::MAX_CARD_LENGTH + 1);
-        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &long).unwrap_err();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &long, &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 }

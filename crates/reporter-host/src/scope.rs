@@ -13,6 +13,8 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use jot_deck_core::write::WriteScope;
+
 use crate::protocol::RpcError;
 
 /// Default per-Reporter write cap (writes/minute). Bounds the "many tiny writes"
@@ -112,10 +114,12 @@ impl RateLimiter {
 pub struct ReporterScope {
     capabilities: Capabilities,
     rate_limiter: RateLimiter,
-    /// Optional write allowlist by column ULID. `None` = the whole Deck (minus
-    /// `private`) is writable. `Some` narrows writes to these columns and, per
-    /// 008 §4.5, disables `column.ensure` *creation* (a fixed set is intended).
-    allowed_columns: Option<Vec<String>>,
+    /// Write allowlist by column ULID, in the form core enforces it. Unrestricted
+    /// = the whole Deck (minus `private`) is writable; an allowlist narrows writes
+    /// to those columns and, per 008 §4.5, disables `column.ensure` *creation*
+    /// (a fixed set is intended). Core is the only place that checks it — this
+    /// scope carries the policy, it does not re-implement the gate.
+    write_scope: WriteScope,
     /// Opaque id identifying this Reporter in write-attribution logs and as the
     /// occupancy-lock holder in Phase 2 (002 §5.2 `locked_by`).
     pub reporter_id: String,
@@ -126,7 +130,7 @@ impl Default for ReporterScope {
         Self {
             capabilities: Capabilities::default(),
             rate_limiter: RateLimiter::new(DEFAULT_MAX_WRITES_PER_MIN),
-            allowed_columns: None,
+            write_scope: WriteScope::unrestricted(),
             reporter_id: ulid::Ulid::generate().to_string(),
         }
     }
@@ -142,7 +146,10 @@ impl ReporterScope {
         Self {
             capabilities,
             rate_limiter: RateLimiter::new(max_writes_per_min),
-            allowed_columns,
+            write_scope: match allowed_columns {
+                None => WriteScope::unrestricted(),
+                Some(cols) => WriteScope::allowlist(cols),
+            },
             reporter_id,
         }
     }
@@ -170,25 +177,11 @@ impl ReporterScope {
             .map_err(RpcError::policy_denied)
     }
 
-    /// Whether `column.ensure` may *create* a new column: only when `structure`
-    /// is enabled and no write allowlist is set (an allowlist means a fixed set,
-    /// exclusive with creation — 008 §4.5). Getting an existing column is always
-    /// allowed and does not consult this.
-    pub fn allow_create(&self) -> bool {
-        self.capabilities.structure && self.allowed_columns.is_none()
-    }
-
-    /// Enforce the write allowlist against a target column ULID. `None` allowlist
-    /// permits any (visible) column; a set allowlist rejects anything outside it
-    /// with an authorization error (008 §4.5 write-scope semantics).
-    pub fn ensure_column_allowed(&self, column_id: &str) -> Result<(), RpcError> {
-        match &self.allowed_columns {
-            None => Ok(()),
-            Some(list) if list.iter().any(|c| c == column_id) => Ok(()),
-            Some(_) => Err(RpcError::new(
-                crate::protocol::UNAUTHORIZED,
-                format!("Column not in this Reporter's write allowlist: {}", column_id),
-            )),
-        }
+    /// This Reporter's write allowlist, to hand to every `jot_deck_core::write`
+    /// call. The allowlist gate (and the `column.ensure` create-vs-get rule it
+    /// implies) lives in core with the visibility gate, so the two can never
+    /// drift apart here — 008 §4.5 / write.rs's trust boundary.
+    pub fn write_scope(&self) -> &WriteScope {
+        &self.write_scope
     }
 }

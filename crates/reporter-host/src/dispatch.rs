@@ -142,13 +142,13 @@ fn card_append(
 ) -> Result<DispatchOutcome, RpcError> {
     scope.begin_write(scope.capabilities().append, "append")?;
     let p: AppendParams = parse_params(params)?;
-    scope.ensure_column_allowed(&p.column_id)?;
     let card = write::append_card(
         conn,
         deck_id,
         &p.column_id,
         &p.content,
         p.idempotency_key.as_deref(),
+        scope.write_scope(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -178,12 +178,14 @@ fn card_patch(
                 "expected_updated_at must be an RFC3339 timestamp (the updated_at you last read)",
             )
         })?;
-    // Resolve the card's column through the visibility-enforced read so the
-    // allowlist can be checked against it (read_card hides private/other-deck
-    // as NotFound, so this never leaks an out-of-scope card's existence).
-    let existing = query::read_card(conn, deck_id, &p.card_id)?;
-    scope.ensure_column_allowed(&existing.column_id)?;
-    let card = write::patch_card(conn, deck_id, &p.card_id, &p.content, expected_updated_at)?;
+    let card = write::patch_card(
+        conn,
+        deck_id,
+        &p.card_id,
+        &p.content,
+        expected_updated_at,
+        scope.write_scope(),
+    )?;
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
         Committed::Card {
@@ -202,13 +204,8 @@ fn card_move(
     // under `edit`).
     scope.begin_write(scope.capabilities().edit, "edit")?;
     let p: MoveCardParams = parse_params(params)?;
-    // Both the source column (the card's current column) and the destination
-    // must be within the write allowlist — a move writes to both sides.
-    let existing = query::read_card(conn, deck_id, &p.card_id)?;
-    scope.ensure_column_allowed(&existing.column_id)?;
-    if let Some(dest) = p.to_column_id.as_deref() {
-        scope.ensure_column_allowed(dest)?;
-    }
+    // Core checks both sides of the move against the write scope — the card's
+    // current column and the destination.
     let card = write::move_card(
         conn,
         deck_id,
@@ -216,6 +213,7 @@ fn card_move(
         p.to_column_id.as_deref(),
         p.before_card_id.as_deref(),
         p.after_card_id.as_deref(),
+        scope.write_scope(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -237,9 +235,7 @@ fn card_delete(
 ) -> Result<DispatchOutcome, RpcError> {
     scope.begin_write(scope.capabilities().delete, "delete")?;
     let p: DeleteParams = parse_params(params)?;
-    let existing = query::read_card(conn, deck_id, &p.card_id)?;
-    scope.ensure_column_allowed(&existing.column_id)?;
-    let card = write::delete_card(conn, deck_id, &p.card_id)?;
+    let card = write::delete_card(conn, deck_id, &p.card_id, scope.write_scope())?;
     let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "deleted_at": deleted_at }),
@@ -258,11 +254,13 @@ fn card_stream_begin(
     // A stream is a form of edit — gate it under the `edit` capability.
     scope.begin_write(scope.capabilities().edit, "edit")?;
     let p: StreamBeginParams = parse_params(params)?;
-    // Resolve the card's column for the allowlist check (read_card hides
-    // out-of-scope cards as NotFound, same as card.patch).
-    let existing = query::read_card(conn, deck_id, &p.card_id)?;
-    scope.ensure_column_allowed(&existing.column_id)?;
-    let card = write::begin_card_stream(conn, deck_id, &p.card_id, &scope.reporter_id)?;
+    let card = write::begin_card_stream(
+        conn,
+        deck_id,
+        &p.card_id,
+        &scope.reporter_id,
+        scope.write_scope(),
+    )?;
     Ok(DispatchOutcome::wrote(
         json!({
             "card_id": card.id,
@@ -284,9 +282,14 @@ fn card_stream_end(
 ) -> Result<DispatchOutcome, RpcError> {
     scope.begin_write(scope.capabilities().edit, "edit")?;
     let p: StreamEndParams = parse_params(params)?;
-    let existing = query::read_card(conn, deck_id, &p.card_id)?;
-    scope.ensure_column_allowed(&existing.column_id)?;
-    let card = write::end_card_stream(conn, deck_id, &p.card_id, &scope.reporter_id, &p.content)?;
+    let card = write::end_card_stream(
+        conn,
+        deck_id,
+        &p.card_id,
+        &scope.reporter_id,
+        &p.content,
+        scope.write_scope(),
+    )?;
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
         Committed::StreamEnd {
@@ -313,7 +316,7 @@ fn column_ensure(
         &p.name,
         &p.description,
         p.private,
-        scope.allow_create(),
+        scope.write_scope(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -334,7 +337,6 @@ fn column_update(
 ) -> Result<DispatchOutcome, RpcError> {
     scope.begin_write(scope.capabilities().structure, "structure")?;
     let p: UpdateColumnParams = parse_params(params)?;
-    scope.ensure_column_allowed(&p.column_id)?;
     // description: Option<Option<String>> → Option<Option<&str>>, where the
     // inner empty string means "clear to NULL" (matches the MCP update_column).
     let description = p
@@ -348,6 +350,7 @@ fn column_update(
         p.name.as_deref(),
         description,
         p.private,
+        scope.write_scope(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -368,13 +371,13 @@ fn column_move(
 ) -> Result<DispatchOutcome, RpcError> {
     scope.begin_write(scope.capabilities().structure, "structure")?;
     let p: MoveColumnParams = parse_params(params)?;
-    scope.ensure_column_allowed(&p.column_id)?;
     let column = write::move_column(
         conn,
         deck_id,
         &p.column_id,
         p.before_column_id.as_deref(),
         p.after_column_id.as_deref(),
+        scope.write_scope(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({ "column_id": column.id, "position": column.position }),
