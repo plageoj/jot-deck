@@ -10,6 +10,8 @@
     editingCardId?: string | null;
     filteredCardIds?: Set<string> | null;
     activeTag?: string | null;
+    /** card_id → in-progress streamed text (007 §6.2). */
+    streamingText?: Record<string, string>;
     onAddCard?: (columnId: string) => void;
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
@@ -29,6 +31,7 @@
     editingCardId = null,
     filteredCardIds = null,
     activeTag = null,
+    streamingText = {},
     onAddCard,
     onSaveCard,
     onCancelEdit,
@@ -63,6 +66,7 @@
         {editingCardId}
         {filteredCardIds}
         {activeTag}
+        {streamingText}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
         {onSaveCard}
         {onCancelEdit}

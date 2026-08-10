@@ -39,6 +39,8 @@ stateDiagram-v2
 
 > **Note:** `Tutorial` は通常のフォーカス遷移とは異なり、下層の Column / Card / Edit に重ねて表示される一時オーバーレイ。詳細は `docs/006-tutorial.md` 4.2 を参照。
 
+> **Streaming（AI 生成中の read-only）:** Reporter がストリーム中のカード（`007-reporter-protocol.md` §6.2 の `card.stream.begin`〜`end`）は、そのカード単位で read-only になる。グローバルなフォーカスモードは追加せず（複数カラムのカードが同時にストリームし得るため）、当該カードだけが編集突入（`i` / `a` / `Enter` / クリック）を弾かれ、`◍ AI generating` を表示する。ユーザは他カードへ自由にナビゲートでき、`end`（確定）でロックが解放されると通常の編集に戻る。
+
 ---
 
 ## 2. Column フォーカス

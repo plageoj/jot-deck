@@ -10,6 +10,9 @@
     editingCardId?: string | null;
     filteredCardIds?: Set<string> | null;
     activeTag?: string | null;
+    /** card_id → in-progress streamed text for cards receiving a Reporter
+     * stream (007 §6.2). Absent keys render normally. */
+    streamingText?: Record<string, string>;
     onAddCard?: () => void;
     onSaveCard?: (cardId: string, content: string) => void;
     onCancelEdit?: () => void;
@@ -29,6 +32,7 @@
     editingCardId = null,
     filteredCardIds = null,
     activeTag = null,
+    streamingText = {},
     onAddCard,
     onSaveCard,
     onCancelEdit,
@@ -82,6 +86,7 @@
           focused={index === focusedCardIndex}
           editing={editingCardId === card.id}
           dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
+          streamingText={streamingText[card.id] ?? null}
           {activeTag}
           onSave={(content) => onSaveCard?.(card.id, content)}
           {onCancelEdit}

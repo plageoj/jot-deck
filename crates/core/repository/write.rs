@@ -257,6 +257,42 @@ pub fn patch_card(
     card::update_content_cas(conn, card_id, content, expected_updated_at)
 }
 
+/// ストリーム開始 ―― 対象カードを Reporter 占有としてロック取得する（`card.stream.begin`,
+/// 007 §6.2 / §7）。可視カード（別 Deck / private / 削除済みは `NotFound`）に対し
+/// `card::acquire_lock` を呼び、他者が有効占有中なら `Conflict`。取得成功でロック済みカードを
+/// 返す。`holder` は Reporter の識別子（占有ロックの `locked_by`, 002 §5.2）。
+pub fn begin_card_stream(
+    conn: &Connection,
+    deck_id: &str,
+    card_id: &str,
+    holder: &str,
+    scope: &WriteScope,
+) -> Result<Card> {
+    writable_card(conn, deck_id, card_id, scope)?;
+    card::acquire_lock(conn, card_id, holder)
+}
+
+/// ストリーム終了 ―― 最終テキストを commit しロックを解放する（`card.stream.end`, 007 §6.2）。
+///
+/// ストリーム中は占有ロックが排他制御なので、CAS（`patch_card` の `expected_updated_at`）は
+/// 取らない ―― 代わりに **`holder` がロックを保持している間だけ書く**。確認・書き込み・解放を
+/// `card::commit_stream_and_release` が 1 本の条件付き UPDATE で原子的に行うため、判定と
+/// 書き込みの隙に他プロセスがリース失効ロックを奪って書きかけを上書きする TOCTOU が起きない。
+/// 失効・奪取済みなら `Conflict`（削除済みなら `InvalidOperation`）を返し、書きかけを黙って
+/// 上書きさせない。
+pub fn end_card_stream(
+    conn: &Connection,
+    deck_id: &str,
+    card_id: &str,
+    holder: &str,
+    content: &str,
+    scope: &WriteScope,
+) -> Result<Card> {
+    writable_card(conn, deck_id, card_id, scope)?;
+    ensure_card_length(content)?;
+    card::commit_stream_and_release(conn, card_id, holder, content)
+}
+
 /// カードを論理削除する（`delete_card`）。物理削除・復元はエージェントに公開せず、
 /// 30 日後の cleanup とユーザの削除スタックに委ねる（008 §4.1）。
 pub fn delete_card(
@@ -1038,5 +1074,109 @@ mod tests {
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &scope).unwrap();
         let err = move_card(&f.conn, &f.deck_id, &card.id, Some(&other), None, None, &scope).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
+    }
+
+    // ---- card.stream.* (007 §6.2 / §7) ----
+
+    #[test]
+    fn begin_stream_locks_visible_card() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let locked = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        assert_eq!(locked.locked_by.as_deref(), Some("reporter:1"));
+        assert!(locked.locked_at.is_some());
+    }
+
+    #[test]
+    fn begin_stream_on_private_card_is_not_found() {
+        let f = setup();
+        // Put a card in the private column directly, then stream against it.
+        let hidden = card::create(
+            &f.conn,
+            NewCard {
+                column_id: f.private_col.clone(),
+                content: "hidden".to_string(),
+            },
+        )
+        .unwrap();
+        let err = begin_card_stream(&f.conn, &f.deck_id, &hidden.id, "reporter:1", &sc()).unwrap_err();
+        assert!(matches!(err, JotDeckError::NotFound(_)));
+    }
+
+    #[test]
+    fn begin_stream_conflicts_when_held_by_another() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        let err = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:2", &sc()).unwrap_err();
+        assert!(matches!(err, JotDeckError::Conflict(_)));
+    }
+
+    #[test]
+    fn end_stream_commits_content_and_releases_lock() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        let committed =
+            end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "final text #done", &sc()).unwrap();
+        assert_eq!(committed.content, "final text #done");
+        assert!(committed.locked_by.is_none());
+        assert!(committed.locked_at.is_none());
+        assert!(committed.updated_at > card.updated_at);
+    }
+
+    #[test]
+    fn end_stream_conflicts_after_lease_takeover() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        // Expire reporter:1's lease so a second holder can take over (as the lock
+        // primitive tests do), then reporter:2 acquires.
+        f.conn
+            .execute(
+                "UPDATE cards SET locked_at = '2000-01-01T00:00:00.000000000Z' WHERE id = ?1",
+                params![card.id],
+            )
+            .unwrap();
+        card::acquire_lock(&f.conn, &card.id, "reporter:2").unwrap();
+        // reporter:1 can no longer commit its stream — the lock moved on.
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "x", &sc()).unwrap_err();
+        assert!(matches!(err, JotDeckError::Conflict(_)));
+        // The conflicting end must NOT have overwritten content or stolen the
+        // lock: the atomic `WHERE locked_by = holder` guard leaves reporter:2's
+        // takeover intact (the whole point of the single-statement commit).
+        let after = card::get_by_id(&f.conn, &card.id).unwrap();
+        assert_eq!(after.content, "draft");
+        assert_eq!(after.locked_by.as_deref(), Some("reporter:2"));
+    }
+
+    #[test]
+    fn end_stream_conflicts_after_own_lease_expiry() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        // Expire reporter:1's own lease with nobody taking over. An expired lease
+        // is no longer exclusive (acquire_lock would let another editor in), so
+        // the holder loses the right to commit — content must stay untouched.
+        f.conn
+            .execute(
+                "UPDATE cards SET locked_at = '2000-01-01T00:00:00.000000000Z' WHERE id = ?1",
+                params![card.id],
+            )
+            .unwrap();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "late", &sc()).unwrap_err();
+        assert!(matches!(err, JotDeckError::Conflict(_)));
+        let after = card::get_by_id(&f.conn, &card.id).unwrap();
+        assert_eq!(after.content, "draft");
+    }
+
+    #[test]
+    fn end_stream_rejects_too_long_content() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
+        let long = "a".repeat(query::MAX_CARD_LENGTH + 1);
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &long, &sc()).unwrap_err();
+        assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 }

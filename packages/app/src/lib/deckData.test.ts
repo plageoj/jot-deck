@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import type { Card, Column, Deck } from "$lib/types";
 import type { DatabaseBackend } from "$lib/db";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
@@ -722,6 +722,193 @@ describe("DeckData external changes", () => {
 
   it("stopWatchingExternalChanges is safe when nothing is subscribed", () => {
     expect(() => data.stopWatchingExternalChanges()).not.toThrow();
+  });
+});
+
+describe("DeckData reporter streams", () => {
+  type StreamEvent = {
+    kind: "begin" | "delta" | "end";
+    card_id: string;
+    column_id?: string;
+    chunk?: string;
+  };
+
+  let data: InstanceType<typeof DeckData>;
+  /** Handlers registered by watchExternalChanges, keyed by event name. */
+  let handlers: Record<string, (() => void) | undefined>;
+
+  /** Deliver one `reporter-stream` payload the way the Tauri event bus would. */
+  function emit(e: StreamEvent): void {
+    const handler = handlers["reporter-stream"] as unknown as
+      | ((event: { payload: StreamEvent }) => void)
+      | undefined;
+    handler?.({ payload: e });
+  }
+
+  /** Run the pending animation-frame delta flush (fake timers fake rAF too). */
+  function flushFrame(): void {
+    vi.advanceTimersByTime(20);
+  }
+
+  beforeEach(async () => {
+    resetState();
+    mockEnv.tauri = true;
+    handlers = {};
+    mockListen.mockImplementation(async (event: string, h: () => void) => {
+      handlers[event] = h;
+      return () => {};
+    });
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [makeColumn("col-active", "deck-1")];
+    state.cardsByColumn = new Map([["col-active", []]]);
+
+    data = new DeckData();
+    await data.init();
+    vi.useFakeTimers();
+    await data.watchExternalChanges();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    mockListen.mockReset();
+    mockListen.mockImplementation(async () => () => {});
+  });
+
+  it("subscribes to the reporter change and stream channels", () => {
+    expect(mockListen).toHaveBeenCalledWith(
+      "reporter-change",
+      expect.any(Function),
+    );
+    expect(mockListen).toHaveBeenCalledWith(
+      "reporter-stream",
+      expect.any(Function),
+    );
+  });
+
+  it("funnels a reporter commit into the same debounced reload as external changes", () => {
+    const tick = data.externalChangeTick;
+
+    handlers["reporter-change"]?.();
+    handlers["reporter-change"]?.();
+    vi.advanceTimersByTime(250);
+
+    expect(data.externalChangeTick).toBe(tick + 1);
+  });
+
+  it("begin opens the overlay before any delta arrives", () => {
+    expect(data.isStreaming("card-1")).toBe(false);
+
+    emit({ kind: "begin", card_id: "card-1" });
+
+    expect(data.isStreaming("card-1")).toBe(true);
+    expect(data.streamingText["card-1"]).toBe("");
+  });
+
+  it("coalesces a burst of deltas into one flush of concatenated text", () => {
+    emit({ kind: "begin", card_id: "card-1" });
+    emit({ kind: "delta", card_id: "card-1", chunk: "Hel" });
+    emit({ kind: "delta", card_id: "card-1", chunk: "lo " });
+    emit({ kind: "delta", card_id: "card-1", chunk: "world" });
+
+    // Nothing is painted until the frame runs — deltas are buffered, not applied.
+    expect(data.streamingText["card-1"]).toBe("");
+    flushFrame();
+    expect(data.streamingText["card-1"]).toBe("Hello world");
+  });
+
+  it("treats a missing chunk as empty and keeps the overlay open", () => {
+    emit({ kind: "begin", card_id: "card-1" });
+    emit({ kind: "delta", card_id: "card-1" });
+    flushFrame();
+
+    expect(data.streamingText["card-1"]).toBe("");
+    expect(data.isStreaming("card-1")).toBe(true);
+  });
+
+  it("drops a delta that lands after the stream already ended", async () => {
+    emit({ kind: "begin", card_id: "card-1" });
+    emit({ kind: "end", card_id: "card-1", column_id: "col-active" });
+    await vi.runAllTimersAsync();
+
+    // A straggler delta must not resurrect the overlay on the committed card.
+    emit({ kind: "delta", card_id: "card-1", chunk: "late" });
+    flushFrame();
+
+    expect(data.isStreaming("card-1")).toBe(false);
+    expect(data.streamingText["card-1"]).toBeUndefined();
+  });
+
+  it("end reloads the streamed card's column and tags, then drops the overlay", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "final #done" })]],
+    ]);
+    state.tagsByDeck = [{ id: "t1", name: "done" }];
+    emit({ kind: "begin", card_id: "card-1" });
+    const tagCalls = state.getTagsByDeckCalls;
+
+    emit({ kind: "end", card_id: "card-1", column_id: "col-active" });
+    await vi.runAllTimersAsync();
+
+    expect(data.cardsByColumn["col-active"].map((c) => c.content)).toEqual([
+      "final #done",
+    ]);
+    expect(state.getTagsByDeckCalls).toBe(tagCalls + 1);
+    expect(data.isStreaming("card-1")).toBe(false);
+  });
+
+  it("end without a loaded column falls back to a full reconcile", async () => {
+    emit({ kind: "begin", card_id: "card-1" });
+    const tick = data.externalChangeTick;
+
+    emit({ kind: "end", card_id: "card-1" });
+    await vi.runAllTimersAsync();
+
+    expect(data.externalChangeTick).toBe(tick + 1);
+    expect(data.isStreaming("card-1")).toBe(false);
+  });
+
+  it("drops the overlay even when the post-stream reload fails", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const original = mockBackend.getCardsByColumn!;
+    mockBackend.getCardsByColumn = async () => {
+      throw new Error("db gone");
+    };
+    emit({ kind: "begin", card_id: "card-1" });
+
+    emit({ kind: "end", card_id: "card-1", column_id: "col-active" });
+    await vi.runAllTimersAsync();
+    mockBackend.getCardsByColumn = original;
+
+    // A failed reload must not leave the card stuck read-only.
+    expect(data.isStreaming("card-1")).toBe(false);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("evicts a stalled stream so a dead Reporter cannot pin a card read-only", () => {
+    emit({ kind: "begin", card_id: "card-1" });
+    emit({ kind: "delta", card_id: "card-1", chunk: "half a sen" });
+    flushFrame();
+
+    // Deltas keep re-arming the timer; silence past the window evicts.
+    vi.advanceTimersByTime(29_000);
+    expect(data.isStreaming("card-1")).toBe(true);
+    vi.advanceTimersByTime(30_000);
+
+    expect(data.isStreaming("card-1")).toBe(false);
+    expect(data.streamingText["card-1"]).toBeUndefined();
+  });
+
+  it("stopWatchingExternalChanges clears every overlay, timer, and pending frame", () => {
+    emit({ kind: "begin", card_id: "card-1" });
+    emit({ kind: "delta", card_id: "card-1", chunk: "unflushed" });
+
+    data.stopWatchingExternalChanges();
+    // Neither the pending frame nor the inactivity timer may fire afterwards.
+    vi.advanceTimersByTime(60_000);
+
+    expect(data.streamingText).toEqual({});
+    expect(data.isStreaming("card-1")).toBe(false);
   });
 });
 

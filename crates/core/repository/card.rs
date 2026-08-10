@@ -281,6 +281,58 @@ pub fn acquire_lock(conn: &Connection, id: &str, locked_by_id: &str) -> Result<C
     }))
 }
 
+/// ストリーム終了時の確定書き込み（`card.stream.end`, 007 §6.2 / 002 §5.2）。
+///
+/// **`holder` が有効なリースでロックを保持している間だけ** content を書き、同じ条件付き
+/// UPDATE でロックも解放する。判定（誰が有効に持っているか）と書き込み・解放を分けると、
+/// その隙に別プロセスがロックを奪って自分の書きかけを持つ状況で、こちらの古い content が
+/// 相手の作業を黙って上書きしてしまう（TOCTOU）。1 文に畳むことで、複数プロセスが同一
+/// ファイルを開いていても取り違えない。
+///
+/// リース判定は `acquire_lock` と対称：`locked_at` が失効（`< cutoff`）していれば、まだ
+/// 誰も奪取していなくても holder は確定権を失う（失効ロックは他者が奪える＝排他性が切れて
+/// いる）。content 書き込み・tag 同期・ロック解放は 1 トランザクションに包み、tag 同期の
+/// 失敗で「content だけ確定してロックは解放済み」という中途半端な状態が残らないようにする。
+/// 0 行更新なら失効・奪取・削除として区別して返す。
+pub fn commit_stream_and_release(
+    conn: &Connection,
+    id: &str,
+    holder: &str,
+    content: &str,
+) -> Result<Card> {
+    let now = Utc::now();
+    let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
+    let tx = conn.unchecked_transaction()?;
+    let affected = tx.execute(
+        "UPDATE cards SET content = ?1, updated_at = ?2, locked_by = NULL, locked_at = NULL
+         WHERE id = ?3 AND locked_by = ?4 AND deleted_at IS NULL AND locked_at >= ?5",
+        params![content, now.to_rfc3339(), id, holder, cutoff],
+    )?;
+
+    if affected == 1 {
+        tag::sync_card_tags(&tx, id, content)?;
+        tx.commit()?;
+        return get_by_id(conn, id);
+    }
+
+    // 0 行更新: 存在しない/削除済み or リース失効・他者奪取で holder が有効に保持していない。
+    drop(tx); // ロールバック（何も書いていないので実質 no-op）。
+    Err(classify_write_failure(conn, id, "Cannot update deleted card", |card| {
+        match card.locked_by.as_deref() {
+            Some(h) if h == holder => format!(
+                "Stream lock for card {} held by {} has expired (lease elapsed); re-acquire before committing",
+                id, holder
+            ),
+            other => format!(
+                "Stream lock for card {} is no longer held by {} (now: {})",
+                id,
+                holder,
+                other.unwrap_or("released")
+            ),
+        }
+    }))
+}
+
 /// 占有ロックを解放する（002 §5.2）。`locked_by_id` が現在の所有者と一致するときだけ
 /// `locked_by`/`locked_at` をクリアする。所有者でなければ何もしない（既に失効・他者が
 /// 奪取済みのケースを冪等に扱う）。

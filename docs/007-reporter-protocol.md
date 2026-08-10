@@ -151,8 +151,23 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 |:---|:---|:---|
 | `card.append` | Reporter → 本体 | カード新規作成。本体が採番し **ULID を返す**。Reporter は以降この id を握る。 |
 | `card.patch` / `card.commit` | Reporter → 本体 | 確定 edit。永続 + 同期に乗る。 |
+| `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先は接続 Deck 内のカラムに限る。 |
+| `card.delete` | Reporter → 本体 | カードを論理削除（復元可能）。物理削除・復元はユーザの削除スタックと cleanup に委ねる。 |
 | `card.read` | Reporter → 本体 | 既存カードの読み返し（文脈把握・過去カードの更新対象特定）。 |
 | `deck.query` | Reporter → 本体 | カラム構成・直近カード等の問い合わせ。 |
+| `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等）。可視範囲に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ column_id, name, position, created }`）。 |
+| `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ）。 |
+| `column.move` | Reporter → 本体 | カラムの並べ替え。アンカー（`before_column_id` / `after_column_id`、どちらか一方。省略時は末尾）で意図を表明し、position は本体が採番。 |
+
+`card.*` / `column.*` はいずれも request/response で、**ID / position の採番は本体が一元化**（§7）。カード・カラムの順序は生の position ではなく「どのカード/カラムの前/後」という**アンカー**で表明する。Reporter は append を主としつつ（§1.3 の append-mostly）、既存カードの再配置（`card.move`）と論理削除（`card.delete`）も行える ―― これらは姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `move_card` / `delete_card` と**同じ core を 007 トランスポートで叩く**（§2.1 の共有 core）。書き込みスコープ（§10）は `card.delete` を独立の権限として扱える。
+
+#### 6.1.1 構造メソッド（カラムの作成 / 再編）
+
+`column.ensure` / `column.update` / `column.move` は、姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `ensure_column` / `update_column` / `move_column` と**対**であり、**同じ core（`jot_deck_core::write`）を 007 トランスポートで叩く**（§2.1 の共有 core・DB。到達経路＝spawn 主体だけが違う）。
+
+- **`column.ensure` が Reporter の自前プロビジョニングを可能にする。** name キーの get-or-create なので、Reporter はテンプレートのカラム（§9：会議議事録なら `決定事項` `ToDo` 等）を**起動時に自分で用意**する。再送・再起動でも同名は既存を返すため列が重複しない。
+- **構造再編もランタイムで行える。** 分類軸の変更（`column.update` の `description` 書き換え）やカラム順の入れ替え（`column.move`）を、カード追記と同じ確定チャネルで表明する。
+- **008 の外部エージェント向け絞り込みは持ち込まない。** `idempotency_key`（§5）・write allowlist・capability といった 008 §4.5/§5 の防具は汎用エージェント境界の関心事。Reporter は本体 spawn の信頼境界内で動く（§3.1）ため、これらはメソッド引数に出さない。ただし**サードパーティ Reporter の per-Reporter 書き込みスコープ（§10 の認証スコープ）は、カード書き込みと同様この構造メソッドにも本体側で適用される** ―― `private` カラムへの読み書き禁止を含む（§10）。
 
 ### 6.2 ストリームチャネル
 
@@ -192,7 +207,7 @@ position 採番はユーザ手編集と AI 追記が同じカラム末尾を奪�
 
 ## 9. ユースケース（Reporter 製品ライン）
 
-共通構造は「外部エージェントが、原子的で分類可能なアイテムを連続生成し、Deck のカラム/カードへ流し込む」。カラム定義とプロンプトの差し替えで新 Reporter を量産できる。
+共通構造は「外部エージェントが、原子的で分類可能なアイテムを連続生成し、Deck のカラム/カードへ流し込む」。カラム定義とプロンプトの差し替えで新 Reporter を量産できる。**各 Reporter は自分のカラムテンプレートを起動時に `column.ensure` でプロビジョニングする**（§6.1.1）ため、テンプレートは Reporter が持つドメイン資産として完結する。
 
 ### 9.1 会話・発話系（文字起こし + 分類 LLM が共通エンジン）
 - 会議議事録: `決定事項` `ToDo` `論点・未決` `質問`

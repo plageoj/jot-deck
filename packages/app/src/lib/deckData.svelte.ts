@@ -23,6 +23,12 @@ export class DeckData {
   deckTags = $state<Tag[]>([]);
   activeTagFilter = $state<string | null>(null);
   filteredCardIds = $state<Set<string> | null>(null);
+  // Ephemeral streaming overlay (007-reporter-protocol.md §4 / §8): card_id →
+  // in-progress text pushed by a Reporter's `card.stream.delta`. Kept separate
+  // from `cardsByColumn` so DB-backed cards stay untouched — deltas never hit
+  // SQLite. A card with an entry here renders the streamed text read-only and
+  // shows an "AI generating" affordance until `card.stream.end` commits.
+  streamingText = $state<Record<string, string>>({});
   // Set after columns finish loading for currentDeck. Use this — not
   // currentDeck — to drive logic that depends on the column list being ready.
   loadedDeckId = $state<string | null>(null);
@@ -213,25 +219,158 @@ export class DeckData {
    * reactive $effect that decides when to actually reload. */
   externalChangeTick = $state(0);
   private externalUnlisten: (() => void) | null = null;
+  private reporterUnlisten: (() => void) | null = null;
+  private reporterStreamUnlisten: (() => void) | null = null;
   private externalReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  // Per-card buffer of delta chunks not yet flushed to `streamingText`, plus the
+  // single pending animation-frame handle that flushes them (007 §8.1: coalesce
+  // many deltas into one repaint, never 1 delta = 1 render).
+  private pendingDeltas: Record<string, string> = {};
+  private deltaFlushHandle: number | null = null;
+  // Per-card inactivity timer. A stream overlay is opened on `begin` and normally
+  // dropped on `end`; if a Reporter dies between the two (crash, killed, pipe
+  // closed), no `end` ever arrives and the card would stay stuck read-only. Each
+  // begin/delta re-arms this timer; if it fires, the stale overlay is evicted so
+  // the card becomes editable again. A late `end` still reconciles via reload, so
+  // eviction is safe. (007 §5 keeps streams short-lived, so silence this long
+  // means the Reporter is gone.)
+  private streamTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+  private static readonly STREAM_INACTIVITY_MS = 30_000;
+
+  /** Coalesce a burst of change signals into one `externalChangeTick` bump. */
+  private scheduleExternalReload(): void {
+    if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
+    this.externalReloadTimer = setTimeout(() => {
+      this.externalReloadTimer = null;
+      this.externalChangeTick++;
+    }, 250);
+  }
 
   /** Subscribe to external DB changes (Tauri only). No-op in the browser (WASM)
    * backend, which is single-process. */
   async watchExternalChanges(): Promise<void> {
     if (!isTauri()) return;
     const { listen } = await import("@tauri-apps/api/event");
+    // Other processes (CLI / MCP bridge) committing to the shared DB, detected
+    // by the `data_version` poller.
     this.externalUnlisten = await listen("external-db-change", () => {
-      if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
-      // Coalesce bursts of external commits into one tick.
-      this.externalReloadTimer = setTimeout(() => {
-        this.externalReloadTimer = null;
-        this.externalChangeTick++;
-      }, 250);
+      this.scheduleExternalReload();
+    });
+    // A spawned Reporter committing a write (007-reporter-protocol.md). A Reporter
+    // shares the GUI's own connection, so its writes never bump `data_version`
+    // and the host signals them explicitly — funnel into the same reload path.
+    this.reporterUnlisten = await listen("reporter-change", () => {
+      this.scheduleExternalReload();
+    });
+    // A Reporter's ephemeral stream (007 §6.2): begin/delta/end. These drive the
+    // in-memory overlay, NOT the debounced DB reload — deltas never touch SQLite.
+    this.reporterStreamUnlisten = await listen<{
+      kind: "begin" | "delta" | "end";
+      card_id: string;
+      column_id?: string;
+      chunk?: string;
+    }>("reporter-stream", ({ payload }) => {
+      this.handleStreamEvent(payload);
     });
     // Reconcile once right after subscribing: a commit landing between the
     // initial load and listener registration would otherwise be missed (the
     // backend emits its detection only once).
     this.externalChangeTick++;
+  }
+
+  /** Route one `reporter-stream` event to the overlay lifecycle. */
+  private handleStreamEvent(e: {
+    kind: "begin" | "delta" | "end";
+    card_id: string;
+    column_id?: string;
+    chunk?: string;
+  }): void {
+    switch (e.kind) {
+      case "begin":
+        // Open the overlay so the card renders as AI-generating immediately,
+        // even before the first delta arrives.
+        this.streamingText[e.card_id] = "";
+        this.armStreamTimeout(e.card_id);
+        break;
+      case "delta":
+        this.bufferDelta(e.card_id, e.chunk ?? "");
+        this.armStreamTimeout(e.card_id);
+        break;
+      case "end":
+        void this.endStream(e.card_id, e.column_id);
+        break;
+    }
+  }
+
+  /** (Re)arm the per-card inactivity timer: if no delta/end arrives within the
+   * window, evict the stale overlay so a dead Reporter can't leave the card
+   * stuck read-only. */
+  private armStreamTimeout(cardId: string): void {
+    const existing = this.streamTimers[cardId];
+    if (existing) clearTimeout(existing);
+    this.streamTimers[cardId] = setTimeout(() => {
+      this.evictStalledStream(cardId);
+    }, DeckData.STREAM_INACTIVITY_MS);
+  }
+
+  /** Clear the inactivity timer for a card, if any. */
+  private clearStreamTimeout(cardId: string): void {
+    const timer = this.streamTimers[cardId];
+    if (timer) {
+      clearTimeout(timer);
+      delete this.streamTimers[cardId];
+    }
+  }
+
+  /** Drop a stalled stream's overlay without committing (no `end` arrived).
+   * The DB-backed card is untouched, so it simply reverts to its last committed
+   * text and becomes editable again. */
+  private evictStalledStream(cardId: string): void {
+    delete this.streamTimers[cardId];
+    delete this.streamingText[cardId];
+    delete this.pendingDeltas[cardId];
+  }
+
+  /** Buffer a delta chunk and schedule a single per-frame flush (007 §8.1). */
+  private bufferDelta(cardId: string, chunk: string): void {
+    this.pendingDeltas[cardId] = (this.pendingDeltas[cardId] ?? "") + chunk;
+    if (this.deltaFlushHandle !== null) return;
+    this.deltaFlushHandle = requestAnimationFrame(() => {
+      this.deltaFlushHandle = null;
+      const pending = this.pendingDeltas;
+      this.pendingDeltas = {};
+      for (const [id, text] of Object.entries(pending)) {
+        // Ignore deltas for a card whose stream already ended (overlay dropped).
+        if (this.streamingText[id] === undefined) continue;
+        this.streamingText[id] += text;
+      }
+    });
+  }
+
+  /** Commit a stream: reload the affected column so the DB-backed card carries
+   * the final text, then drop the overlay (revealing it without a flash). */
+  private async endStream(cardId: string, columnId?: string): Promise<void> {
+    try {
+      if (columnId && this.cardsByColumn[columnId]) {
+        const cards = await this.db.getCardsByColumn(columnId);
+        if (this.cardsByColumn[columnId]) this.cardsByColumn[columnId] = cards;
+        await this.loadDeckTags();
+      } else {
+        // No column hint (or column not loaded): fall back to a full reconcile.
+        this.scheduleExternalReload();
+      }
+    } catch (e) {
+      console.error(`Failed to reload after stream end for ${cardId}:`, e);
+    } finally {
+      this.clearStreamTimeout(cardId);
+      delete this.streamingText[cardId];
+      delete this.pendingDeltas[cardId];
+    }
+  }
+
+  /** Whether a card is currently receiving a Reporter stream (read-only). */
+  isStreaming(cardId: string): boolean {
+    return this.streamingText[cardId] !== undefined;
   }
 
   /** Re-read the current deck after an external change.
@@ -273,6 +412,21 @@ export class DeckData {
     }
     this.externalUnlisten?.();
     this.externalUnlisten = null;
+    this.reporterUnlisten?.();
+    this.reporterUnlisten = null;
+    this.reporterStreamUnlisten?.();
+    this.reporterStreamUnlisten = null;
+    if (this.deltaFlushHandle !== null) {
+      cancelAnimationFrame(this.deltaFlushHandle);
+      this.deltaFlushHandle = null;
+    }
+    // After the listeners are gone no `end` event can arrive, so any open stream
+    // overlay would be permanently stale. Cancel pending timers and drop all
+    // overlay state (deltas + streaming text) so nothing stays stuck read-only.
+    for (const timer of Object.values(this.streamTimers)) clearTimeout(timer);
+    this.streamTimers = {};
+    this.pendingDeltas = {};
+    this.streamingText = {};
   }
 
   async createDeck(): Promise<Deck | null> {
