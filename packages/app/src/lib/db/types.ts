@@ -5,7 +5,7 @@
  * allowing different implementations (Tauri/Rust or WASM SQLite).
  */
 
-import type { Deck, Column, Card, Tag } from "../types";
+import type { Deck, Column, Card, Tag, ReporterConfig } from "../types";
 
 export interface CreateDeckParams {
   name: string;
@@ -82,4 +82,25 @@ export interface DatabaseBackend {
    * Returns null when unavailable (e.g. the browser/WASM backend, which has no
    * bundled bridge binary or real filesystem paths). */
   generateMcpConfig(deckId: string): Promise<string | null>;
+
+  // Reporter host operations (007-reporter-protocol.md). Desktop-only: the
+  // browser/WASM backend cannot spawn child processes, so reads return empty
+  // and writes reject.
+  /** List a deck's registered Reporters. */
+  listReporters(deckId: string): Promise<ReporterConfig[]>;
+  /** Register a new Reporter; the host assigns and returns its `reporter_id`. */
+  addReporter(deckId: string, config: ReporterConfig): Promise<ReporterConfig>;
+  /** Update an existing Reporter registration in place (matched by id). */
+  updateReporter(
+    deckId: string,
+    config: ReporterConfig
+  ): Promise<ReporterConfig>;
+  /** Remove a Reporter registration (stopping it first if running). */
+  removeReporter(deckId: string, reporterId: string): Promise<void>;
+  /** Spawn a registered Reporter and start pumping its stdio. */
+  startReporter(deckId: string, reporterId: string): Promise<void>;
+  /** Stop a running Reporter. */
+  stopReporter(reporterId: string): Promise<void>;
+  /** Ids of Reporters currently running (spans all decks). */
+  listRunningReporters(): Promise<string[]>;
 }

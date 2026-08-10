@@ -383,6 +383,13 @@ describe("ActionDispatcher.executeAction palette routing", () => {
     expect(focus.focusMode).not.toBe("command");
   });
 
+  it("routes showReporters to focus.showReporters = true (no palette)", async () => {
+    await dispatcher.executeAction("showReporters");
+    expect(focus.showReporters).toBe(true);
+    expect(focus.activePalette).toBeNull();
+    expect(focus.focusMode).not.toBe("command");
+  });
+
   it("routes checkForUpdates to open the About dialog and trigger a check", async () => {
     const spy = vi.spyOn(updaterStore, "check");
     try {
@@ -982,6 +989,14 @@ describe("ActionDispatcher.handleKeydown routing", () => {
 
   it("is a no-op while the about dialog is open", () => {
     focus.showAbout = true;
+    const event = makeKeyEvent({ key: "j" });
+    dispatcher.handleKeydown(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(focus.focusMode).toBe("column");
+  });
+
+  it("is a no-op while the reporters dialog is open", () => {
+    focus.showReporters = true;
     const event = makeKeyEvent({ key: "j" });
     dispatcher.handleKeydown(event);
     expect(event.defaultPrevented).toBe(false);

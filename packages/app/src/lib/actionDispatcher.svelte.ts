@@ -61,8 +61,14 @@ export class ActionDispatcher {
       return;
     }
 
-    // Settings / keybindings / about dialogs manage their own input — let them handle keys.
-    if (focus.showSettings || focus.showKeybindings || focus.showAbout) return;
+    // Settings / keybindings / about / reporters dialogs manage their own input — let them handle keys.
+    if (
+      focus.showSettings ||
+      focus.showKeybindings ||
+      focus.showAbout ||
+      focus.showReporters
+    )
+      return;
 
     // Skip if focus is on input fields
     if (this.isEditableTarget(event.target as HTMLElement)) return;
@@ -201,6 +207,11 @@ export class ActionDispatcher {
 
     if (action === "showAbout") {
       this.focus.showAbout = true;
+      return;
+    }
+
+    if (action === "showReporters") {
+      this.focus.showReporters = true;
       return;
     }
 

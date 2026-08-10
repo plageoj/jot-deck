@@ -7,7 +7,14 @@
 
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
 import { ulid } from "ulid";
-import { TAG_PATTERN, type Deck, type Column, type Card, type Tag } from "../types";
+import {
+  TAG_PATTERN,
+  type Deck,
+  type Column,
+  type Card,
+  type Tag,
+  type ReporterConfig,
+} from "../types";
 import type {
   DatabaseBackend,
   CreateDeckParams,
@@ -782,6 +789,40 @@ export class WasmBackend implements DatabaseBackend {
     // The browser backend has no bundled bridge binary or real filesystem
     // paths, so it cannot produce a runnable config. MCP is a desktop feature.
     return null;
+  }
+
+  // ========================================
+  // Reporter Host Operations
+  // ========================================
+
+  // Reporters are spawned child processes over stdio (007-reporter-protocol.md),
+  // which the browser cannot do. Reads return empty; writes reject.
+  async listReporters(): Promise<ReporterConfig[]> {
+    return [];
+  }
+
+  async listRunningReporters(): Promise<string[]> {
+    return [];
+  }
+
+  async addReporter(): Promise<ReporterConfig> {
+    throw new Error("Reporters are only available in the desktop app.");
+  }
+
+  async updateReporter(): Promise<ReporterConfig> {
+    throw new Error("Reporters are only available in the desktop app.");
+  }
+
+  async removeReporter(): Promise<void> {
+    throw new Error("Reporters are only available in the desktop app.");
+  }
+
+  async startReporter(): Promise<void> {
+    throw new Error("Reporters are only available in the desktop app.");
+  }
+
+  async stopReporter(): Promise<void> {
+    throw new Error("Reporters are only available in the desktop app.");
   }
 
   // ========================================

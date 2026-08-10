@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import type { Card, Column, Deck } from "$lib/types";
+import type { Card, Column, Deck, ReporterConfig } from "$lib/types";
 import type { DatabaseBackend } from "$lib/db";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 
@@ -23,6 +23,9 @@ const state = {
   moveCardCalls: [] as Array<{ id: string; position: number }>,
   moveCardToColumnCalls: [] as Array<{ id: string; columnId: string }>,
   updateCardScoreCalls: [] as Array<{ id: string; delta: number }>,
+  reporters: [] as ReporterConfig[],
+  runningReporters: [] as string[],
+  reporterCalls: [] as string[][],
 };
 
 const mockBackend: Partial<DatabaseBackend> = {
@@ -95,6 +98,31 @@ const mockBackend: Partial<DatabaseBackend> = {
   },
   getTagSuggestions: async (_deckId: string, prefix: string) =>
     [{ id: `tag-${prefix}`, name: `${prefix}-suggestion` }],
+  listReporters: async (deckId: string) => {
+    state.reporterCalls.push(["listReporters", deckId]);
+    return state.reporters;
+  },
+  addReporter: async (deckId: string, config: ReporterConfig) => {
+    state.reporterCalls.push(["addReporter", deckId, config.name]);
+    return { ...config, reporter_id: "assigned-id" };
+  },
+  updateReporter: async (deckId: string, config: ReporterConfig) => {
+    state.reporterCalls.push(["updateReporter", deckId, config.reporter_id]);
+    return config;
+  },
+  removeReporter: async (deckId: string, reporterId: string) => {
+    state.reporterCalls.push(["removeReporter", deckId, reporterId]);
+  },
+  startReporter: async (deckId: string, reporterId: string) => {
+    state.reporterCalls.push(["startReporter", deckId, reporterId]);
+  },
+  stopReporter: async (reporterId: string) => {
+    state.reporterCalls.push(["stopReporter", reporterId]);
+  },
+  listRunningReporters: async () => {
+    state.reporterCalls.push(["listRunningReporters"]);
+    return state.runningReporters;
+  },
 };
 
 // Toggle the simulated Tauri environment per test (name prefixed `mock` so the
@@ -130,6 +158,9 @@ function resetState() {
   state.moveCardCalls = [];
   state.moveCardToColumnCalls = [];
   state.updateCardScoreCalls = [];
+  state.reporters = [];
+  state.runningReporters = [];
+  state.reporterCalls = [];
   localStorage.clear();
 }
 
@@ -909,6 +940,70 @@ describe("DeckData reporter streams", () => {
 
     expect(data.streamingText).toEqual({});
     expect(data.isStreaming("card-1")).toBe(false);
+  });
+});
+
+describe("DeckData reporter registry", () => {
+  let data: InstanceType<typeof DeckData>;
+
+  const config: ReporterConfig = {
+    reporter_id: "rep-1",
+    name: "Minutes",
+    command: "/opt/whisper",
+    args: [],
+    env: {},
+    deny: [],
+    max_writes_per_min: null,
+    allowed_columns: null,
+  };
+
+  beforeEach(async () => {
+    resetState();
+    state.decks = [makeDeck("deck-1")];
+    state.columns = [makeColumn("col-active", "deck-1")];
+    state.cardsByColumn = new Map([["col-active", []]]);
+
+    data = new DeckData();
+    await data.init();
+  });
+
+  it("passes every reporter operation straight to the backend", async () => {
+    state.reporters = [config];
+    state.runningReporters = ["rep-1"];
+
+    expect(await data.listReporters("deck-1")).toEqual([config]);
+    expect(await data.listRunningReporters()).toEqual(["rep-1"]);
+    expect((await data.addReporter("deck-1", config)).reporter_id).toBe(
+      "assigned-id",
+    );
+    await data.updateReporter("deck-1", config);
+    await data.startReporter("deck-1", "rep-1");
+    await data.stopReporter("rep-1");
+    await data.removeReporter("deck-1", "rep-1");
+
+    expect(state.reporterCalls).toEqual([
+      ["listReporters", "deck-1"],
+      ["listRunningReporters"],
+      ["addReporter", "deck-1", "Minutes"],
+      ["updateReporter", "deck-1", "rep-1"],
+      ["startReporter", "deck-1", "rep-1"],
+      ["stopReporter", "rep-1"],
+      ["removeReporter", "deck-1", "rep-1"],
+    ]);
+  });
+
+  it("re-throws instead of funnelling into the board-wide error banner", async () => {
+    const original = mockBackend.startReporter!;
+    mockBackend.startReporter = async () => {
+      throw new Error("ENOENT");
+    };
+
+    // The registration dialog reports failures inline per row, so DeckData must
+    // not swallow them into `this.error` the way the board operations do.
+    await expect(data.startReporter("deck-1", "rep-1")).rejects.toThrow("ENOENT");
+    expect(data.error).toBeNull();
+
+    mockBackend.startReporter = original;
   });
 });
 

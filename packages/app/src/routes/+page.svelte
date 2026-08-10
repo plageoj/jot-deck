@@ -10,6 +10,7 @@
     KeybindingCheatsheet,
     KeybindingsDialog,
     RenameDialog,
+    ReportersDialog,
     SettingsDialog,
     TagFilterBar,
     TagPalette,
@@ -42,6 +43,14 @@
         getCurrentWindow().setTitle(windowTitle);
       });
     }
+  });
+
+  // The Reporters dialog is per-deck, so it unmounts if the deck disappears
+  // (deleting the last deck) — without ever running its onClose. The flag would
+  // stay set, and ActionDispatcher suppresses every board keybinding while it
+  // is, leaving the board deaf with no dialog to take the keys. Clear it here.
+  $effect(() => {
+    if (!data.currentDeck) focus.showReporters = false;
   });
 
   // Persist & restore focus state per deck. Switching the deck reassigns
@@ -188,6 +197,11 @@
     >
     <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
       >New Column</button
+    >
+    <button
+      onclick={() => (focus.showReporters = true)}
+      disabled={!data.currentDeck}
+      title="Manage Reporters (g r)">Reporters</button
     >
     <button
       class="header-spacer"
@@ -404,6 +418,20 @@
 
 {#if focus.showAbout}
   <AboutDialog onClose={() => (focus.showAbout = false)} />
+{/if}
+
+{#if focus.showReporters && data.currentDeck}
+  <ReportersDialog
+    deckId={data.currentDeck.id}
+    listReporters={(deckId) => data.listReporters(deckId)}
+    listRunning={() => data.listRunningReporters()}
+    onAdd={(deckId, config) => data.addReporter(deckId, config)}
+    onUpdate={(deckId, config) => data.updateReporter(deckId, config)}
+    onRemove={(deckId, reporterId) => data.removeReporter(deckId, reporterId)}
+    onStart={(deckId, reporterId) => data.startReporter(deckId, reporterId)}
+    onStop={(reporterId) => data.stopReporter(reporterId)}
+    onClose={() => (focus.showReporters = false)}
+  />
 {/if}
 
 <style>
