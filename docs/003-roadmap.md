@@ -143,23 +143,30 @@ MCP ブリッジは CLI 同型の**別プロセスから同一 `jot-deck.db` を
 ### 目標
 Reporter（外部ストリーミング入力アダプタ）と汎用エージェントの書き込みを可能にする。トランスポートは spawn 主体で分岐する ―― Reporter はホストが spawn し stdio パイプ 1 本で両チャネルを運ぶ（ローカル書き込み口）、MCP ブリッジは Claude が spawn し直接 DB へ書く。有料 Reporter 製品ラインの土台。
 
-### 先行タスク（書き込み共通の土台）
+### 先行タスク（書き込み共通の土台）✅
 Reporter・MCP 書き込みのどちらより先に入れる。両パスが依存する。
-* `cards` テーブルへ `locked_by` / `locked_at` を追加するスキーマ移行
-* カード編集の競合制御（占有ロック＋楽観ロック、`002` §5）― Reporter の streaming 占有・MCP patch の楽観ロックが共通で乗る
-* GUI の**外部変更観測**: `PRAGMA data_version` の約 1s ポーリング＋`updated_at`/`deleted_at` 差分描画（ブリッジ/CLI の外部書き込み用。ホスト内 Reporter の書き込みは `update_hook` で即時描画）
+* `cards` テーブルへ `locked_by` / `locked_at` を追加するスキーマ移行（既存 DB 向けの移行ガード付き）
+* カード編集の競合制御（占有ロック＋楽観ロック、`002` §5）― core の `acquire_lock` / `release_lock` / `commit_stream_and_release` / `update_content_cas` に集約し、Reporter の streaming 占有・MCP patch の楽観ロックが共通で乗る
+* GUI の**外部変更観測**: `PRAGMA data_version` の約 1s ポーリングで `external-db-change` を emit し、frontend 側で 250ms コアレスしてカラムを再読み込みする（ブリッジ/CLI の外部書き込み用）。ホスト内 Reporter の書き込みはホストが `reporter-change` イベントで直接通知する
+
+#### 未実装
+* GUI 自身の編集パスが占有ロック / CAS に参加していない（`update_card_content` は `expected_updated_at` を取らず、ロックも取得しない）。エージェント間・Reporter 間の競合は制御されるが、人間の GUI 編集と外部書き込みの競合は未制御
 
 ### 成果物（Reporter 基盤）
-* ローカル書き込み口（ホスト spawn ＋ stdio、認証スコープ・採番一元化・変更通知）
-* 2 チャネル（committed / ephemeral）とカード長 commit 制約、`streaming` フォーカス状態
-* frontend の外部起因カード追加/更新の差分描画（delta コアレス）
-* 配管パッケージの切り出し: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離。一次実装は **Python**。参照実装 Reporter のトランスポート層をそのままパッケージ化し、後の公開 SDK の種とする（`007` §9.5）
-* 参照実装 Reporter 1 種（Python。例: 議事録、Whisper ベースの音声認識）
+* ローカル書き込み口 ✅（ホスト spawn ＋ stdio、認証スコープ・採番一元化・変更通知。`crates/reporter-host`）
+* 2 チャネル（committed / ephemeral）とカード長 commit 制約 ✅。ストリーミング表示はフォーカスモードではなく**カード単位のオーバーレイ**で表現する（当該カードだけを読み取り専用化し生成中バッジを出す。複数カラムのカードが同時にストリームし得るため。`001-keybindings.md` §1.2）
+* frontend の外部起因カード追加/更新の差分描画（delta コアレス）✅。加えて 30s 無通信のオーバーレイは破棄し、Reporter が落ちてもカードが読み取り専用のまま残らないようにする
+* Reporter 登録 UI ✅（バイナリのフルパス登録・起動/停止・実行状態表示。`ReportersDialog`、`g r`）
 
-### 成果物（MCP 書き込み面 ―― 直接 DB リンク）
+#### 残作業
+* **参照実装 Reporter ―― 別のプライベートリポジトリで開発中**（Python。例: 議事録、Whisper ベースの音声認識）。本リポジトリには配置しない。Reporter プロトコルを実際に話す唯一のクライアント実装であり、下記の配管パッケージはここから切り出す
+* **配管パッケージの切り出し ―― 本リポジトリへ配置予定**: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離する。一次実装は **Python**（`007` §9.5）。**Reporter プロトコルが固まってから**切り出す方針のため、それまでは本リポジトリに置かない。したがって現状、本リポジトリにあるプロトコル実装はホスト側（Rust、`crates/reporter-host`）のみで、パイプの反対側にあたるクライアント側の配管は存在しない
+* Reporter 登録 UI からの認証スコープ編集（`deny` / `max_writes_per_min` / `allowed_columns` はバックエンドで強制されるが、GUI では編集できず既定値のまま保持される）
+
+### 成果物（MCP 書き込み面 ―― 直接 DB リンク）✅
 * カード書き込み: `append_card`（idempotency key）/ `patch_card`（`expected_updated_at` 楽観ロック）/ `move_card` / `delete_card`
 * 構造再編: `ensure_column` / `update_column` / `move_column`（Deck 内フル再編・Deck 越え不可）。`ensure_column` の新規作成は structure 有効かつ write allowlist 未指定のときのみ（deny structure / allowlist 明示ではエラー、既存取得は可）
-* 安全域（`008` §5）: capability opt-out（既定 full write、機微な接続は個別に deny）・接続ごとレート制限・接続 id 帰属・回復性（論理削除＋アンドゥ）
+* 安全域（`008` §5）: capability opt-out（既定 full write、機微な接続は個別に deny。deny した verb は `tools/list` からも隠す）・接続ごとレート制限・接続 id 帰属・回復性（論理削除のみを公開し、物理削除と復元はエージェントに開かない。ユーザー向けの復元は削除スタック UI が担う）
 
 詳細設計: `007-reporter-protocol.md` / `008-mcp-server.md`
 
@@ -213,8 +220,7 @@ Phase 5 で内部的に切り出した配管パッケージ（`007` §9.5）を�
 ### 成果物
 * 配管パッケージの公開 SDK 化（publish ＋ API ドキュメント ＋ サンプル Reporter）
 * Reporter プロトコル仕様の外部向け文書化（`007` を実装リファレンスとして整備）
-* サードパーティ向け per-Reporter 書き込みスコープの実装（書けるカラム/デッキの制限。本体 spawn は「自分が起動した」ことしか保証せず登録バイナリの良性は保証しないため必須。`007` §10）
-* Reporter 登録 UI（バイナリのフルパス登録。Claude Desktop `mcpServers` 相当の power-user 設定）
+* per-Reporter 書き込みスコープの**編集 UI**（書けるカラム/デッキの制限。強制自体は Phase 5 でバックエンドに入っているが、GUI から設定できないとサードパーティ Reporter には使えない。本体 spawn は「自分が起動した」ことしか保証せず登録バイナリの良性は保証しないため必須。`007` §10）
 
 詳細設計: `007-reporter-protocol.md` §9.5 / §3.2
 
@@ -223,7 +229,7 @@ Phase 5 で内部的に切り出した配管パッケージ（`007` §9.5）を�
 ## 将来の Phase
 
 * **Phase 10:** 全文検索
-* **Phase 11:** macOS / Linux 対応
+* **Phase 11:** macOS / Linux の動作検証（バイナリは既に 3 プラットフォーム分を配信しているが、検証は Windows のみ。`000-spec.md` §8.1）
 * **Phase 12:** エクスポート機能
 * **Phase 13:** 共有機能
 
@@ -237,7 +243,7 @@ Phase 5 で内部的に切り出した配管パッケージ（`007` §9.5）を�
 | **Tauri 統合** | Phase 2 | 完了 |
 | **ローカル動作版** | Phase 3.1-3.9 | 完了 |
 | **AI KB 化（MCP 読み取り面）** | Phase 4 | 完了 |
-| **Reporter 基盤** | Phase 5 | 未着手 |
+| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージの切り出し / GUI 編集パスの競合制御。参照実装 Reporter は別リポジトリで開発中） |
 | **MVP リリース（Reporter 課金）** | Phase 6 | 未着手 |
 | **チュートリアル** | Phase 7 | 未着手 |
 | **同期機能リリース** | Phase 8 | 未着手 |
