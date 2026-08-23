@@ -188,7 +188,7 @@ describe("resolveKeybindings", () => {
       description: "Undo",
     };
     const resolved = resolveKeybindings({}, [added]);
-    expect(resolved.length).toBe(DEFAULT_KEYBINDINGS.length + 1);
+    expect(resolved).toHaveLength(DEFAULT_KEYBINDINGS.length + 1);
     expect(resolved[resolved.length - 1]).toEqual(added);
   });
 
@@ -199,7 +199,7 @@ describe("resolveKeybindings", () => {
       modes: ["card"],
       description: "Undo",
     };
-    expect(resolveKeybindings({}, [added]).length).toBe(
+    expect(resolveKeybindings({}, [added])).toHaveLength(
       DEFAULT_KEYBINDINGS.length,
     );
   });
@@ -209,7 +209,7 @@ describe("getKnownActions", () => {
   it("returns one entry per distinct action", () => {
     const actions = getKnownActions();
     const distinct = new Set(DEFAULT_KEYBINDINGS.map((b) => b.action));
-    expect(actions.length).toBe(distinct.size);
+    expect(actions).toHaveLength(distinct.size);
     expect(new Set(actions.map((a) => a.action)).size).toBe(actions.length);
   });
 
