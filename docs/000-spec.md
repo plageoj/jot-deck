@@ -201,8 +201,8 @@ Jot Deck は自前のクラウド AI 機能を持たず、**Deck を MCP サー�
 ## 8. MVP スコープ
 
 ### 8.1 対象プラットフォーム
-* **MVP:** Windows のみ
-* **将来:** macOS, Linux
+* **Primary: Windows。** 開発と動作検証はこのプラットフォームで行う。
+* **macOS / Linux: バイナリ提供のみ。** リリースワークフローが 3 プラットフォーム分のインストーラを生成する（`005-release.md`）ため入手・インストールはできるが、動作検証は行っていない。
 
 ### 8.2 MVP に含める機能
 * Deck / Column / Card の CRUD
@@ -226,7 +226,7 @@ Jot Deck は自前のクラウド AI 機能を持たず、**Deck を MCP サー�
 * 全文検索（Deck 内 / 全 Deck 横断）
 * クラウド同期（Essential / Power User プラン）
 * エクスポート機能
-* macOS / Linux 対応
+* macOS / Linux の動作検証（バイナリは提供するが未検証。`8.1`）
 * 他ユーザーへの共有
 
 ---
