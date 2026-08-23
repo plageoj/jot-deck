@@ -158,9 +158,9 @@ Reporter・MCP 書き込みのどちらより先に入れる。両パスが依�
 * frontend の外部起因カード追加/更新の差分描画（delta コアレス）✅。加えて 30s 無通信のオーバーレイは破棄し、Reporter が落ちてもカードが読み取り専用のまま残らないようにする
 * Reporter 登録 UI ✅（バイナリのフルパス登録・起動/停止・実行状態表示。`ReportersDialog`、`g r`）
 
-#### 未実装
-* 配管パッケージの切り出し: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離。一次実装は **Python**。参照実装 Reporter のトランスポート層をそのままパッケージ化し、後の公開 SDK の種とする（`007` §9.5）。現状 Reporter プロトコルの実装はホスト側（Rust）のみで、パイプの反対側にあたるクライアント側の配管は存在しない
-* 参照実装 Reporter 1 種（Python。例: 議事録、Whisper ベースの音声認識）
+#### 残作業
+* **参照実装 Reporter ―― 別のプライベートリポジトリで開発中**（Python。例: 議事録、Whisper ベースの音声認識）。本リポジトリには配置しない。Reporter プロトコルを実際に話す唯一のクライアント実装であり、下記の配管パッケージはここから切り出す
+* **配管パッケージの切り出し ―― 本リポジトリへ配置予定**: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離する。一次実装は **Python**（`007` §9.5）。**Reporter プロトコルが固まってから**切り出す方針のため、それまでは本リポジトリに置かない。したがって現状、本リポジトリにあるプロトコル実装はホスト側（Rust、`crates/reporter-host`）のみで、パイプの反対側にあたるクライアント側の配管は存在しない
 * Reporter 登録 UI からの認証スコープ編集（`deny` / `max_writes_per_min` / `allowed_columns` はバックエンドで強制されるが、GUI では編集できず既定値のまま保持される）
 
 ### 成果物（MCP 書き込み面 ―― 直接 DB リンク）✅
@@ -243,7 +243,7 @@ Phase 5 で内部的に切り出した配管パッケージ（`007` §9.5）を�
 | **Tauri 統合** | Phase 2 | 完了 |
 | **ローカル動作版** | Phase 3.1-3.9 | 完了 |
 | **AI KB 化（MCP 読み取り面）** | Phase 4 | 完了 |
-| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージ / 参照実装 Reporter / GUI 編集パスの競合制御） |
+| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージの切り出し / GUI 編集パスの競合制御。参照実装 Reporter は別リポジトリで開発中） |
 | **MVP リリース（Reporter 課金）** | Phase 6 | 未着手 |
 | **チュートリアル** | Phase 7 | 未着手 |
 | **同期機能リリース** | Phase 8 | 未着手 |
