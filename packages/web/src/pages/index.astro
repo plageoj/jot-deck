@@ -1,4 +1,7 @@
 ---
+const RELEASE_PAGE = "https://github.com/plageoj/jot-deck/releases/tag/preview";
+const REPO = "https://github.com/plageoj/jot-deck";
+
 const features = [
   {
     icon: "zap",
@@ -16,11 +19,77 @@ const features = [
     description: "Think in fragments, not paragraphs",
   },
   {
-    icon: "sparkles",
-    title: "AI synthesis",
-    description: "Scattered ideas → polished drafts",
+    icon: "plug",
+    title: "Open to your agent",
+    description: "Claude reads and writes your deck over MCP",
+  },
+  {
+    icon: "radio",
+    title: "Reporters",
+    description: "Stream transcripts, webhooks and agent logs into columns",
+  },
+  {
+    icon: "lock",
+    title: "Local-first, always",
+    description: "SQLite on your disk. No account, no cloud, no telemetry.",
   },
 ];
+
+// Defaults from packages/app/src/lib/keybindings.ts — keep in sync if they move.
+const keys = [
+  { key: "o", label: "New card" },
+  { key: "h j k l", label: "Move anywhere" },
+  { key: "i", label: "Edit" },
+  { key: "d d", label: "Delete" },
+  { key: "u", label: "Undo" },
+  { key: "y y / p", label: "Copy, paste" },
+  { key: "c", label: "New column" },
+  { key: "/", label: "Filter by tag" },
+  { key: "g t", label: "Trash" },
+  { key: "Ctrl P", label: "Switch deck" },
+];
+
+// Format rows for the download matrix. `key` is matched against the release
+// assets by the client script; the href stays on the release page until then,
+// so every link works even with JS off or the GitHub API unreachable.
+const downloads = [
+  {
+    os: "windows",
+    label: "Windows",
+    note: "Windows 10 and 11, 64-bit",
+    formats: [
+      { key: "windows-exe", label: ".exe installer" },
+      { key: "windows-msi", label: ".msi" },
+    ],
+  },
+  {
+    os: "macos",
+    label: "macOS",
+    note: "Universal — Apple Silicon and Intel",
+    formats: [{ key: "macos-dmg", label: ".dmg" }],
+  },
+  {
+    os: "linux",
+    label: "Linux",
+    note: "x86_64",
+    formats: [
+      { key: "linux-appimage", label: ".AppImage" },
+      { key: "linux-deb", label: ".deb" },
+      { key: "linux-rpm", label: ".rpm" },
+    ],
+  },
+];
+
+const mcpSnippet = `{
+  "mcpServers": {
+    "jot-deck": {
+      "command": "/path/to/jot-deck-mcp",
+      "env": {
+        "JOT_DECK_DECK_ID": "01J...your-deck-id"
+      }
+    }
+  }
+}`;
 ---
 
 <html lang="en">
@@ -34,12 +103,12 @@ const features = [
     <title>Jot Deck — Jot Down. Shape Up.</title>
     <meta
       name="description"
-      content="A blazing-fast, keyboard-driven note app for power users. Stack your thoughts as cards, navigate with Vim keys, and let AI crystallize your fragments into polished text."
+      content="A keyboard-driven, local-first note app. Capture ideas as tweet-sized cards in TweetDeck-style columns — and open your deck to your own AI agent over MCP. Free preview for Windows, macOS and Linux."
     />
     <meta property="og:title" content="Jot Deck — Jot Down. Shape Up." />
     <meta
       property="og:description"
-      content="A blazing-fast, keyboard-driven note app for power users."
+      content="A keyboard-driven, local-first note app. Capture ideas as tweet-sized cards — and open your deck to your own AI agent over MCP."
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://jot-deck.com" />
@@ -60,24 +129,25 @@ const features = [
             <strong>Or getting lost in deep nested bullet lists?</strong>
           </p>
           <p class="description">
-            Jot Deck is a local-first note app built for speed obsessives.
-            Capture ideas as flat, tweet-sized cards in a TweetDeck-style
-            multi-column layout — no hierarchy, no lag, just flow.
+            Flat, tweet-sized cards in TweetDeck-style columns. No hierarchy, no
+            lag, no mouse. Then hand the whole deck to your own AI agent.
           </p>
-          <form
-            class="waitlist-form"
-            action="https://formspree.io/f/mqeezpak"
-            method="POST"
-          >
-            <input
-              type="email"
-              name="email"
-              placeholder="you@example.com"
-              required
-            />
-            <button type="submit" class="button primary">Join Waitlist</button>
-          </form>
-          <p class="waitlist-note">Be the first to know when we launch.</p>
+
+          <div class="cta">
+            <a
+              id="dl-primary"
+              class="button primary"
+              href={RELEASE_PAGE}
+              rel="noopener">Download Preview</a
+            >
+            <a class="button secondary" href="#download">All downloads →</a>
+          </div>
+          <p class="cta-meta">
+            <span id="dl-version" hidden></span>
+            <span
+              >Preview build · Windows, macOS &amp; Linux · free, no account</span
+            >
+          </p>
         </div>
       </section>
 
@@ -85,10 +155,30 @@ const features = [
         <div class="container">
           <img
             src="/app-screenshot.png"
-            alt="Jot Deck app showing multi-column layout with cards"
+            alt="Jot Deck showing a Writing deck with Inbox, Research and Drafts columns of short cards"
             width="1200"
-            height="832"
+            height="660"
           />
+        </div>
+      </section>
+
+      <section class="keys">
+        <div class="container">
+          <h2>Everything is a keystroke</h2>
+          <ul class="key-list">
+            {
+              keys.map((k) => (
+                <li>
+                  <kbd>{k.key}</kbd>
+                  <span>{k.label}</span>
+                </li>
+              ))
+            }
+          </ul>
+          <p class="keys-note">
+            Press <kbd>?</kbd> in the app for the full sheet. Rebind anything in
+            Settings.
+          </p>
         </div>
       </section>
 
@@ -109,42 +199,252 @@ const features = [
         </div>
       </section>
 
+      <section id="mcp" class="mcp">
+        <div class="container">
+          <h2>Your deck, open to your agent</h2>
+          <p class="section-lead">
+            Jot Deck runs no AI of its own. It hands your deck to the agent you
+            already use — Claude Desktop, Claude Code — over <strong>MCP</strong
+            >. No API keys, no second bill.
+          </p>
+
+          <div class="split">
+            <div class="split-item">
+              <h3>It reads</h3>
+              <p>
+                "What did I conclude about pricing?" Search, recall and draft
+                from months of notes.
+              </p>
+            </div>
+            <div class="split-item">
+              <h3>It writes</h3>
+              <p>
+                "File the key points from this PDF into Research." Agents can
+                log their own work as they go.
+              </p>
+            </div>
+          </div>
+
+          <p class="section-body">
+            Columns and cards <strong>are</strong> the chunking an agent needs —
+            done when you typed it, not after the fact.
+          </p>
+
+          <div class="snippet">
+            <p class="snippet-label">The whole setup:</p>
+            <pre><code>{mcpSnippet}</code></pre>
+            <p class="snippet-note">
+              The app fills in the real path and deck id for you — <em
+                >Copy MCP server config</em
+              > in the Deck switcher.
+            </p>
+          </div>
+
+          <p class="note">
+            Columns you mark <strong>private</strong> stay invisible over MCP.
+          </p>
+        </div>
+      </section>
+
+      <section id="reporters" class="reporters">
+        <div class="container">
+          <h2>Reporters <span class="badge">in development</span></h2>
+          <p class="section-lead">
+            Reporters pipe live input into your columns — meeting transcripts,
+            webhooks, an agent's task log — cut into short cards as it happens,
+            never one endlessly growing wall of text.
+          </p>
+          <p class="note">
+            Not shipped yet. Jot Deck itself stays free.
+          </p>
+        </div>
+      </section>
+
       <section class="tech">
         <div class="container">
           <p class="tech-stack">
             Built with <strong>Tauri + Rust</strong> for native performance.<br
             />
-            Offline-first with <strong>SQLite</strong>.
+            Offline-first with <strong>SQLite</strong>.<br />
+            Speaks <strong>MCP</strong> over stdio, as a bundled sidecar.
           </p>
         </div>
       </section>
 
-      <section id="waitlist" class="waitlist">
+      <section id="download" class="download">
         <div class="container">
-          <h2>Join the Waitlist</h2>
-          <p>Launching soon for Windows. macOS and Linux to follow.</p>
-          <form
-            class="waitlist-form"
-            action="https://formspree.io/f/mqeezpak"
-            method="POST"
-          >
-            <input
-              type="email"
-              name="email"
-              placeholder="you@example.com"
-              required
-            />
-            <button type="submit" class="button primary">Notify Me</button>
-          </form>
+          <h2>Download the Preview</h2>
+          <p class="section-lead">
+            Every push to <code>main</code> ships a fresh build for all three
+            platforms. No stable release yet — this is the way in.
+          </p>
+
+          <div class="dl-grid">
+            {
+              downloads.map((d) => (
+                <div class="dl-os" data-os={d.os}>
+                  <h3>{d.label}</h3>
+                  <p class="dl-note">{d.note}</p>
+                  <ul>
+                    {d.formats.map((f) => (
+                      <li>
+                        <a data-asset={f.key} href={RELEASE_PAGE} rel="noopener">
+                          {f.label}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            }
+          </div>
+
+          <ul class="caveats">
+            <li>
+              <strong>Not code-signed yet.</strong> Windows: <em>More info → Run
+              anyway</em>. macOS: right-click → <em>Open</em>.
+            </li>
+            <li>
+              <strong>Installs as its own app,</strong> with its own data — a
+              rough preview can't touch a future stable install.
+            </li>
+            <li><strong>Updates itself,</strong> and asks first.</li>
+          </ul>
         </div>
       </section>
 
       <footer>
         <div class="container">
-          <p>&copy; 2025 Jot Deck. All rights reserved.</p>
+          <p class="footer-links">
+            <a href={REPO} rel="noopener">GitHub</a>
+            <a href={`${REPO}/releases`} rel="noopener">Releases</a>
+          </p>
+          <p>&copy; 2026 Jot Deck. All rights reserved.</p>
         </div>
       </footer>
     </main>
+
+    <script>
+      // Progressive enhancement for the download links, in three tiers:
+      //   1. The server-rendered href already points at the preview release
+      //      page and always works — with JS off, offline, whatever.
+      //   2. Detect the OS (no network) and relabel/reorder.
+      //   3. Ask the GitHub API for the exact current asset URLs.
+      // Tier 3 failing is fine and silent: tiers 1-2 already left a working
+      // button. The `preview` tag is rolling and asset filenames carry the
+      // version, so the URLs can't be baked in at build time.
+      const API =
+        "https://api.github.com/repos/plageoj/jot-deck/releases/tags/preview";
+      const DL_PREFIX = "https://github.com/plageoj/jot-deck/releases/download/";
+      const CACHE_KEY = "jot-deck:preview-release:v1";
+
+      const PATTERNS: Record<string, RegExp> = {
+        "windows-exe": /_x64-setup\.exe$/,
+        "windows-msi": /_x64_en-US\.msi$/,
+        "macos-dmg": /_universal\.dmg$/,
+        "linux-appimage": /_amd64\.AppImage$/,
+        "linux-deb": /_amd64\.deb$/,
+        "linux-rpm": /\.x86_64\.rpm$/,
+      };
+      const PRIMARY: Record<string, string> = {
+        windows: "windows-exe",
+        macos: "macos-dmg",
+        linux: "linux-appimage",
+      };
+      const OS_LABEL: Record<string, string> = {
+        windows: "Windows",
+        macos: "macOS",
+        linux: "Linux",
+      };
+
+      const primaryEl = document.getElementById(
+        "dl-primary",
+      ) as HTMLAnchorElement | null;
+      const versionEl = document.getElementById("dl-version");
+
+      function detectOS(): string | null {
+        const nav = navigator as Navigator & {
+          userAgentData?: { platform?: string };
+        };
+        const hint = nav.userAgentData?.platform ?? nav.platform ?? "";
+        const probe = (hint + " " + (nav.userAgent ?? "")).toLowerCase();
+        // Mobile first — those UAs also contain "mac" / "linux".
+        if (/android|iphone|ipad|ipod/.test(probe)) return null;
+        if (/win/.test(probe)) return "windows";
+        if (/mac|darwin/.test(probe)) return "macos";
+        if (/linux|x11|cros/.test(probe)) return "linux";
+        return null;
+      }
+
+      const os = detectOS();
+
+      // Tier 2: label the button and float the visitor's platform to the front
+      // of the download grid.
+      if (os) {
+        if (primaryEl) primaryEl.textContent = "Download for " + OS_LABEL[os];
+        const grid = document.querySelector(".dl-grid");
+        const mine = grid?.querySelector('.dl-os[data-os="' + os + '"]');
+        if (grid && mine) grid.prepend(mine);
+      }
+
+      type Trimmed = { name: string; assets: Record<string, string> };
+
+      function apply(data: Trimmed) {
+        for (const el of document.querySelectorAll<HTMLAnchorElement>(
+          "[data-asset]",
+        )) {
+          const url = data.assets[el.dataset.asset ?? ""];
+          if (url) el.href = url;
+        }
+        if (os && primaryEl) {
+          const url = data.assets[PRIMARY[os]];
+          if (url) primaryEl.href = url;
+        }
+        const version = /\(([^)]+)\)/.exec(data.name)?.[1];
+        if (version && versionEl) {
+          versionEl.textContent = "Version " + version;
+          versionEl.hidden = false;
+        }
+      }
+
+      function trim(release: any): Trimmed {
+        const assets: Record<string, string> = {};
+        for (const asset of release?.assets ?? []) {
+          const name: string = asset?.name ?? "";
+          const url: unknown = asset?.browser_download_url;
+          // A .sig sidecar sits next to every bundle; never link one.
+          if (name.endsWith(".sig")) continue;
+          if (typeof url !== "string" || !url.startsWith(DL_PREFIX)) continue;
+          for (const key of Object.keys(PATTERNS)) {
+            if (!assets[key] && PATTERNS[key].test(name)) assets[key] = url;
+          }
+        }
+        return { name: String(release?.name ?? ""), assets };
+      }
+
+      // Tier 3. The unauthenticated GitHub API allows 60 req/hr/IP, so reuse
+      // the answer for the rest of the session.
+      const cached = sessionStorage.getItem(CACHE_KEY);
+      if (cached) {
+        try {
+          apply(JSON.parse(cached) as Trimmed);
+        } catch {
+          sessionStorage.removeItem(CACHE_KEY);
+        }
+      } else {
+        fetch(API, { headers: { Accept: "application/vnd.github+json" } })
+          .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+          .then((release) => {
+            const data = trim(release);
+            if (!Object.keys(data.assets).length) return;
+            sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+            apply(data);
+          })
+          .catch(() => {
+            /* keep the release-page fallback */
+          });
+      }
+    </script>
 
     <style>
       :root {
@@ -236,38 +536,32 @@ const features = [
         margin: 0 auto 2.5rem;
       }
 
-      .waitlist-form {
+      /* CTA */
+      .cta {
+        display: flex;
+        gap: 0.75rem;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+
+      .cta-meta {
+        margin-top: 1rem;
+        font-size: 0.875rem;
+        color: var(--color-text-muted);
         display: flex;
         gap: 0.5rem;
         justify-content: center;
         flex-wrap: wrap;
-        max-width: 400px;
-        margin: 0 auto;
       }
 
-      .waitlist-form input[type="email"] {
-        flex: 1;
-        min-width: 200px;
-        padding: 0.875rem 1rem;
-        font-size: 1rem;
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        background: var(--color-surface);
+      #dl-version {
+        font-family: var(--font-mono);
         color: var(--color-text);
       }
 
-      .waitlist-form input[type="email"]::placeholder {
-        color: var(--color-text-muted);
-      }
-
-      .waitlist-form input[type="email"]:focus {
-        outline: none;
-        border-color: var(--color-primary);
-      }
-
-      .waitlist-note {
-        margin-top: 1rem;
-        font-size: 0.875rem;
+      #dl-version::after {
+        content: "·";
+        margin-left: 0.5rem;
         color: var(--color-text-muted);
       }
 
@@ -320,6 +614,50 @@ const features = [
         box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.4);
       }
 
+      /* Keys */
+      .keys {
+        padding: 5rem 0;
+        text-align: center;
+      }
+
+      .keys h2 {
+        font-size: 2rem;
+        margin-bottom: 2.5rem;
+      }
+
+      .key-list {
+        list-style: none;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 0.75rem;
+      }
+
+      .key-list li {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.5rem 0.9rem;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 999px;
+        font-size: 0.875rem;
+        color: var(--color-text-muted);
+      }
+
+      kbd {
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        color: var(--color-text);
+        white-space: nowrap;
+      }
+
+      .keys-note {
+        margin-top: 2rem;
+        font-size: 0.875rem;
+        color: var(--color-text-muted);
+      }
+
       /* Features */
       .features {
         padding: 6rem 0;
@@ -332,9 +670,10 @@ const features = [
         margin-bottom: 3rem;
       }
 
+      /* 260px keeps six tiles at 3+3 on desktop rather than a lopsided 4+2. */
       .feature-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
         gap: 2rem;
       }
 
@@ -364,6 +703,124 @@ const features = [
         color: var(--color-text-muted);
       }
 
+      /* Shared section typography */
+      .section-lead {
+        font-size: 1.125rem;
+        color: var(--color-text-muted);
+        max-width: 46rem;
+      }
+
+      .section-body {
+        color: var(--color-text-muted);
+        max-width: 46rem;
+        margin-top: 1.5rem;
+      }
+
+      .section-lead strong,
+      .section-body strong {
+        color: var(--color-text);
+      }
+
+      .note {
+        margin-top: 2rem;
+        padding: 1rem 1.25rem;
+        border-left: 3px solid var(--color-primary);
+        background: var(--color-surface);
+        border-radius: 0 8px 8px 0;
+        font-size: 0.9375rem;
+        color: var(--color-text-muted);
+        max-width: 46rem;
+      }
+
+      .note strong {
+        color: var(--color-text);
+      }
+
+      /* MCP */
+      .mcp {
+        padding: 6rem 0;
+      }
+
+      .mcp h2,
+      .reporters h2,
+      .download h2 {
+        font-size: 2rem;
+        margin-bottom: 1rem;
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 2rem;
+        margin-top: 2.5rem;
+      }
+
+      .split-item h3 {
+        font-size: 1.0625rem;
+        margin-bottom: 0.5rem;
+      }
+
+      .split-item p {
+        color: var(--color-text-muted);
+        font-size: 0.9375rem;
+      }
+
+      .snippet {
+        margin-top: 2.5rem;
+      }
+
+      .snippet-label {
+        font-size: 0.9375rem;
+        color: var(--color-text-muted);
+        margin-bottom: 0.75rem;
+      }
+
+      .snippet pre {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        padding: 1.25rem;
+        overflow-x: auto;
+      }
+
+      .snippet code {
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        line-height: 1.7;
+        color: var(--color-text);
+      }
+
+      .snippet-note {
+        margin-top: 0.75rem;
+        font-size: 0.875rem;
+        color: var(--color-text-muted);
+      }
+
+      /* Reporters */
+      .reporters {
+        padding: 6rem 0;
+        background: var(--color-surface);
+      }
+
+      .reporters .note {
+        background: var(--color-bg);
+      }
+
+      .badge {
+        display: inline-block;
+        vertical-align: middle;
+        margin-left: 0.5rem;
+        padding: 0.2rem 0.6rem;
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: var(--color-primary);
+        border: 1px solid var(--color-primary);
+        border-radius: 999px;
+      }
+
       /* Tech */
       .tech {
         padding: 4rem 0;
@@ -374,27 +831,90 @@ const features = [
         font-family: var(--font-mono);
         font-size: 0.9375rem;
         color: var(--color-text-muted);
+        line-height: 2;
       }
 
       .tech-stack strong {
         color: var(--color-text);
       }
 
-      /* Waitlist */
-      .waitlist {
+      /* Download */
+      .download {
         padding: 6rem 0;
-        text-align: center;
         background: var(--color-surface);
       }
 
-      .waitlist h2 {
-        font-size: 2rem;
+      .download code {
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        color: var(--color-text);
+      }
+
+      .dl-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 1.5rem;
+        margin-top: 2.5rem;
+      }
+
+      .dl-os {
+        padding: 1.5rem;
+        background: var(--color-bg);
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+      }
+
+      .dl-os h3 {
+        font-size: 1.125rem;
+        margin-bottom: 0.25rem;
+      }
+
+      .dl-note {
+        font-size: 0.8125rem;
+        color: var(--color-text-muted);
         margin-bottom: 1rem;
       }
 
-      .waitlist p {
+      .dl-os ul {
+        list-style: none;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .dl-os a {
+        display: inline-block;
+        padding: 0.4rem 0.8rem;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        color: var(--color-text);
+        text-decoration: none;
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+      }
+
+      .dl-os a:hover {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+      }
+
+      .caveats {
+        list-style: none;
+        margin-top: 2.5rem;
+        display: grid;
+        gap: 0.75rem;
+        max-width: 46rem;
+      }
+
+      .caveats li {
+        font-size: 0.9375rem;
         color: var(--color-text-muted);
-        margin-bottom: 2rem;
+        padding-left: 1rem;
+        border-left: 2px solid var(--color-border);
+      }
+
+      .caveats strong {
+        color: var(--color-text);
       }
 
       /* Footer */
@@ -407,6 +927,22 @@ const features = [
       footer p {
         font-size: 0.875rem;
         color: var(--color-text-muted);
+      }
+
+      .footer-links {
+        display: flex;
+        gap: 1.5rem;
+        justify-content: center;
+        margin-bottom: 0.75rem;
+      }
+
+      .footer-links a {
+        color: var(--color-text-muted);
+        text-decoration: none;
+      }
+
+      .footer-links a:hover {
+        color: var(--color-primary);
       }
     </style>
   </body>
