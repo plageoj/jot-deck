@@ -9,7 +9,7 @@ use jot_deck_core::{
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    let db_path = args.get(1).map(|s| s.as_str()).unwrap_or("jot-deck.db");
+    let db_path = args.get(1).map(String::as_str).unwrap_or("jot-deck.db");
 
     println!("Jot Deck CLI - データ層テスト");
     println!("Database: {}", db_path);

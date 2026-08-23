@@ -317,12 +317,12 @@ export class WasmBackend implements DatabaseBackend {
 
     const newName = name ?? current.name;
     // Empty description string clears to NULL; undefined leaves it unchanged.
-    const newDescription =
-      description === undefined
-        ? current.description
-        : description === ""
-          ? null
-          : description;
+    let newDescription: string | null;
+    if (description === undefined) {
+      newDescription = current.description;
+    } else {
+      newDescription = description === "" ? null : description;
+    }
     const newPrivate = isPrivate ?? current.private;
 
     db.run(

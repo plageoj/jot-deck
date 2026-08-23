@@ -207,7 +207,7 @@ describe("ActionDispatcher with no columns loaded", () => {
 
     await flushPromises();
 
-    expect(state.createColumnCalls.length).toBe(1);
+    expect(state.createColumnCalls).toHaveLength(1);
     expect(event.defaultPrevented).toBe(true);
   });
 
@@ -503,7 +503,7 @@ describe("ActionDispatcher column-mode actions", () => {
 
   it("createCard delegates to data.createCard for the focused column", async () => {
     await dispatcher.executeColumnAction("createCard");
-    expect(state.createCardCalls.length).toBe(1);
+    expect(state.createCardCalls).toHaveLength(1);
     expect(state.createCardCalls[0].column_id).toBe("col-1");
     expect(focus.editingCardId).not.toBeNull();
   });
@@ -515,24 +515,24 @@ describe("ActionDispatcher column-mode actions", () => {
 
   it("reorderColumnLeft moves the column when not at the start", async () => {
     await dispatcher.executeColumnAction("reorderColumnLeft");
-    expect(state.moveColumnCalls.length).toBe(1);
+    expect(state.moveColumnCalls).toHaveLength(1);
     expect(state.moveColumnCalls[0].id).toBe("col-1");
   });
 
   it("reorderColumnLeft is a no-op at the first column", async () => {
     focus.focusedColumnIndex = 0;
     await dispatcher.executeColumnAction("reorderColumnLeft");
-    expect(state.moveColumnCalls.length).toBe(0);
+    expect(state.moveColumnCalls).toHaveLength(0);
   });
 
   it("reorderColumnRight moves the column when not at the end", async () => {
     await dispatcher.executeColumnAction("reorderColumnRight");
-    expect(state.moveColumnCalls.length).toBe(1);
+    expect(state.moveColumnCalls).toHaveLength(1);
   });
 
   it("createColumn delegates to data.createColumnAtPosition", async () => {
     await dispatcher.executeColumnAction("createColumn");
-    expect(state.createColumnCalls.length).toBe(1);
+    expect(state.createColumnCalls).toHaveLength(1);
   });
 });
 
@@ -574,26 +574,47 @@ describe("ActionDispatcher card-mode actions", () => {
     dispatcher = new ActionDispatcher(data, focus);
   });
 
-  it("moveDown advances focusedCardIndex within the column", async () => {
-    await dispatcher.executeCardAction("moveDown");
-    expect(focus.focusedCardIndex).toBe(2);
-  });
-
-  it("moveDown is a no-op at the last card", async () => {
-    focus.focusedCardIndex = 2;
-    await dispatcher.executeCardAction("moveDown");
-    expect(focus.focusedCardIndex).toBe(2);
-  });
-
-  it("moveUp decrements focusedCardIndex", async () => {
-    await dispatcher.executeCardAction("moveUp");
-    expect(focus.focusedCardIndex).toBe(0);
-  });
-
-  it("moveUp is a no-op at the first card", async () => {
-    focus.focusedCardIndex = 0;
-    await dispatcher.executeCardAction("moveUp");
-    expect(focus.focusedCardIndex).toBe(0);
+  it.each([
+    {
+      name: "moveDown advances focusedCardIndex within the column",
+      action: "moveDown",
+      from: 1,
+      expected: 2,
+    },
+    {
+      name: "moveDown is a no-op at the last card",
+      action: "moveDown",
+      from: 2,
+      expected: 2,
+    },
+    {
+      name: "moveUp decrements focusedCardIndex",
+      action: "moveUp",
+      from: 1,
+      expected: 0,
+    },
+    {
+      name: "moveUp is a no-op at the first card",
+      action: "moveUp",
+      from: 0,
+      expected: 0,
+    },
+    {
+      name: "goFirst snaps focusedCardIndex to 0",
+      action: "goFirst",
+      from: 1,
+      expected: 0,
+    },
+    {
+      name: "goLast snaps focusedCardIndex to last card",
+      action: "goLast",
+      from: 1,
+      expected: 2,
+    },
+  ])("$name", async ({ action, from, expected }) => {
+    focus.focusedCardIndex = from;
+    await dispatcher.executeCardAction(action);
+    expect(focus.focusedCardIndex).toBe(expected);
   });
 
   it("moveLeft is a no-op at the first column in card mode", async () => {
@@ -606,16 +627,6 @@ describe("ActionDispatcher card-mode actions", () => {
     expect(focus.focusedColumnIndex).toBe(1);
     // col-1 has 1 card → restoreCardIndex falls back to length-1 = 0
     expect(focus.focusedCardIndex).toBe(0);
-  });
-
-  it("goFirst snaps focusedCardIndex to 0", async () => {
-    await dispatcher.executeCardAction("goFirst");
-    expect(focus.focusedCardIndex).toBe(0);
-  });
-
-  it("goLast snaps focusedCardIndex to last card", async () => {
-    await dispatcher.executeCardAction("goLast");
-    expect(focus.focusedCardIndex).toBe(2);
   });
 
   it("scrollHalfPageUp clamps to 0", async () => {
@@ -761,7 +772,7 @@ describe("ActionDispatcher.executeCommand", () => {
 
   it("newColumn delegates to data.createColumn", async () => {
     await dispatcher.executeCommand("newColumn");
-    expect(state.createColumnCalls.length).toBe(1);
+    expect(state.createColumnCalls).toHaveLength(1);
   });
 
   it("default branch forwards unknown actions through executeAction", async () => {
@@ -1068,7 +1079,7 @@ describe("ActionDispatcher card-mode cross-column and paste actions", () => {
   it("moveCardLeft is a no-op at the first column", async () => {
     focus.focusedColumnIndex = 0;
     await dispatcher.executeCardAction("moveCardLeft");
-    expect(state.moveCardToColumnCalls.length).toBe(0);
+    expect(state.moveCardToColumnCalls).toHaveLength(0);
   });
 
   it("moveCardRight moves the focused card to the next column", async () => {
@@ -1082,7 +1093,7 @@ describe("ActionDispatcher card-mode cross-column and paste actions", () => {
   it("moveCardRight is a no-op at the last column", async () => {
     focus.focusedColumnIndex = 1;
     await dispatcher.executeCardAction("moveCardRight");
-    expect(state.moveCardToColumnCalls.length).toBe(0);
+    expect(state.moveCardToColumnCalls).toHaveLength(0);
   });
 
   it("moveLeft navigates to the previous column and stays in card mode", async () => {
@@ -1114,7 +1125,7 @@ describe("ActionDispatcher card-mode cross-column and paste actions", () => {
     focus.clipboardCard = null;
     await dispatcher.executeCardAction("pasteAbove");
     await dispatcher.executeCardAction("pasteBelow");
-    expect(state.createCardCalls.length).toBe(0);
+    expect(state.createCardCalls).toHaveLength(0);
   });
 
   it("deleteCard exits to column mode when the column becomes empty", async () => {

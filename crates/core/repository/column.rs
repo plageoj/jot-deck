@@ -186,7 +186,7 @@ pub fn create_with(
         deck_id: deck_id.to_string(),
         name,
         position,
-        description: description.map(|s| s.to_string()),
+        description: description.map(str::to_string),
         private,
         created_at: now,
         updated_at: now,
@@ -267,7 +267,7 @@ pub fn update(
     let now = Utc::now();
     let new_name = name.unwrap_or(&column.name).to_string();
     let new_description: Option<String> = match description {
-        Some(d) => d.map(|s| s.to_string()),
+        Some(d) => d.map(str::to_string),
         None => column.description.clone(),
     };
     let new_private = private.unwrap_or(column.private);
