@@ -714,7 +714,7 @@ describe("FocusManager focus helpers", () => {
 
     focus.persistCurrent();
 
-    expect(localStorage.length).toBe(0);
+    expect(localStorage).toHaveLength(0);
   });
 
   it("clampToLoadedDeck resets focus when the deck has no columns", () => {

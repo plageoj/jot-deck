@@ -483,7 +483,7 @@ describe("DeckData CRUD", () => {
     const before = data.columns.length;
     const col = await data.createColumn();
     expect(col).not.toBeNull();
-    expect(data.columns.length).toBe(before + 1);
+    expect(data.columns).toHaveLength(before + 1);
     expect(data.cardsByColumn[col!.id]).toEqual([]);
   });
 
@@ -1016,7 +1016,7 @@ describe("DeckData onboarding", () => {
     const fresh = new DeckData();
     await fresh.init();
 
-    expect(fresh.decks.length).toBe(1);
+    expect(fresh.decks).toHaveLength(1);
     expect(fresh.decks[0].name).toBe("Getting Started");
   });
 
@@ -1025,14 +1025,14 @@ describe("DeckData onboarding", () => {
 
     const fresh = new DeckData();
     await fresh.init();
-    expect(fresh.decks.length).toBe(1);
+    expect(fresh.decks).toHaveLength(1);
 
     const restored = await fresh.restoreOnboardingDeck();
 
     expect(restored).not.toBeNull();
     expect(restored?.name).toBe("Getting Started");
     // Prepended, existing deck preserved.
-    expect(fresh.decks.length).toBe(2);
+    expect(fresh.decks).toHaveLength(2);
     expect(fresh.decks[0].id).toBe(restored?.id);
     expect(fresh.decks.some((d) => d.id === "existing-deck")).toBe(true);
     // Newly restored deck becomes the current one.
