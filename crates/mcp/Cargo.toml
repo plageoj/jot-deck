@@ -20,4 +20,4 @@ chrono = "0.4"
 ulid = "3"
 # Resolves the platform data dir (same crate Tauri v2 uses under the hood), so
 # the bridge derives the same fixed DB location as the GUI.
-dirs = "6"
+dirs = "7"
