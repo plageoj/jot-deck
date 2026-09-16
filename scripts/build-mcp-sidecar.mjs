@@ -26,28 +26,43 @@ function hostTriple() {
   return match[1].trim();
 }
 
-const triple = process.env.TAURI_ENV_TARGET_TRIPLE || hostTriple();
+function buildForTriple(triple) {
+  // Build. Pass --target only when a specific triple is requested so a plain host
+  // build lands in target/release (no triple subdir).
+  const cargoArgs = ["build", "-p", "jot-deck-mcp", "--release"];
+  if (triple) {
+    cargoArgs.push("--target", triple);
+  }
+  console.log(`[sidecar] cargo ${cargoArgs.join(" ")}`);
+  execFileSync("cargo", cargoArgs, { cwd: repoRoot, stdio: "inherit" });
+
+  const builtDir = triple
+    ? join(repoRoot, "target", triple, "release")
+    : join(repoRoot, "target", "release");
+  return join(builtDir, `jot-deck-mcp${exeSuffix}`);
+}
+
+const requestedTriple = process.env.TAURI_ENV_TARGET_TRIPLE;
+const triple = requestedTriple || hostTriple();
 const isWindows = triple.includes("windows");
 const exeSuffix = isWindows ? ".exe" : "";
-
-// Build. Pass --target only when a specific triple is requested so a plain host
-// build lands in target/release (no triple subdir).
-const cargoArgs = ["build", "-p", "jot-deck-mcp", "--release"];
-if (process.env.TAURI_ENV_TARGET_TRIPLE) {
-  cargoArgs.push("--target", triple);
-}
-console.log(`[sidecar] cargo ${cargoArgs.join(" ")}`);
-execFileSync("cargo", cargoArgs, { cwd: repoRoot, stdio: "inherit" });
-
-const builtDir = process.env.TAURI_ENV_TARGET_TRIPLE
-  ? join(repoRoot, "target", triple, "release")
-  : join(repoRoot, "target", "release");
-const builtBin = join(builtDir, `jot-deck-mcp${exeSuffix}`);
 const destBin = join(destDir, `jot-deck-mcp-${triple}${exeSuffix}`);
 
 mkdirSync(destDir, { recursive: true });
-copyFileSync(builtBin, destBin);
-// externalBin requires the sidecar to be executable; copyFileSync inherits the
-// process umask, so restore the executable bit on Unix targets.
+
+if (triple === "universal-apple-darwin") {
+  // Not a real rustc/cargo target — Tauri's own universal macOS build lipo's
+  // together separate x86_64/aarch64 binaries, so do the same here.
+  const arches = ["x86_64-apple-darwin", "aarch64-apple-darwin"];
+  const builtBins = arches.map(buildForTriple);
+  console.log(`[sidecar] lipo -create ${builtBins.join(" ")} -output ${destBin}`);
+  execFileSync("lipo", ["-create", ...builtBins, "-output", destBin]);
+} else {
+  const builtBin = buildForTriple(requestedTriple);
+  copyFileSync(builtBin, destBin);
+}
+
+// externalBin requires the sidecar to be executable; copyFileSync/lipo output
+// inherits the process umask, so restore the executable bit on Unix targets.
 if (!isWindows) chmodSync(destBin, 0o755);
 console.log(`[sidecar] staged ${destBin}`);
