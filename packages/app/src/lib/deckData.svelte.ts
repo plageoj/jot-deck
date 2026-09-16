@@ -9,6 +9,7 @@ import {
 } from "$lib/types";
 import { getDatabase, isTauri, type DatabaseBackend } from "$lib/db";
 import { FocusManager } from "./focusManager.svelte";
+import { UndoStack } from "./undoStack";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
 
@@ -33,6 +34,9 @@ export class DeckData {
   // Set after columns finish loading for currentDeck. Use this — not
   // currentDeck — to drive logic that depends on the column list being ready.
   loadedDeckId = $state<string | null>(null);
+  // Generic Undo/Redo (001-keybindings.md §4.4). Session-scoped — cleared on
+  // deck switch in `selectDeck`, never persisted.
+  readonly history = new UndoStack();
 
   async init() {
     this.db = await getDatabase();
@@ -172,6 +176,7 @@ export class DeckData {
   async selectDeck(deck: Deck) {
     this.currentDeck = deck;
     this.loadedDeckId = null;
+    this.history.clear();
     this.saveLastDeckId(deck.id);
     this.clearTagFilter();
     try {
@@ -539,12 +544,13 @@ export class DeckData {
     }
   }
 
-  async createColumn(): Promise<Column | null> {
+  async createColumn(record = true): Promise<Column | null> {
     if (!this.currentDeck) return null;
     try {
       const col = await this.db.createColumn({ deck_id: this.currentDeck.id });
       this.columns = [...this.columns, col];
       this.cardsByColumn[col.id] = [];
+      if (record) this.recordColumnCreate(col.id);
       return col;
     } catch (e) {
       this.error = `Failed to create column: ${e}`;
@@ -552,7 +558,10 @@ export class DeckData {
     }
   }
 
-  async createColumnAtPosition(position: number): Promise<Column | null> {
+  async createColumnAtPosition(
+    position: number,
+    record = true,
+  ): Promise<Column | null> {
     if (!this.currentDeck) return null;
     try {
       const col = await this.db.createColumn({
@@ -560,6 +569,7 @@ export class DeckData {
         position,
       });
       await this.reloadColumns();
+      if (record) this.recordColumnCreate(col.id);
       return col;
     } catch (e) {
       this.error = `Failed to create column: ${e}`;
@@ -571,6 +581,7 @@ export class DeckData {
     columnId: string,
     content = "",
     position?: number,
+    record = true,
   ): Promise<Card | null> {
     try {
       const card = await this.db.createCard({
@@ -586,6 +597,7 @@ export class DeckData {
       } else {
         await this.loadCardsForColumns();
       }
+      if (record) this.recordCardCreate(card.id);
       return card;
     } catch (e) {
       this.error = `Failed to create card: ${e}`;
@@ -593,7 +605,8 @@ export class DeckData {
     }
   }
 
-  async saveCard(cardId: string, content: string) {
+  async saveCard(cardId: string, content: string, record = true) {
+    const previousContent = this.findCardContent(cardId);
     try {
       const updatedCard = await this.db.updateCardContent(cardId, content);
       for (const columnId of Object.keys(this.cardsByColumn)) {
@@ -609,15 +622,85 @@ export class DeckData {
         }
       }
       await this.loadDeckTags();
+      if (record && previousContent !== null && previousContent !== content) {
+        this.history.push({
+          undo: async () => {
+            await this.saveCard(cardId, previousContent, false);
+          },
+          redo: async () => {
+            await this.saveCard(cardId, content, false);
+          },
+        });
+      }
     } catch (e) {
       this.error = `Failed to save card: ${e}`;
     }
   }
 
-  async deleteColumn(columnId: string): Promise<boolean> {
+  private findCardContent(cardId: string): string | null {
+    for (const cards of Object.values(this.cardsByColumn)) {
+      const card = cards.find((c) => c.id === cardId);
+      if (card) return card.content;
+    }
+    return null;
+  }
+
+  private findColumnIdForCard(cardId: string): string | null {
+    for (const [columnId, cards] of Object.entries(this.cardsByColumn)) {
+      if (cards.some((c) => c.id === cardId)) return columnId;
+    }
+    return null;
+  }
+
+  private recordColumnCreate(id: string): void {
+    this.history.push({
+      undo: async () => {
+        await this.deleteColumn(id, false);
+      },
+      redo: async () => {
+        await this.restoreDeleted("column", id);
+      },
+    });
+  }
+
+  private recordColumnDelete(id: string): void {
+    this.history.push({
+      undo: async () => {
+        await this.restoreDeleted("column", id);
+      },
+      redo: async () => {
+        await this.deleteColumn(id, false);
+      },
+    });
+  }
+
+  private recordCardCreate(id: string): void {
+    this.history.push({
+      undo: async () => {
+        await this.deleteCard(id, false);
+      },
+      redo: async () => {
+        await this.restoreDeleted("card", id);
+      },
+    });
+  }
+
+  private recordCardDelete(id: string): void {
+    this.history.push({
+      undo: async () => {
+        await this.restoreDeleted("card", id);
+      },
+      redo: async () => {
+        await this.deleteCard(id, false);
+      },
+    });
+  }
+
+  async deleteColumn(columnId: string, record = true): Promise<boolean> {
     try {
       await this.db.deleteColumn(columnId);
       await this.reloadColumns();
+      if (record) this.recordColumnDelete(columnId);
       return true;
     } catch (e) {
       this.error = `Failed to delete column: ${e}`;
@@ -625,10 +708,11 @@ export class DeckData {
     }
   }
 
-  async deleteCard(cardId: string): Promise<boolean> {
+  async deleteCard(cardId: string, record = true): Promise<boolean> {
     try {
       await this.db.deleteCard(cardId);
       await this.loadCardsForColumns();
+      if (record) this.recordCardDelete(cardId);
       return true;
     } catch (e) {
       this.error = `Failed to delete card: ${e}`;
@@ -636,10 +720,21 @@ export class DeckData {
     }
   }
 
-  async moveColumn(id: string, position: number): Promise<boolean> {
+  async moveColumn(id: string, position: number, record = true): Promise<boolean> {
+    const fromPosition = this.columns.findIndex((c) => c.id === id);
     try {
       await this.db.moveColumn(id, position);
       await this.reloadColumns();
+      if (record && fromPosition !== -1 && fromPosition !== position) {
+        this.history.push({
+          undo: async () => {
+            await this.moveColumn(id, fromPosition, false);
+          },
+          redo: async () => {
+            await this.moveColumn(id, position, false);
+          },
+        });
+      }
       return true;
     } catch (e) {
       this.error = `Failed to move column: ${e}`;
@@ -647,10 +742,24 @@ export class DeckData {
     }
   }
 
-  async moveCard(id: string, position: number): Promise<boolean> {
+  async moveCard(id: string, position: number, record = true): Promise<boolean> {
+    const columnId = this.findColumnIdForCard(id);
+    const fromPosition = columnId
+      ? (this.cardsByColumn[columnId] ?? []).findIndex((c) => c.id === id)
+      : -1;
     try {
       await this.db.moveCard(id, position);
       await this.loadCardsForColumns();
+      if (record && fromPosition !== -1 && fromPosition !== position) {
+        this.history.push({
+          undo: async () => {
+            await this.moveCard(id, fromPosition, false);
+          },
+          redo: async () => {
+            await this.moveCard(id, position, false);
+          },
+        });
+      }
       return true;
     } catch (e) {
       this.error = `Failed to move card: ${e}`;
@@ -658,10 +767,33 @@ export class DeckData {
     }
   }
 
-  async moveCardToColumn(cardId: string, columnId: string): Promise<boolean> {
+  async moveCardToColumn(
+    cardId: string,
+    columnId: string,
+    record = true,
+  ): Promise<boolean> {
+    const fromColumnId = this.findColumnIdForCard(cardId);
+    const fromPosition = fromColumnId
+      ? (this.cardsByColumn[fromColumnId] ?? []).findIndex(
+          (c) => c.id === cardId,
+        )
+      : -1;
     try {
       await this.db.moveCardToColumn(cardId, columnId);
       await this.loadCardsForColumns();
+      if (record && fromColumnId && fromColumnId !== columnId) {
+        this.history.push({
+          undo: async () => {
+            await this.moveCardToColumn(cardId, fromColumnId, false);
+            if (fromPosition !== -1) {
+              await this.moveCard(cardId, fromPosition, false);
+            }
+          },
+          redo: async () => {
+            await this.moveCardToColumn(cardId, columnId, false);
+          },
+        });
+      }
       return true;
     } catch (e) {
       this.error = `Failed to move card: ${e}`;
@@ -773,15 +905,7 @@ export class DeckData {
 
   async restoreTrashItem(item: TrashItem): Promise<boolean> {
     try {
-      if (item.type === "column") {
-        await this.db.restoreColumn(item.id);
-      } else {
-        await this.db.restoreCard(item.id);
-      }
-      await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
-      if (this.activeTagFilter) {
-        this.filterByTag(this.activeTagFilter);
-      }
+      await this.restoreDeleted(item.type, item.id);
       return true;
     } catch (e) {
       this.error = `Failed to restore: ${e}`;
@@ -789,9 +913,20 @@ export class DeckData {
     }
   }
 
-  async undoLastDelete(): Promise<boolean> {
-    const items = await this.getTrashItems();
-    if (items.length === 0) return false;
-    return this.restoreTrashItem(items[0]);
+  /** Shared by trash-palette restore and the undo-stack's redo-of-create /
+   * undo-of-delete effects — both are "clear `deleted_at`" under the hood. */
+  private async restoreDeleted(
+    type: "card" | "column",
+    id: string,
+  ): Promise<void> {
+    if (type === "column") {
+      await this.db.restoreColumn(id);
+    } else {
+      await this.db.restoreCard(id);
+    }
+    await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
+    if (this.activeTagFilter) {
+      this.filterByTag(this.activeTagFilter);
+    }
   }
 }

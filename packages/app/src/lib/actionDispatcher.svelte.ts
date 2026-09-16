@@ -155,7 +155,8 @@ export class ActionDispatcher {
       action === "showDeckPalette" ||
       action === "showCommandPalette" ||
       action === "showSettings" ||
-      action === "undo"
+      action === "undo" ||
+      action === "redo"
     ) {
       event.preventDefault();
       this.executeAction(action);
@@ -229,7 +230,12 @@ export class ActionDispatcher {
     }
 
     if (action === "undo") {
-      await this.data.undoLastDelete();
+      await this.data.history.undo();
+      return;
+    }
+
+    if (action === "redo") {
+      await this.data.history.redo();
       return;
     }
 
