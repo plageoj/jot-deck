@@ -554,6 +554,18 @@ describe("DeckData CRUD", () => {
     expect(data.error).toBe("Cannot save card: edit lock is not held");
   });
 
+  it("releases the lock and reports a CAS conflict when saving fails", async () => {
+    const original = mockBackend.updateCardContentCas;
+    mockBackend.updateCardContentCas = async () => {
+      throw new Error("Card was modified since it was read");
+    };
+
+    expect(await data.startCardEdit("card-1")).toBe(true);
+    expect(await data.saveCardEdit("card-1", "new content")).toBe(false);
+    expect(data.error).toContain("Card was modified since it was read");
+    mockBackend.updateCardContentCas = original;
+  });
+
   it("deleteColumn forwards the id to the backend", async () => {
     const ok = await data.deleteColumn("col-active");
     expect(ok).toBe(true);
