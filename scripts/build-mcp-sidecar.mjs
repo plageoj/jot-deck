@@ -51,18 +51,26 @@ const destBin = join(destDir, `jot-deck-mcp-${triple}${exeSuffix}`);
 mkdirSync(destDir, { recursive: true });
 
 if (triple === "universal-apple-darwin") {
-  // Not a real rustc/cargo target — Tauri's own universal macOS build lipo's
-  // together separate x86_64/aarch64 binaries, so do the same here.
+  // Not a real rustc/cargo target: Tauri's universal macOS build compiles the
+  // app twice, once per real arch, and each of those two cargo invocations
+  // asks tauri-build for the sidecar under ITS OWN `TARGET` env var (never
+  // "universal-apple-darwin") — so stage both real-triple binaries here
+  // rather than lipo-ing them into a single universal-named file no build
+  // ever looks for.
   const arches = ["x86_64-apple-darwin", "aarch64-apple-darwin"];
-  const builtBins = arches.map(buildForTriple);
-  console.log(`[sidecar] lipo -create ${builtBins.join(" ")} -output ${destBin}`);
-  execFileSync("lipo", ["-create", ...builtBins, "-output", destBin]);
+  for (const arch of arches) {
+    const builtBin = buildForTriple(arch);
+    const archDestBin = join(destDir, `jot-deck-mcp-${arch}`);
+    copyFileSync(builtBin, archDestBin);
+    chmodSync(archDestBin, 0o755);
+    console.log(`[sidecar] staged ${archDestBin}`);
+  }
 } else {
   const builtBin = buildForTriple(requestedTriple);
   copyFileSync(builtBin, destBin);
-}
 
-// externalBin requires the sidecar to be executable; copyFileSync/lipo output
-// inherits the process umask, so restore the executable bit on Unix targets.
-if (!isWindows) chmodSync(destBin, 0o755);
-console.log(`[sidecar] staged ${destBin}`);
+  // externalBin requires the sidecar to be executable; copyFileSync output
+  // inherits the process umask, so restore the executable bit on Unix targets.
+  if (!isWindows) chmodSync(destBin, 0o755);
+  console.log(`[sidecar] staged ${destBin}`);
+}
