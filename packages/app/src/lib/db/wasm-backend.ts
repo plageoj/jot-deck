@@ -547,6 +547,9 @@ export class WasmBackend implements DatabaseBackend {
         "UPDATE cards SET content = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
         [content, now, id, expectedUpdatedAt],
       );
+      if (db.getRowsModified() !== 1) {
+        throw new Error("Card was modified since it was read");
+      }
       await this.syncCardTags(id, content);
       db.run("COMMIT");
     } catch (error) {
