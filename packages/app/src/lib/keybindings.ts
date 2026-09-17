@@ -103,8 +103,11 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   // Common - Tag filter
   { sequence: "/", action: "openTagFilter", modes: ["column", "card"], description: "Filter by tag" },
 
-  // Common - Undo
+  // Common - Undo / Redo
   { sequence: "u", action: "undo", modes: ["column", "card"], description: "Undo" },
+  { sequence: "Ctrl+z", action: "undo", modes: ["column", "card"], description: "Undo" },
+  { sequence: "Ctrl+r", action: "redo", modes: ["column", "card"], description: "Redo" },
+  { sequence: "Ctrl+Shift+Z", action: "redo", modes: ["column", "card"], description: "Redo" },
 
   // Common - Trash
   { sequence: "gt", action: "showTrashPalette", modes: ["column", "card"], description: "Open trash" },

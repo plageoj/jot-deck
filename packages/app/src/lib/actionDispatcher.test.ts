@@ -211,29 +211,30 @@ describe("ActionDispatcher with no columns loaded", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
-  it("undoes the last delete via `u` when no columns exist", async () => {
-    state.deletedCards = [
-      {
-        id: "card-1",
-        column_id: "col-x",
-        content: "x",
-        score: 0,
-        position: 0,
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
-        deleted_at: "2026-05-01T00:00:00Z",
-        deleted_with_column: false,
-        locked_by: null,
-        locked_at: null,
-      },
-    ];
+  it("pops the undo stack via `u` when no columns exist", async () => {
+    const undo = vi.fn(async () => {});
+    data.history.push({ undo, redo: async () => {} });
 
     const event = makeKeyEvent({ key: "u" });
     dispatcher.handleKeydown(event);
 
     await flushPromises();
 
-    expect(state.restoreCardCalls).toContain("card-1");
+    expect(undo).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("pops the redo stack via `Ctrl+r` when no columns exist", async () => {
+    const redo = vi.fn(async () => {});
+    data.history.push({ undo: async () => {}, redo });
+    await data.history.undo();
+
+    const event = makeKeyEvent({ key: "r", ctrl: true });
+    dispatcher.handleKeydown(event);
+
+    await flushPromises();
+
+    expect(redo).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
   });
 

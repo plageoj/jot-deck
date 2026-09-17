@@ -166,12 +166,20 @@ describe("resolveKeybindings", () => {
   });
 
   it("drops a binding when overridden to null or empty", () => {
-    const undo = DEFAULT_KEYBINDINGS.find((b) => b.action === "undo")!;
-    const sig = signatureOf(undo);
-    expect(resolveKeybindings({ [sig]: null }).some((b) => b.action === "undo"))
-      .toBe(false);
-    expect(resolveKeybindings({ [sig]: "" }).some((b) => b.action === "undo"))
-      .toBe(false);
+    const tagFilter = DEFAULT_KEYBINDINGS.find(
+      (b) => b.action === "openTagFilter",
+    )!;
+    const sig = signatureOf(tagFilter);
+    expect(
+      resolveKeybindings({ [sig]: null }).some(
+        (b) => b.action === "openTagFilter",
+      ),
+    ).toBe(false);
+    expect(
+      resolveKeybindings({ [sig]: "" }).some(
+        (b) => b.action === "openTagFilter",
+      ),
+    ).toBe(false);
   });
 
   it("ignores overrides whose signature matches no default", () => {

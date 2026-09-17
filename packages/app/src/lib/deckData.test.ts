@@ -266,39 +266,6 @@ describe("DeckData trash", () => {
     expect(state.restoreCardCalls).toEqual([]);
   });
 
-  it("undoLastDelete restores the most recent deletion", async () => {
-    state.deletedCards = [
-      makeCard("card-old", "col-active", { deletedAt: "2026-05-01T10:00:00Z" }),
-      makeCard("card-new", "col-active", { deletedAt: "2026-05-03T10:00:00Z" }),
-    ];
-
-    const ok = await data.undoLastDelete();
-
-    expect(ok).toBe(true);
-    expect(state.restoreCardCalls).toEqual(["card-new"]);
-  });
-
-  it("undoLastDelete returns false when trash is empty", async () => {
-    const ok = await data.undoLastDelete();
-    expect(ok).toBe(false);
-    expect(state.restoreCardCalls).toEqual([]);
-    expect(state.restoreColumnCalls).toEqual([]);
-  });
-
-  it("undoLastDelete called repeatedly walks the stack newest-first", async () => {
-    state.deletedCards = [
-      makeCard("card-a", "col-active", { deletedAt: "2026-05-01T10:00:00Z" }),
-      makeCard("card-b", "col-active", { deletedAt: "2026-05-02T10:00:00Z" }),
-      makeCard("card-c", "col-active", { deletedAt: "2026-05-03T10:00:00Z" }),
-    ];
-
-    await data.undoLastDelete();
-    await data.undoLastDelete();
-    await data.undoLastDelete();
-
-    expect(state.restoreCardCalls).toEqual(["card-c", "card-b", "card-a"]);
-  });
-
   it("breaks deleted_at ties deterministically by id (descending)", async () => {
     // Same deletedAt — order must be stable and id-descending so undo picks
     // the same item every time, regardless of source-table merge order.
@@ -555,6 +522,190 @@ describe("DeckData CRUD", () => {
   it("updateCardScore forwards delta to the backend", async () => {
     await data.updateCardScore("card-x", 1);
     expect(state.updateCardScoreCalls).toEqual([{ id: "card-x", delta: 1 }]);
+  });
+
+  it("createCard undo deletes the new card, redo restores it", async () => {
+    const card = await data.createCard("col-active", "hello");
+    expect(card).not.toBeNull();
+
+    await data.history.undo();
+    expect(state.deleteCardCalls).toEqual([card!.id]);
+
+    await data.history.redo();
+    expect(state.restoreCardCalls).toEqual([card!.id]);
+  });
+
+  it("deleteCard undo restores it, redo deletes it again", async () => {
+    const ok = await data.deleteCard("card-1");
+    expect(ok).toBe(true);
+
+    await data.history.undo();
+    expect(state.restoreCardCalls).toEqual(["card-1"]);
+
+    await data.history.redo();
+    expect(state.deleteCardCalls).toEqual(["card-1", "card-1"]);
+  });
+
+  it("createColumn undo deletes the new column, redo restores it", async () => {
+    const col = await data.createColumn();
+    expect(col).not.toBeNull();
+
+    await data.history.undo();
+    expect(state.deleteColumnCalls).toEqual([col!.id]);
+
+    await data.history.redo();
+    expect(state.restoreColumnCalls).toEqual([col!.id]);
+  });
+
+  it("deleteColumn undo restores it, redo deletes it again", async () => {
+    const ok = await data.deleteColumn("col-active");
+    expect(ok).toBe(true);
+
+    await data.history.undo();
+    expect(state.restoreColumnCalls).toEqual(["col-active"]);
+
+    await data.history.redo();
+    expect(state.deleteColumnCalls).toEqual(["col-active", "col-active"]);
+  });
+
+  it("saveCard undo restores the previous content, redo re-applies the new content", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
+    ]);
+    await data.loadCardsForColumns();
+
+    await data.saveCard("card-1", "new content");
+    expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
+
+    await data.history.undo();
+    expect(data.cardsByColumn["col-active"][0].content).toBe("old");
+
+    await data.history.redo();
+    expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
+  });
+
+  it("moveCard undo/redo restores the original position", async () => {
+    state.cardsByColumn = new Map([
+      [
+        "col-active",
+        [makeCard("card-a", "col-active"), makeCard("card-b", "col-active")],
+      ],
+    ]);
+    await data.loadCardsForColumns();
+
+    await data.moveCard("card-a", 1);
+    expect(state.moveCardCalls).toEqual([{ id: "card-a", position: 1 }]);
+
+    await data.history.undo();
+    expect(state.moveCardCalls.at(-1)).toEqual({ id: "card-a", position: 0 });
+
+    await data.history.redo();
+    expect(state.moveCardCalls.at(-1)).toEqual({ id: "card-a", position: 1 });
+  });
+
+  it("moveColumn undo/redo restores the original position", async () => {
+    state.columns = [
+      makeColumn("col-active", "deck-1"),
+      makeColumn("col-b", "deck-1"),
+    ];
+    await data.reloadColumns();
+
+    await data.moveColumn("col-b", 0);
+    expect(state.moveColumnCalls).toEqual([{ id: "col-b", position: 0 }]);
+
+    await data.history.undo();
+    expect(state.moveColumnCalls.at(-1)).toEqual({ id: "col-b", position: 1 });
+
+    await data.history.redo();
+    expect(state.moveColumnCalls.at(-1)).toEqual({ id: "col-b", position: 0 });
+  });
+
+  it("moveCardToColumn undo moves the card back to its original column and index", async () => {
+    state.columns = [
+      makeColumn("col-active", "deck-1"),
+      makeColumn("col-b", "deck-1"),
+    ];
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-x", "col-active")]],
+      ["col-b", []],
+    ]);
+    await data.reloadColumns();
+
+    await data.moveCardToColumn("card-x", "col-b");
+    expect(state.moveCardToColumnCalls).toEqual([
+      { id: "card-x", columnId: "col-b" },
+    ]);
+
+    await data.history.undo();
+    expect(state.moveCardToColumnCalls.at(-1)).toEqual({
+      id: "card-x",
+      columnId: "col-active",
+    });
+    expect(state.moveCardCalls).toEqual([{ id: "card-x", position: 0 }]);
+
+    await data.history.redo();
+    expect(state.moveCardToColumnCalls.at(-1)).toEqual({
+      id: "card-x",
+      columnId: "col-b",
+    });
+  });
+
+  it("selectDeck clears the undo/redo history", async () => {
+    await data.deleteCard("card-1");
+    expect(data.history.canUndo).toBe(true);
+
+    state.decks = [makeDeck("deck-1"), makeDeck("deck-2")];
+    await data.selectDeck(state.decks[1]);
+
+    expect(data.history.canUndo).toBe(false);
+  });
+
+  it("a mutation in flight during a deck switch never records history for the new deck", async () => {
+    state.decks = [makeDeck("deck-1"), makeDeck("deck-2")];
+    state.columns = [makeColumn("col-2", "deck-2")];
+    state.cardsByColumn = new Map([["col-2", []]]);
+
+    // Hold up saveCard's DB round-trip until after the deck switch completes.
+    let releaseSave: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (releaseSave = resolve));
+    const original = mockBackend.updateCardContent!;
+    mockBackend.updateCardContent = async (id, content) => {
+      await gate;
+      return original(id, content);
+    };
+
+    const savePromise = data.saveCard("card-1", "edited while switching");
+    await data.selectDeck(state.decks[1]);
+    expect(data.history.canUndo).toBe(false);
+
+    releaseSave();
+    await savePromise;
+
+    // The stale save must not have pushed onto deck-2's fresh history.
+    expect(data.history.canUndo).toBe(false);
+
+    mockBackend.updateCardContent = original;
+  });
+
+  it("undo surfaces a rejected effect and restores the entry for a retry", async () => {
+    const ok = await data.deleteCard("card-1");
+    expect(ok).toBe(true);
+    expect(data.history.canUndo).toBe(true);
+
+    const original = mockBackend.restoreCard!;
+    mockBackend.restoreCard = async () => {
+      throw new Error("db unavailable");
+    };
+
+    await expect(data.history.undo()).rejects.toThrow("db unavailable");
+    // The entry must still be undoable — it was never silently dropped or
+    // moved to the redo stack despite the failure.
+    expect(data.history.canUndo).toBe(true);
+    expect(data.history.canRedo).toBe(false);
+
+    mockBackend.restoreCard = original;
+    await data.history.undo();
+    expect(state.restoreCardCalls).toEqual(["card-1"]);
   });
 
   it("filterByTag captures matching cards by tag", async () => {

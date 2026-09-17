@@ -155,7 +155,8 @@ export class ActionDispatcher {
       action === "showDeckPalette" ||
       action === "showCommandPalette" ||
       action === "showSettings" ||
-      action === "undo"
+      action === "undo" ||
+      action === "redo"
     ) {
       event.preventDefault();
       this.executeAction(action);
@@ -229,7 +230,20 @@ export class ActionDispatcher {
     }
 
     if (action === "undo") {
-      await this.data.undoLastDelete();
+      try {
+        await this.data.history.undo();
+      } catch (e) {
+        this.data.error = `Failed to undo: ${e}`;
+      }
+      return;
+    }
+
+    if (action === "redo") {
+      try {
+        await this.data.history.redo();
+      } catch (e) {
+        this.data.error = `Failed to redo: ${e}`;
+      }
       return;
     }
 
