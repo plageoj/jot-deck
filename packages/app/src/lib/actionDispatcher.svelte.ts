@@ -230,12 +230,20 @@ export class ActionDispatcher {
     }
 
     if (action === "undo") {
-      await this.data.history.undo();
+      try {
+        await this.data.history.undo();
+      } catch (e) {
+        this.data.error = `Failed to undo: ${e}`;
+      }
       return;
     }
 
     if (action === "redo") {
-      await this.data.history.redo();
+      try {
+        await this.data.history.redo();
+      } catch (e) {
+        this.data.error = `Failed to redo: ${e}`;
+      }
       return;
     }
 

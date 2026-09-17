@@ -15,8 +15,25 @@ export class UndoStack {
 
   private past: UndoEntry[] = [];
   private future: UndoEntry[] = [];
+  // Bumped by clear() so a mutation that started before a deck switch (and
+  // resolves after) can tell its captured generation is stale and skip
+  // pushing into the new deck's history. Also used by undo()/redo() to avoid
+  // repopulating a stack that was cleared out from under an in-flight effect.
+  private generation = 0;
+  // Serializes undo()/redo(): an effect's DB work + reload is not atomic, so
+  // a second call arriving before the first resolves would race the same
+  // shared state. A no-op false return (rather than queuing) is enough since
+  // callers already await before allowing another keypress to dispatch.
+  private busy = false;
 
-  push(entry: UndoEntry): void {
+  /** Snapshot to pass to a later `push()` call, captured before starting an
+   * async mutation — so the push can be skipped if `clear()` ran meanwhile. */
+  get currentGeneration(): number {
+    return this.generation;
+  }
+
+  push(entry: UndoEntry, generation?: number): void {
+    if (generation !== undefined && generation !== this.generation) return;
     this.past.push(entry);
     if (this.past.length > UndoStack.MAX_DEPTH) this.past.shift();
     this.future = [];
@@ -31,23 +48,44 @@ export class UndoStack {
   }
 
   async undo(): Promise<boolean> {
+    if (this.busy) return false;
     const entry = this.past.pop();
     if (!entry) return false;
-    await entry.undo();
-    this.future.push(entry);
-    return true;
+    this.busy = true;
+    const generation = this.generation;
+    try {
+      await entry.undo();
+      if (this.generation === generation) this.future.push(entry);
+      return true;
+    } catch (e) {
+      if (this.generation === generation) this.past.push(entry);
+      throw e;
+    } finally {
+      this.busy = false;
+    }
   }
 
   async redo(): Promise<boolean> {
+    if (this.busy) return false;
     const entry = this.future.pop();
     if (!entry) return false;
-    await entry.redo();
-    this.past.push(entry);
-    return true;
+    this.busy = true;
+    const generation = this.generation;
+    try {
+      await entry.redo();
+      if (this.generation === generation) this.past.push(entry);
+      return true;
+    } catch (e) {
+      if (this.generation === generation) this.future.push(entry);
+      throw e;
+    } finally {
+      this.busy = false;
+    }
   }
 
   clear(): void {
     this.past = [];
     this.future = [];
+    this.generation++;
   }
 }

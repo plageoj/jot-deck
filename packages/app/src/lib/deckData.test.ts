@@ -660,6 +660,54 @@ describe("DeckData CRUD", () => {
     expect(data.history.canUndo).toBe(false);
   });
 
+  it("a mutation in flight during a deck switch never records history for the new deck", async () => {
+    state.decks = [makeDeck("deck-1"), makeDeck("deck-2")];
+    state.columns = [makeColumn("col-2", "deck-2")];
+    state.cardsByColumn = new Map([["col-2", []]]);
+
+    // Hold up saveCard's DB round-trip until after the deck switch completes.
+    let releaseSave: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (releaseSave = resolve));
+    const original = mockBackend.updateCardContent!;
+    mockBackend.updateCardContent = async (id, content) => {
+      await gate;
+      return original(id, content);
+    };
+
+    const savePromise = data.saveCard("card-1", "edited while switching");
+    await data.selectDeck(state.decks[1]);
+    expect(data.history.canUndo).toBe(false);
+
+    releaseSave();
+    await savePromise;
+
+    // The stale save must not have pushed onto deck-2's fresh history.
+    expect(data.history.canUndo).toBe(false);
+
+    mockBackend.updateCardContent = original;
+  });
+
+  it("undo surfaces a rejected effect and restores the entry for a retry", async () => {
+    const ok = await data.deleteCard("card-1");
+    expect(ok).toBe(true);
+    expect(data.history.canUndo).toBe(true);
+
+    const original = mockBackend.restoreCard!;
+    mockBackend.restoreCard = async () => {
+      throw new Error("db unavailable");
+    };
+
+    await expect(data.history.undo()).rejects.toThrow("db unavailable");
+    // The entry must still be undoable — it was never silently dropped or
+    // moved to the redo stack despite the failure.
+    expect(data.history.canUndo).toBe(true);
+    expect(data.history.canRedo).toBe(false);
+
+    mockBackend.restoreCard = original;
+    await data.history.undo();
+    expect(state.restoreCardCalls).toEqual(["card-1"]);
+  });
+
   it("filterByTag captures matching cards by tag", async () => {
     state.cardsByColumn = new Map([
       [
