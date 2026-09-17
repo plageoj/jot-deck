@@ -74,12 +74,32 @@ const mockBackend: Partial<DatabaseBackend> = {
       position: params.position,
     }),
   updateCardContent: async (id, content) => makeCard(id, "col-active", { content }),
-  acquireCardLock: async (id) =>
-    makeCard(id, "col-active", { lockedBy: "user" }),
-  updateCardContentCas: async (id, content) =>
-    makeCard(id, "col-active", { content, lockedBy: "user" }),
-  releaseCardLock: async (id) =>
-    makeCard(id, "col-active", { lockedBy: null, lockedAt: null }),
+  acquireCardLock: async (id) => {
+    const card = [...state.cardsByColumn.values()]
+      .flat()
+      .find((candidate) => candidate.id === id);
+    return { ...(card ?? makeCard(id, "col-active")), locked_by: "user" };
+  },
+  updateCardContentCas: async (id, content) => {
+    const card = [...state.cardsByColumn.values()]
+      .flat()
+      .find((candidate) => candidate.id === id);
+    return {
+      ...(card ?? makeCard(id, "col-active")),
+      content,
+      locked_by: "user",
+    };
+  },
+  releaseCardLock: async (id) => {
+    const card = [...state.cardsByColumn.values()]
+      .flat()
+      .find((candidate) => candidate.id === id);
+    return {
+      ...(card ?? makeCard(id, "col-active")),
+      locked_by: null,
+      locked_at: null,
+    };
+  },
   deleteColumn: async (id) => {
     state.deleteColumnCalls.push(id);
   },
