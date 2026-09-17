@@ -538,6 +538,22 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn["col-active"][0].content).toBe("old");
   });
 
+  it("reports a lock acquisition conflict without entering edit state", async () => {
+    const original = mockBackend.acquireCardLock;
+    mockBackend.acquireCardLock = async () => {
+      throw new Error("Card is locked by another editor");
+    };
+
+    expect(await data.startCardEdit("card-1")).toBe(false);
+    expect(data.error).toContain("Card is locked by another editor");
+    mockBackend.acquireCardLock = original;
+  });
+
+  it("rejects GUI save requests that did not acquire an edit lock", async () => {
+    expect(await data.saveCardEdit("card-1", "new content")).toBe(false);
+    expect(data.error).toBe("Cannot save card: edit lock is not held");
+  });
+
   it("deleteColumn forwards the id to the backend", async () => {
     const ok = await data.deleteColumn("col-active");
     expect(ok).toBe(true);
