@@ -75,11 +75,11 @@ const mockBackend: Partial<DatabaseBackend> = {
     }),
   updateCardContent: async (id, content) => makeCard(id, "col-active", { content }),
   acquireCardLock: async (id) =>
-    makeCard(id, "col-active", { locked_by: "user" }),
+    makeCard(id, "col-active", { lockedBy: "user" }),
   updateCardContentCas: async (id, content) =>
-    makeCard(id, "col-active", { content, locked_by: "user" }),
+    makeCard(id, "col-active", { content, lockedBy: "user" }),
   releaseCardLock: async (id) =>
-    makeCard(id, "col-active", { locked_by: null, locked_at: null }),
+    makeCard(id, "col-active", { lockedBy: null, lockedAt: null }),
   deleteColumn: async (id) => {
     state.deleteColumnCalls.push(id);
   },
