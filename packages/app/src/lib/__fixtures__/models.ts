@@ -41,6 +41,8 @@ export function makeCard(
     content?: string;
     deletedAt?: string;
     deletedWithColumn?: boolean;
+    lockedBy?: string | null;
+    lockedAt?: string | null;
   } = {},
 ): Card {
   return {
@@ -53,7 +55,7 @@ export function makeCard(
     updated_at: "2026-01-01T00:00:00Z",
     deleted_at: options.deletedAt ?? null,
     deleted_with_column: options.deletedWithColumn ?? false,
-    locked_by: null,
-    locked_at: null,
+    locked_by: options.lockedBy ?? null,
+    locked_at: options.lockedAt ?? null,
   };
 }

@@ -61,6 +61,13 @@ export interface DatabaseBackend {
   getCard(id: string): Promise<Card>;
   createCard(params: CreateCardParams): Promise<Card>;
   updateCardContent(id: string, content: string): Promise<Card>;
+  acquireCardLock(id: string, holder: string): Promise<Card>;
+  updateCardContentCas(
+    id: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card>;
+  releaseCardLock(id: string, holder: string): Promise<Card>;
   updateCardScore(id: string, delta: number): Promise<Card>;
   moveCardToColumn(id: string, columnId: string): Promise<Card>;
   moveCard(id: string, position: number): Promise<Card>;

@@ -12,6 +12,7 @@ import { FocusManager } from "./focusManager.svelte";
 import { UndoStack } from "./undoStack";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
+const USER_EDIT_HOLDER = "user";
 
 export class DeckData {
   private db!: DatabaseBackend;
@@ -37,6 +38,7 @@ export class DeckData {
   // Generic Undo/Redo (001-keybindings.md §4.4). Session-scoped — cleared on
   // deck switch in `selectDeck`, never persisted.
   readonly history = new UndoStack();
+  private readonly editVersions = new Map<string, string>();
 
   async init() {
     this.db = await getDatabase();
@@ -627,6 +629,86 @@ export class DeckData {
       }
     }
     await this.loadDeckTags();
+  }
+
+  /** Acquire the repository lock before mounting the GUI editor. */
+  async startCardEdit(cardId: string): Promise<boolean> {
+    try {
+      const locked = await this.db.acquireCardLock(cardId, USER_EDIT_HOLDER);
+      this.editVersions.set(cardId, locked.updated_at);
+      this.replaceCard(locked);
+      return true;
+    } catch (e) {
+      this.error = `Failed to edit card: ${e}`;
+      return false;
+    }
+  }
+
+  /** Commit a GUI edit using the version observed when the lock was acquired. */
+  async saveCardEdit(cardId: string, content: string, record = true) {
+    const expected = this.editVersions.get(cardId);
+    if (!expected) {
+      this.error = "Cannot save card: edit lock is not held";
+      return false;
+    }
+    const previousContent = this.findCardContent(cardId);
+    const generation = this.history.currentGeneration;
+    try {
+      const updated = await this.db.updateCardContentCas(cardId, content, expected);
+      this.replaceCard(updated);
+      // Keep the lock while the editor remains mounted. :w may be followed
+      // by more edits; the enclosing exit path releases it.
+      this.editVersions.set(cardId, updated.updated_at);
+      await this.loadDeckTags();
+      if (record && previousContent !== null && previousContent !== content) {
+        this.history.push(
+          {
+            undo: () => this.saveCardImpl(cardId, previousContent),
+            redo: () => this.saveCardImpl(cardId, content),
+          },
+          generation,
+        );
+      }
+      return true;
+    } catch (e) {
+      this.editVersions.delete(cardId);
+      try {
+        await this.db.releaseCardLock(cardId, USER_EDIT_HOLDER);
+      } catch {
+        // Preserve the original save error for the user.
+      }
+      this.error = `Failed to save card: ${e}`;
+      return false;
+    }
+  }
+
+  async cancelCardEdit(cardId: string) {
+    await this.finishCardEdit(cardId);
+  }
+
+  async finishCardEdit(cardId: string) {
+    this.editVersions.delete(cardId);
+    try {
+      const released = await this.db.releaseCardLock(cardId, USER_EDIT_HOLDER);
+      this.replaceCard(released);
+    } catch (e) {
+      this.error = `Failed to release card edit: ${e}`;
+    }
+  }
+
+  private replaceCard(updatedCard: Card) {
+    for (const columnId of Object.keys(this.cardsByColumn)) {
+      const cards = this.cardsByColumn[columnId];
+      const index = cards.findIndex((c) => c.id === updatedCard.id);
+      if (index !== -1) {
+        this.cardsByColumn[columnId] = [
+          ...cards.slice(0, index),
+          updatedCard,
+          ...cards.slice(index + 1),
+        ];
+        return;
+      }
+    }
   }
 
   async saveCard(cardId: string, content: string, record = true) {

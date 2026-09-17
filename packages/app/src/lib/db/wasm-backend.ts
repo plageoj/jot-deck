@@ -523,6 +523,46 @@ export class WasmBackend implements DatabaseBackend {
     return this.getCard(id);
   }
 
+  // The browser backend has no competing GUI/agent process, but uses the same
+  // contract so edit code is exercised identically in E2E tests.
+  async acquireCardLock(id: string, _holder: string): Promise<Card> {
+    return this.getCard(id);
+  }
+
+  async updateCardContentCas(
+    id: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    const card = await this.getCard(id);
+    if (card.updated_at !== expectedUpdatedAt) {
+      throw new Error("Card was modified since it was read");
+    }
+    const now = this.now();
+    db.run("BEGIN");
+    try {
+      db.run(
+        "UPDATE cards SET content = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+        [content, now, id, expectedUpdatedAt],
+      );
+      if (db.getRowsModified() !== 1) {
+        throw new Error("Card was modified since it was read");
+      }
+      await this.syncCardTags(id, content);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    return this.getCard(id);
+  }
+
+  async releaseCardLock(id: string, _holder: string): Promise<Card> {
+    return this.getCard(id);
+  }
+
   async updateCardScore(id: string, delta: number): Promise<Card> {
     await this.init();
     const db = this.ensureDb();

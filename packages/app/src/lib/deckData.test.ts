@@ -74,6 +74,32 @@ const mockBackend: Partial<DatabaseBackend> = {
       position: params.position,
     }),
   updateCardContent: async (id, content) => makeCard(id, "col-active", { content }),
+  acquireCardLock: async (id) => {
+    const card = [...state.cardsByColumn.values()]
+      .flat()
+      .find((candidate) => candidate.id === id);
+    return { ...(card ?? makeCard(id, "col-active")), locked_by: "user" };
+  },
+  updateCardContentCas: async (id, content) => {
+    const card = [...state.cardsByColumn.values()]
+      .flat()
+      .find((candidate) => candidate.id === id);
+    return {
+      ...(card ?? makeCard(id, "col-active")),
+      content,
+      locked_by: "user",
+    };
+  },
+  releaseCardLock: async (id) => {
+    const card = [...state.cardsByColumn.values()]
+      .flat()
+      .find((candidate) => candidate.id === id);
+    return {
+      ...(card ?? makeCard(id, "col-active")),
+      locked_by: null,
+      locked_at: null,
+    };
+  },
   deleteColumn: async (id) => {
     state.deleteColumnCalls.push(id);
   },
@@ -488,6 +514,56 @@ describe("DeckData CRUD", () => {
       (c) => c.id === "card-1",
     );
     expect(stored?.content).toBe("new content");
+  });
+
+  it("GUI edit lifecycle acquires, CAS-saves, and releases the card lock", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
+    ]);
+    await data.loadCardsForColumns();
+
+    expect(await data.startCardEdit("card-1")).toBe(true);
+    expect(await data.saveCardEdit("card-1", "new content")).toBe(true);
+    expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
+  });
+
+  it("GUI edit cancellation releases the lock without changing content", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
+    ]);
+    await data.loadCardsForColumns();
+
+    expect(await data.startCardEdit("card-1")).toBe(true);
+    await data.cancelCardEdit("card-1");
+    expect(data.cardsByColumn["col-active"][0].content).toBe("old");
+  });
+
+  it("reports a lock acquisition conflict without entering edit state", async () => {
+    const original = mockBackend.acquireCardLock;
+    mockBackend.acquireCardLock = async () => {
+      throw new Error("Card is locked by another editor");
+    };
+
+    expect(await data.startCardEdit("card-1")).toBe(false);
+    expect(data.error).toContain("Card is locked by another editor");
+    mockBackend.acquireCardLock = original;
+  });
+
+  it("rejects GUI save requests that did not acquire an edit lock", async () => {
+    expect(await data.saveCardEdit("card-1", "new content")).toBe(false);
+    expect(data.error).toBe("Cannot save card: edit lock is not held");
+  });
+
+  it("releases the lock and reports a CAS conflict when saving fails", async () => {
+    const original = mockBackend.updateCardContentCas;
+    mockBackend.updateCardContentCas = async () => {
+      throw new Error("Card was modified since it was read");
+    };
+
+    expect(await data.startCardEdit("card-1")).toBe(true);
+    expect(await data.saveCardEdit("card-1", "new content")).toBe(false);
+    expect(data.error).toContain("Card was modified since it was read");
+    mockBackend.updateCardContentCas = original;
   });
 
   it("deleteColumn forwards the id to the backend", async () => {

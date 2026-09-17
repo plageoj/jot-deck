@@ -24,3 +24,49 @@ describe("WasmBackend reporter surface", () => {
     );
   });
 });
+
+describe("WasmBackend GUI card edit surface", () => {
+  it("locks, CAS-updates, and releases a card", async () => {
+    const backend = new WasmBackend();
+    const deck = await backend.createDeck({ name: "Test deck" });
+    const column = await backend.createColumn({
+      deck_id: deck.id,
+      name: "Inbox",
+    });
+    const card = await backend.createCard({
+      column_id: column.id,
+      content: "before #old",
+    });
+
+    const locked = await backend.acquireCardLock(card.id, "user");
+    expect(locked.id).toBe(card.id);
+
+    const updated = await backend.updateCardContentCas(
+      card.id,
+      "after #new",
+      locked.updated_at,
+    );
+    expect(updated.content).toBe("after #new");
+
+    const released = await backend.releaseCardLock(card.id, "user");
+    expect(released.content).toBe("after #new");
+  });
+
+  it("rejects a stale CAS update without changing the card", async () => {
+    const backend = new WasmBackend();
+    const deck = await backend.createDeck({ name: "Test deck" });
+    const column = await backend.createColumn({
+      deck_id: deck.id,
+      name: "Inbox",
+    });
+    const card = await backend.createCard({
+      column_id: column.id,
+      content: "before",
+    });
+
+    await expect(
+      backend.updateCardContentCas(card.id, "after", "stale-version"),
+    ).rejects.toThrow("Card was modified since it was read");
+    expect((await backend.getCard(card.id)).content).toBe("before");
+  });
+});

@@ -17,7 +17,7 @@
 
   interface Props {
     content: string;
-    onSave: (content: string) => void;
+    onSave: (content: string) => void | Promise<void>;
     onCancel: () => void;
     onExitEdit?: () => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
@@ -29,13 +29,20 @@
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
   let cancelled = false;
+  let exited = false;
 
   function getContent(): string {
     return view?.state.doc.toString() ?? content;
   }
 
   function save() {
-    onSave(getContent());
+    void onSave(getContent());
+  }
+
+  async function saveAndExit() {
+    exited = true;
+    await onSave(getContent());
+    onExitEdit?.();
   }
 
   function cancel() {
@@ -74,8 +81,7 @@
         save();
       });
       Vim.defineEx("wq", "wq", () => {
-        save();
-        cancel();
+        void saveAndExit();
       });
       Vim.defineEx("q", "q", () => {
         // Discard changes and exit (don't save)
@@ -91,8 +97,7 @@
       {
         key: "Ctrl-Enter",
         run: () => {
-          save();
-          cancel();
+          void saveAndExit();
           return true;
         },
       },
@@ -248,9 +253,12 @@
   onDestroy(() => {
     // Auto-save on destroy (when switching to another card)
     // Don't save if explicitly cancelled with :q
-    if (view && !cancelled) {
-      save();
-      onExitEdit?.();
+    if (view && !cancelled && !exited) {
+      exited = true;
+      void (async () => {
+        await onSave(getContent());
+        onExitEdit?.();
+      })();
     }
     view?.destroy();
   });

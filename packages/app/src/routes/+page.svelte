@@ -115,6 +115,7 @@
       const col = data.columns[focus.focusedColumnIndex];
       if (col) handleDeleteColumn(col);
     };
+    actions.onStartEdit = startCardEdit;
     window.addEventListener("keydown", actions.handleKeydown);
     await Promise.all([data.init(), settingsStore.load()]);
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
@@ -166,6 +167,10 @@
       trashItems = [];
     }
   });
+
+  async function startCardEdit(cardId: string) {
+    if (await data.startCardEdit(cardId)) focus.startEdit(cardId);
+  }
 
   function handleRenameDeck(deck: Deck) {
     renamingDeck = deck;
@@ -243,16 +248,24 @@
       streamingText={data.streamingText}
       onAddCard={async (columnId) => {
         const card = await data.createCard(columnId);
-        if (card) focus.editingCardId = card.id;
+        if (card) await startCardEdit(card.id);
       }}
-      onSaveCard={(cardId, content) => data.saveCard(cardId, content)}
-      onCancelEdit={() => focus.cancelEdit()}
+      onSaveCard={(cardId, content) => data.saveCardEdit(cardId, content)}
+      onCancelEdit={() => {
+        const cardId = focus.editingCardId;
+        if (cardId) void data.cancelCardEdit(cardId);
+        focus.cancelEdit();
+      }}
       onStartEdit={(cardId) => {
         // A card being streamed by a Reporter is read-only (007 §7).
         if (data.isStreaming(cardId)) return;
-        focus.startEdit(cardId);
+        void startCardEdit(cardId);
       }}
-      onExitEdit={() => focus.exitEdit()}
+      onExitEdit={() => {
+        const cardId = focus.editingCardId;
+        if (cardId) void data.finishCardEdit(cardId);
+        focus.exitEdit();
+      }}
       filteredCardIds={data.filteredCardIds}
       activeTag={data.activeTagFilter}
       onFocusColumn={(i) => focus.handleFocusColumn(i)}
