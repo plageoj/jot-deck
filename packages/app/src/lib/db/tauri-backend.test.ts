@@ -72,4 +72,25 @@ describe("TauriBackend reporter surface", () => {
     await backend.listRunningReporters();
     expect(invoke).toHaveBeenCalledWith("list_running_reporters");
   });
+
+  it("maps GUI card edit locking and CAS to Tauri commands", async () => {
+    await backend.acquireCardLock("card-1", "user");
+    expect(invoke).toHaveBeenCalledWith("acquire_card_lock", {
+      id: "card-1",
+      holder: "user",
+    });
+
+    await backend.updateCardContentCas("card-1", "edited", "2026-01-01T00:00:00Z");
+    expect(invoke).toHaveBeenCalledWith("update_card_content_cas", {
+      id: "card-1",
+      content: "edited",
+      expectedUpdatedAt: "2026-01-01T00:00:00Z",
+    });
+
+    await backend.releaseCardLock("card-1", "user");
+    expect(invoke).toHaveBeenCalledWith("release_card_lock", {
+      id: "card-1",
+      holder: "user",
+    });
+  });
 });
