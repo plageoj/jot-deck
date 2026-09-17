@@ -51,20 +51,26 @@ const destBin = join(destDir, `jot-deck-mcp-${triple}${exeSuffix}`);
 mkdirSync(destDir, { recursive: true });
 
 if (triple === "universal-apple-darwin") {
-  // Not a real rustc/cargo target: Tauri's universal macOS build compiles the
-  // app twice, once per real arch, and each of those two cargo invocations
-  // asks tauri-build for the sidecar under ITS OWN `TARGET` env var (never
-  // "universal-apple-darwin") — so stage both real-triple binaries here
-  // rather than lipo-ing them into a single universal-named file no build
-  // ever looks for.
+  // Not a real rustc/cargo target. Tauri's universal macOS build compiles the
+  // app twice, once per real arch, and each of those two cargo invocations'
+  // tauri-build script asks for the sidecar under ITS OWN `TARGET` env var —
+  // so stage both real-triple binaries for that. Afterwards the (single)
+  // bundling pass copies external binaries using the literal
+  // "universal-apple-darwin" triple, so also stage a lipo'd combination
+  // under that name for the bundler to find.
   const arches = ["x86_64-apple-darwin", "aarch64-apple-darwin"];
-  for (const arch of arches) {
+  const builtBins = arches.map((arch) => {
     const builtBin = buildForTriple(arch);
     const archDestBin = join(destDir, `jot-deck-mcp-${arch}`);
     copyFileSync(builtBin, archDestBin);
     chmodSync(archDestBin, 0o755);
     console.log(`[sidecar] staged ${archDestBin}`);
-  }
+    return builtBin;
+  });
+  console.log(`[sidecar] lipo -create ${builtBins.join(" ")} -output ${destBin}`);
+  execFileSync("lipo", ["-create", ...builtBins, "-output", destBin]);
+  chmodSync(destBin, 0o755);
+  console.log(`[sidecar] staged ${destBin}`);
 } else {
   const builtBin = buildForTriple(requestedTriple);
   copyFileSync(builtBin, destBin);
