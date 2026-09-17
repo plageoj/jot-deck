@@ -38,7 +38,7 @@ export class DeckData {
   // Generic Undo/Redo (001-keybindings.md §4.4). Session-scoped — cleared on
   // deck switch in `selectDeck`, never persisted.
   readonly history = new UndoStack();
-  private editVersions = new Map<string, string>();
+  private readonly editVersions = new Map<string, string>();
 
   async init() {
     this.db = await getDatabase();
@@ -683,13 +683,7 @@ export class DeckData {
   }
 
   async cancelCardEdit(cardId: string) {
-    this.editVersions.delete(cardId);
-    try {
-      const released = await this.db.releaseCardLock(cardId, USER_EDIT_HOLDER);
-      this.replaceCard(released);
-    } catch (e) {
-      this.error = `Failed to release card edit: ${e}`;
-    }
+    await this.finishCardEdit(cardId);
   }
 
   async finishCardEdit(cardId: string) {
