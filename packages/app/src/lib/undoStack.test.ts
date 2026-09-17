@@ -85,6 +85,89 @@ describe("UndoStack", () => {
     expect(stack.canRedo).toBe(false);
   });
 
+  it("a rejected undo restores the entry to the past stack instead of dropping it", async () => {
+    const stack = new UndoStack();
+    const entry = {
+      undo: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+      redo: vi.fn(async () => {}),
+    };
+    stack.push(entry);
+
+    await expect(stack.undo()).rejects.toThrow("boom");
+
+    expect(stack.canUndo).toBe(true);
+    expect(stack.canRedo).toBe(false);
+  });
+
+  it("a rejected redo restores the entry to the future stack instead of dropping it", async () => {
+    const stack = new UndoStack();
+    const entry = {
+      undo: vi.fn(async () => {}),
+      redo: vi.fn(async () => {
+        throw new Error("boom");
+      }),
+    };
+    stack.push(entry);
+    await stack.undo();
+
+    await expect(stack.redo()).rejects.toThrow("boom");
+
+    expect(stack.canRedo).toBe(true);
+    expect(stack.canUndo).toBe(false);
+  });
+
+  it("a second undo call while one is in flight is a no-op", async () => {
+    const stack = new UndoStack();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    // Pushed in order [buried, top] — undo() pops LIFO, so `top` is the one
+    // gated in flight and `buried` must stay untouched until it resolves.
+    const buried = makeEntry();
+    const top = { undo: vi.fn(async () => gate), redo: vi.fn(async () => {}) };
+    stack.push(buried);
+    stack.push(top);
+
+    const topUndo = stack.undo();
+    const reentrant = await stack.undo();
+
+    expect(reentrant).toBe(false);
+    expect(buried.undo).not.toHaveBeenCalled();
+
+    release();
+    expect(await topUndo).toBe(true);
+    expect(top.undo).toHaveBeenCalledOnce();
+  });
+
+  it("push and pop after clear() during an in-flight undo do not repopulate the old generation", async () => {
+    const stack = new UndoStack();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const entry = { undo: vi.fn(async () => gate), redo: vi.fn(async () => {}) };
+    stack.push(entry);
+
+    const undoPromise = stack.undo();
+    stack.clear(); // simulates a deck switch while the effect is still awaiting
+    release();
+    await undoPromise;
+
+    // The completed entry belongs to the old generation and must not land in
+    // the new (post-clear) redo stack.
+    expect(stack.canRedo).toBe(false);
+    expect(stack.canUndo).toBe(false);
+  });
+
+  it("push is skipped when the passed generation no longer matches (stale mutation)", () => {
+    const stack = new UndoStack();
+    const generation = stack.currentGeneration;
+    stack.clear();
+
+    stack.push(makeEntry(), generation);
+
+    expect(stack.canUndo).toBe(false);
+  });
+
   it("bounds depth by dropping the oldest entry", async () => {
     const stack = new UndoStack();
     const entries = Array.from({ length: 101 }, () => makeEntry());

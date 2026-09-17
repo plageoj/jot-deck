@@ -29,6 +29,7 @@
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
   let cancelled = false;
+  let exited = false;
 
   function getContent(): string {
     return view?.state.doc.toString() ?? content;
@@ -39,6 +40,7 @@
   }
 
   async function saveAndExit() {
+    exited = true;
     await onSave(getContent());
     onExitEdit?.();
   }
@@ -251,9 +253,12 @@
   onDestroy(() => {
     // Auto-save on destroy (when switching to another card)
     // Don't save if explicitly cancelled with :q
-    if (view && !cancelled) {
-      save();
-      onExitEdit?.();
+    if (view && !cancelled && !exited) {
+      exited = true;
+      void (async () => {
+        await onSave(getContent());
+        onExitEdit?.();
+      })();
     }
     view?.destroy();
   });

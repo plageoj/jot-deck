@@ -51,18 +51,32 @@ const destBin = join(destDir, `jot-deck-mcp-${triple}${exeSuffix}`);
 mkdirSync(destDir, { recursive: true });
 
 if (triple === "universal-apple-darwin") {
-  // Not a real rustc/cargo target — Tauri's own universal macOS build lipo's
-  // together separate x86_64/aarch64 binaries, so do the same here.
+  // Not a real rustc/cargo target. Tauri's universal macOS build compiles the
+  // app twice, once per real arch, and each of those two cargo invocations'
+  // tauri-build script asks for the sidecar under ITS OWN `TARGET` env var —
+  // so stage both real-triple binaries for that. Afterwards the (single)
+  // bundling pass copies external binaries using the literal
+  // "universal-apple-darwin" triple, so also stage a lipo'd combination
+  // under that name for the bundler to find.
   const arches = ["x86_64-apple-darwin", "aarch64-apple-darwin"];
-  const builtBins = arches.map(buildForTriple);
+  const builtBins = arches.map((arch) => {
+    const builtBin = buildForTriple(arch);
+    const archDestBin = join(destDir, `jot-deck-mcp-${arch}`);
+    copyFileSync(builtBin, archDestBin);
+    chmodSync(archDestBin, 0o755);
+    console.log(`[sidecar] staged ${archDestBin}`);
+    return builtBin;
+  });
   console.log(`[sidecar] lipo -create ${builtBins.join(" ")} -output ${destBin}`);
   execFileSync("lipo", ["-create", ...builtBins, "-output", destBin]);
+  chmodSync(destBin, 0o755);
+  console.log(`[sidecar] staged ${destBin}`);
 } else {
   const builtBin = buildForTriple(requestedTriple);
   copyFileSync(builtBin, destBin);
-}
 
-// externalBin requires the sidecar to be executable; copyFileSync/lipo output
-// inherits the process umask, so restore the executable bit on Unix targets.
-if (!isWindows) chmodSync(destBin, 0o755);
-console.log(`[sidecar] staged ${destBin}`);
+  // externalBin requires the sidecar to be executable; copyFileSync output
+  // inherits the process umask, so restore the executable bit on Unix targets.
+  if (!isWindows) chmodSync(destBin, 0o755);
+  console.log(`[sidecar] staged ${destBin}`);
+}

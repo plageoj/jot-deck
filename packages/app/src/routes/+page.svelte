@@ -261,7 +261,11 @@
         if (data.isStreaming(cardId)) return;
         void startCardEdit(cardId);
       }}
-      onExitEdit={() => focus.exitEdit()}
+      onExitEdit={() => {
+        const cardId = focus.editingCardId;
+        if (cardId) void data.finishCardEdit(cardId);
+        focus.exitEdit();
+      }}
       filteredCardIds={data.filteredCardIds}
       activeTag={data.activeTagFilter}
       onFocusColumn={(i) => focus.handleFocusColumn(i)}

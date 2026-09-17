@@ -656,9 +656,9 @@ export class DeckData {
     try {
       const updated = await this.db.updateCardContentCas(cardId, content, expected);
       this.replaceCard(updated);
-      this.editVersions.delete(cardId);
-      const released = await this.db.releaseCardLock(cardId, USER_EDIT_HOLDER);
-      this.replaceCard(released);
+      // Keep the lock while the editor remains mounted. :w may be followed
+      // by more edits; the enclosing exit path releases it.
+      this.editVersions.set(cardId, updated.updated_at);
       await this.loadDeckTags();
       if (record && previousContent !== null && previousContent !== content) {
         this.history.push(
@@ -683,6 +683,16 @@ export class DeckData {
   }
 
   async cancelCardEdit(cardId: string) {
+    this.editVersions.delete(cardId);
+    try {
+      const released = await this.db.releaseCardLock(cardId, USER_EDIT_HOLDER);
+      this.replaceCard(released);
+    } catch (e) {
+      this.error = `Failed to release card edit: ${e}`;
+    }
+  }
+
+  async finishCardEdit(cardId: string) {
     this.editVersions.delete(cardId);
     try {
       const released = await this.db.releaseCardLock(cardId, USER_EDIT_HOLDER);
