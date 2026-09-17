@@ -541,11 +541,18 @@ export class WasmBackend implements DatabaseBackend {
       throw new Error("Card was modified since it was read");
     }
     const now = this.now();
-    db.run(
-      "UPDATE cards SET content = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
-      [content, now, id, expectedUpdatedAt],
-    );
-    await this.syncCardTags(id, content);
+    db.run("BEGIN");
+    try {
+      db.run(
+        "UPDATE cards SET content = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+        [content, now, id, expectedUpdatedAt],
+      );
+      await this.syncCardTags(id, content);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
     return this.getCard(id);
   }
 

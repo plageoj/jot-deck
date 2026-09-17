@@ -234,7 +234,7 @@ fn update_card_content_cas(
     content: String,
     expected_updated_at: String,
 ) -> CommandResult<Card> {
-    let expected = DateTime::<Utc>::parse_from_rfc3339(&expected_updated_at)
+    let expected = DateTime::parse_from_rfc3339(&expected_updated_at)
         .map_err(|e| CommandError {
             message: format!("Invalid expected_updated_at: {e}"),
         })?

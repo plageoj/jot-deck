@@ -343,7 +343,10 @@ export class ActionDispatcher {
     const column = this.focusedColumn;
     if (column) {
       const card = await data.createCard(column.id);
-      if (card) focus.editingCardId = card.id;
+      if (card) {
+        if (this.onStartEdit) await this.onStartEdit(card.id);
+        else focus.editingCardId = card.id;
+      }
     }
   }
 
