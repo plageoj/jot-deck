@@ -17,6 +17,7 @@ export class ActionDispatcher {
   onDeleteDeck: (() => void) | null = null;
   onRenameColumn: (() => void) | null = null;
   onDeleteColumn: (() => void) | null = null;
+  onStartEdit: ((cardId: string) => void | Promise<void>) | null = null;
 
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;
@@ -230,12 +231,20 @@ export class ActionDispatcher {
     }
 
     if (action === "undo") {
-      await this.data.history.undo();
+      try {
+        await this.data.history.undo();
+      } catch (e) {
+        this.data.error = `Failed to undo: ${e}`;
+      }
       return;
     }
 
     if (action === "redo") {
-      await this.data.history.redo();
+      try {
+        await this.data.history.redo();
+      } catch (e) {
+        this.data.error = `Failed to redo: ${e}`;
+      }
       return;
     }
 
@@ -517,7 +526,10 @@ export class ActionDispatcher {
   private cardStartEdit() {
     const card = this.focusedCard;
     // A card being streamed by a Reporter is read-only (007 §7).
-    if (card && !this.data.isStreaming(card.id)) this.focus.startEdit(card.id);
+    if (card && !this.data.isStreaming(card.id)) {
+      if (this.onStartEdit) void this.onStartEdit(card.id);
+      else this.focus.startEdit(card.id);
+    }
   }
 
   private async cardCreate(position: number) {
@@ -529,7 +541,8 @@ export class ActionDispatcher {
         const updated = data.cardsByColumn[column.id] ?? [];
         focus.focusedCardIndex = updated.findIndex((c) => c.id === newCard.id);
         if (focus.focusedCardIndex === -1) focus.focusedCardIndex = 0;
-        focus.startEdit(newCard.id);
+        if (this.onStartEdit) await this.onStartEdit(newCard.id);
+        else focus.startEdit(newCard.id);
       }
     }
   }

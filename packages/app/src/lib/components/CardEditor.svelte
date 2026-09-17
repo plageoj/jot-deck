@@ -17,7 +17,7 @@
 
   interface Props {
     content: string;
-    onSave: (content: string) => void;
+    onSave: (content: string) => void | Promise<void>;
     onCancel: () => void;
     onExitEdit?: () => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
@@ -35,7 +35,12 @@
   }
 
   function save() {
-    onSave(getContent());
+    void onSave(getContent());
+  }
+
+  async function saveAndExit() {
+    await onSave(getContent());
+    onExitEdit?.();
   }
 
   function cancel() {
@@ -74,8 +79,7 @@
         save();
       });
       Vim.defineEx("wq", "wq", () => {
-        save();
-        cancel();
+        void saveAndExit();
       });
       Vim.defineEx("q", "q", () => {
         // Discard changes and exit (don't save)
@@ -91,8 +95,7 @@
       {
         key: "Ctrl-Enter",
         run: () => {
-          save();
-          cancel();
+          void saveAndExit();
           return true;
         },
       },

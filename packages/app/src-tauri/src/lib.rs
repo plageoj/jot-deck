@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use jot_deck_core::{
     create_file_db,
     repository::{card, column, deck, setting, tag},
@@ -217,6 +218,42 @@ fn update_card_content(
 }
 
 #[tauri::command]
+fn acquire_card_lock(
+    state: State<AppState>,
+    id: String,
+    holder: String,
+) -> CommandResult<Card> {
+    let conn = get_conn(&state)?;
+    card::acquire_lock(&conn, &id, &holder).map_err(Into::into)
+}
+
+#[tauri::command]
+fn update_card_content_cas(
+    state: State<AppState>,
+    id: String,
+    content: String,
+    expected_updated_at: String,
+) -> CommandResult<Card> {
+    let expected = DateTime::<Utc>::parse_from_rfc3339(&expected_updated_at)
+        .map_err(|e| CommandError {
+            message: format!("Invalid expected_updated_at: {e}"),
+        })?
+        .with_timezone(&Utc);
+    let conn = get_conn(&state)?;
+    card::update_content_cas(&conn, &id, &content, expected).map_err(Into::into)
+}
+
+#[tauri::command]
+fn release_card_lock(
+    state: State<AppState>,
+    id: String,
+    holder: String,
+) -> CommandResult<Card> {
+    let conn = get_conn(&state)?;
+    card::release_lock(&conn, &id, &holder).map_err(Into::into)
+}
+
+#[tauri::command]
 fn update_card_score(state: State<AppState>, id: String, delta: i32) -> CommandResult<Card> {
     let conn = get_conn(&state)?;
     card::update_score(&conn, &id, delta).map_err(Into::into)
@@ -420,6 +457,9 @@ pub fn run() {
             get_card,
             create_card,
             update_card_content,
+            acquire_card_lock,
+            update_card_content_cas,
+            release_card_lock,
             update_card_score,
             move_card_to_column,
             move_card,

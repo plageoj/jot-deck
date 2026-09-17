@@ -19,6 +19,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+chrono = "0.4"
 jot-deck-core = { path = "../../../crates/core" }
 # Reporter host: JSON-RPC dispatch + per-Reporter scope (007-reporter-protocol.md).
 jot-deck-reporter-host = { path = "../../../crates/reporter-host" }
