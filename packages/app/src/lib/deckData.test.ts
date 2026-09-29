@@ -538,6 +538,21 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn["col-active"][0].content).toBe("old");
   });
 
+  it("releases the lock on both cancellation and normal edit completion", async () => {
+    const original = mockBackend.releaseCardLock!;
+    const releaseCardLock = vi.fn(original);
+    mockBackend.releaseCardLock = releaseCardLock;
+
+    expect(await data.startCardEdit("card-1")).toBe(true);
+    await data.cancelCardEdit("card-1");
+    expect(releaseCardLock).toHaveBeenCalledWith("card-1", "user");
+
+    expect(await data.startCardEdit("card-1")).toBe(true);
+    await data.finishCardEdit("card-1");
+    expect(releaseCardLock).toHaveBeenCalledTimes(2);
+    mockBackend.releaseCardLock = original;
+  });
+
   it("reports a lock acquisition conflict without entering edit state", async () => {
     const original = mockBackend.acquireCardLock;
     mockBackend.acquireCardLock = async () => {

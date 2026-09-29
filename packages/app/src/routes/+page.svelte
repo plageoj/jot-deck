@@ -168,8 +168,20 @@
     }
   });
 
+  function isCardFocused(cardId: string) {
+    const column = data.columns[focus.focusedColumnIndex];
+    return data.cardsByColumn[column?.id]?.[focus.focusedCardIndex]?.id === cardId;
+  }
+
   async function startCardEdit(cardId: string) {
-    if (await data.startCardEdit(cardId)) focus.startEdit(cardId);
+    if (!(await data.startCardEdit(cardId))) return;
+    if (isCardFocused(cardId)) {
+      focus.startEdit(cardId);
+    } else {
+      // Navigation may have moved focus while the asynchronous lock request was
+      // in flight. Do not enter an editor the user no longer selected.
+      void data.finishCardEdit(cardId);
+    }
   }
 
   function handleRenameDeck(deck: Deck) {
@@ -248,7 +260,13 @@
       streamingText={data.streamingText}
       onAddCard={async (columnId) => {
         const card = await data.createCard(columnId);
-        if (card) await startCardEdit(card.id);
+        if (card) {
+          focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === columnId);
+          focus.focusedCardIndex = (data.cardsByColumn[columnId] ?? []).findIndex(
+            (candidate) => candidate.id === card.id,
+          );
+          await startCardEdit(card.id);
+        }
       }}
       onSaveCard={(cardId, content) => data.saveCardEdit(cardId, content)}
       onCancelEdit={() => {
