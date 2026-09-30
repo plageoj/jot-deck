@@ -523,9 +523,18 @@ export class WasmBackend implements DatabaseBackend {
     return this.getCard(id);
   }
 
-  // The browser backend has no competing GUI/agent process, but uses the same
-  // contract so edit code is exercised identically in E2E tests.
-  async acquireCardLock(id: string, _holder: string): Promise<Card> {
+  async acquireCardLock(id: string, holder: string): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    const card = await this.getCard(id);
+    if (card.locked_by && card.locked_by !== holder) {
+      throw new Error(`Card is locked by ${card.locked_by}`);
+    }
+    db.run("UPDATE cards SET locked_by = ?, locked_at = ? WHERE id = ?", [
+      holder,
+      this.now(),
+      id,
+    ]);
     return this.getCard(id);
   }
 
@@ -559,7 +568,41 @@ export class WasmBackend implements DatabaseBackend {
     return this.getCard(id);
   }
 
-  async releaseCardLock(id: string, _holder: string): Promise<Card> {
+  async updateCardContentCasOwned(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    const card = await this.getCard(id);
+    if (card.locked_by !== holder) throw new Error("Card edit lock is not held");
+    return this.updateCardContentCas(id, content, expectedUpdatedAt);
+  }
+
+  async updateCardContentCasAndRelease(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    const updated = await this.updateCardContentCasOwned(
+      id,
+      holder,
+      content,
+      expectedUpdatedAt,
+    );
+    return this.releaseCardLock(id, holder).then(() => this.getCard(updated.id));
+  }
+
+  async releaseCardLock(id: string, holder: string): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    db.run(
+      "UPDATE cards SET locked_by = NULL, locked_at = NULL WHERE id = ? AND locked_by = ?",
+      [id, holder],
+    );
     return this.getCard(id);
   }
 

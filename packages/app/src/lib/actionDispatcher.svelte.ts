@@ -344,6 +344,9 @@ export class ActionDispatcher {
     if (column) {
       const card = await data.createCard(column.id);
       if (card) {
+        const cards = data.cardsByColumn[column.id] ?? [];
+        focus.focusedCardIndex = cards.findIndex((candidate) => candidate.id === card.id);
+        focus.focusMode = "card";
         if (this.onStartEdit) await this.onStartEdit(card.id);
         else focus.editingCardId = card.id;
       }
@@ -544,6 +547,7 @@ export class ActionDispatcher {
         const updated = data.cardsByColumn[column.id] ?? [];
         focus.focusedCardIndex = updated.findIndex((c) => c.id === newCard.id);
         if (focus.focusedCardIndex === -1) focus.focusedCardIndex = 0;
+        focus.focusMode = "card";
         if (this.onStartEdit) await this.onStartEdit(newCard.id);
         else focus.startEdit(newCard.id);
       }

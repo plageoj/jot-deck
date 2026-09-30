@@ -17,7 +17,7 @@
     TrashPalette,
     UpdateBanner,
   } from "$lib/components";
-  import { DeckData } from "$lib/deckData.svelte";
+  import { DeckData, type EditSession } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
   import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
   import {
@@ -91,6 +91,7 @@
   });
 
   let deckComponent = $state<DeckComponent | null>(null);
+  let editSession = $state<EditSession | null>(null);
 
   // Settings: hydrate from SQLite, then apply reactively whenever the store
   // changes (theme attribute + font CSS variables on <html>). The first apply
@@ -174,13 +175,15 @@
   }
 
   async function startCardEdit(cardId: string) {
-    if (!(await data.startCardEdit(cardId))) return;
+    const session = await data.startCardEdit(cardId);
+    if (!session) return;
     if (isCardFocused(cardId)) {
+      editSession = session;
       focus.startEdit(cardId);
     } else {
       // Navigation may have moved focus while the asynchronous lock request was
       // in flight. Do not enter an editor the user no longer selected.
-      void data.finishCardEdit(cardId);
+      await data.finishCardEdit(session);
     }
   }
 
@@ -257,6 +260,7 @@
       focusedColumnIndex={focus.focusedColumnIndex}
       focusedCardIndex={focus.focusMode === "card" ? focus.focusedCardIndex : -1}
       editingCardId={focus.editingCardId}
+      {editSession}
       streamingText={data.streamingText}
       onAddCard={async (columnId) => {
         const card = await data.createCard(columnId);
@@ -268,21 +272,19 @@
           await startCardEdit(card.id);
         }
       }}
-      onSaveCard={(cardId, content) => data.saveCardEdit(cardId, content)}
-      onCancelEdit={() => {
-        const cardId = focus.editingCardId;
-        if (cardId) void data.cancelCardEdit(cardId);
-        focus.cancelEdit();
-      }}
+      onSaveCard={async (session, content, release) =>
+        data.saveCardEdit(session, content, release)}
+      onCancelEdit={(session) => data.cancelCardEdit(session)}
       onStartEdit={(cardId) => {
         // A card being streamed by a Reporter is read-only (007 §7).
         if (data.isStreaming(cardId)) return;
         void startCardEdit(cardId);
       }}
-      onExitEdit={() => {
-        const cardId = focus.editingCardId;
-        if (cardId) void data.finishCardEdit(cardId);
-        focus.exitEdit();
+      onExitEdit={(session) => {
+        if (editSession === session) {
+          editSession = null;
+          focus.exitEdit();
+        }
       }}
       filteredCardIds={data.filteredCardIds}
       activeTag={data.activeTagFilter}

@@ -67,6 +67,18 @@ export interface DatabaseBackend {
     content: string,
     expectedUpdatedAt: string,
   ): Promise<Card>;
+  updateCardContentCasOwned(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card>;
+  updateCardContentCasAndRelease(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card>;
   releaseCardLock(id: string, holder: string): Promise<Card>;
   updateCardScore(id: string, delta: number): Promise<Card>;
   moveCardToColumn(id: string, columnId: string): Promise<Card>;

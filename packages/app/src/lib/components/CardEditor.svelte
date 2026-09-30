@@ -17,8 +17,8 @@
 
   interface Props {
     content: string;
-    onSave: (content: string) => void | Promise<void>;
-    onCancel: () => void;
+    onSave: (content: string, release: boolean) => Promise<boolean>;
+    onCancel: () => Promise<boolean>;
     onExitEdit?: () => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
@@ -36,19 +36,21 @@
   }
 
   function save() {
-    void onSave(getContent());
+    void onSave(getContent(), false);
   }
 
   async function saveAndExit() {
-    exited = true;
-    await onSave(getContent());
-    onExitEdit?.();
+    if (await onSave(getContent(), true)) {
+      exited = true;
+      onExitEdit?.();
+    }
   }
 
-  function cancel() {
-    cancelled = true;
-    onCancel();
-    onExitEdit?.();
+  async function cancel() {
+    if (await onCancel()) {
+      cancelled = true;
+      onExitEdit?.();
+    }
   }
 
   function tagCompletionSource(
@@ -85,11 +87,11 @@
       });
       Vim.defineEx("q", "q", () => {
         // Discard changes and exit (don't save)
-        cancel();
+        void cancel();
       });
       Vim.defineEx("q!", "q!", () => {
         // Force quit (same as :q since we don't auto-save)
-        cancel();
+        void cancel();
       });
     }
 
@@ -110,7 +112,7 @@
             {
               key: "Escape",
               run: () => {
-                cancel();
+                void cancel();
                 return true;
               },
             },
@@ -256,8 +258,7 @@
     if (view && !cancelled && !exited) {
       exited = true;
       void (async () => {
-        await onSave(getContent());
-        onExitEdit?.();
+        if (await onSave(getContent(), true)) onExitEdit?.();
       })();
     }
     view?.destroy();

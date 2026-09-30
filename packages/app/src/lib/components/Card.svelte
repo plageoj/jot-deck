@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Card } from "$lib/types";
+  import type { EditSession } from "$lib/deckData.svelte";
   import { settingsStore } from "$lib/settings.svelte";
   import CardEditor from "./CardEditor.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
@@ -9,16 +10,17 @@
     card: Card;
     focused?: boolean;
     editing?: boolean;
+    editSession?: EditSession | null;
     dimmed?: boolean;
     activeTag?: string | null;
     /** In-progress streamed text from a Reporter (007 §6.2). When non-null the
      * card is read-only and shows an "AI generating" affordance; the streamed
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
-    onSave?: (content: string) => void;
-    onCancelEdit?: () => void;
+    onSave?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: () => void;
-    onExitEdit?: () => void;
+    onExitEdit?: (session: EditSession) => void;
     onFocusCard?: () => void;
     onTagClick?: (tagName: string) => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
@@ -28,6 +30,7 @@
     card,
     focused = false,
     editing = false,
+    editSession = null,
     dimmed = false,
     activeTag = null,
     streamingText = null,
@@ -45,12 +48,16 @@
   let streaming = $derived(streamingText !== null && streamingText !== undefined);
   let displayContent = $derived(streaming ? (streamingText ?? "") : card.content);
 
-  function handleSave(content: string) {
-    onSave?.(content);
+  async function handleSave(content: string, release: boolean): Promise<boolean> {
+    return editSession ? (await onSave?.(editSession, content, release)) ?? false : false;
   }
 
-  function handleCancel() {
-    onCancelEdit?.();
+  async function handleCancel(): Promise<boolean> {
+    return editSession ? (await onCancelEdit?.(editSession)) ?? false : false;
+  }
+
+  function handleExit() {
+    if (editSession) onExitEdit?.(editSession);
   }
 
   function handleClick() {
@@ -83,7 +90,7 @@
       content={card.content}
       onSave={handleSave}
       onCancel={handleCancel}
-      {onExitEdit}
+      onExitEdit={handleExit}
       {onTagSuggestions}
     />
   {:else}

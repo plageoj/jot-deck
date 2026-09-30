@@ -116,6 +116,34 @@ export class TauriBackend implements DatabaseBackend {
     });
   }
 
+  async updateCardContentCasOwned(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    return invoke<Card>("update_card_content_cas_owned", {
+      id,
+      holder,
+      content,
+      expectedUpdatedAt,
+    });
+  }
+
+  async updateCardContentCasAndRelease(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    return invoke<Card>("update_card_content_cas_and_release", {
+      id,
+      holder,
+      content,
+      expectedUpdatedAt,
+    });
+  }
+
   async releaseCardLock(id: string, holder: string): Promise<Card> {
     return invoke<Card>("release_card_lock", { id, holder });
   }

@@ -244,6 +244,40 @@ fn update_card_content_cas(
 }
 
 #[tauri::command]
+fn update_card_content_cas_owned(
+    state: State<AppState>,
+    id: String,
+    holder: String,
+    content: String,
+    expected_updated_at: String,
+) -> CommandResult<Card> {
+    let expected = parse_expected_updated_at(&expected_updated_at)?;
+    let conn = get_conn(&state)?;
+    card::update_content_cas_owned(&conn, &id, &holder, &content, expected).map_err(Into::into)
+}
+
+#[tauri::command]
+fn update_card_content_cas_and_release(
+    state: State<AppState>,
+    id: String,
+    holder: String,
+    content: String,
+    expected_updated_at: String,
+) -> CommandResult<Card> {
+    let expected = parse_expected_updated_at(&expected_updated_at)?;
+    let conn = get_conn(&state)?;
+    card::update_content_cas_and_release(&conn, &id, &holder, &content, expected).map_err(Into::into)
+}
+
+fn parse_expected_updated_at(expected_updated_at: &str) -> CommandResult<DateTime<Utc>> {
+    DateTime::parse_from_rfc3339(expected_updated_at)
+        .map_err(|e| CommandError {
+            message: format!("Invalid expected_updated_at: {e}"),
+        })
+        .map(|value| value.with_timezone(&Utc))
+}
+
+#[tauri::command]
 fn release_card_lock(
     state: State<AppState>,
     id: String,
@@ -460,6 +494,8 @@ pub fn run() {
             update_card_content,
             acquire_card_lock,
             update_card_content_cas,
+            update_card_content_cas_owned,
+            update_card_content_cas_and_release,
             release_card_lock,
             update_card_score,
             move_card_to_column,
