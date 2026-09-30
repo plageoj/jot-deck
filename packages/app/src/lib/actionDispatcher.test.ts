@@ -39,7 +39,17 @@ const mockBackend: Partial<DatabaseBackend> = {
       params.deck_id,
       { position: params.position },
     );
-    state.columns = [...state.columns, col];
+    state.columns =
+      params.position === undefined
+        ? [...state.columns, col]
+        : [
+            ...state.columns.map((column) =>
+              column.position >= params.position!
+                ? { ...column, position: column.position + 1 }
+                : column,
+            ),
+            col,
+          ].sort((a, b) => a.position - b.position);
     state.cardsByColumn.set(col.id, []);
     return col;
   },
@@ -697,6 +707,14 @@ describe("ActionDispatcher card-mode actions", () => {
     await dispatcher.executeCardAction("createCardAbove");
     expect(state.createCardCalls[0]?.position).toBe(1);
     expect(focus.focusMode).toBe("edit");
+  });
+
+  it("createColumn inserts a column after the focused column", async () => {
+    await dispatcher.executeCardAction("createColumn");
+    expect(state.createColumnCalls[0]?.position).toBe(1);
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
+    expect(focus.focusMode).toBe("column");
   });
 });
 

@@ -424,6 +424,11 @@ export class ActionDispatcher {
       case "createCardAbove":
         await this.cardCreate(this.focus.focusedCardIndex);
         break;
+      case "createColumn":
+        await this.columnCreateColumn();
+        // A newly created column has no card to retain card focus on.
+        this.focus.focusMode = "column";
+        break;
       case "deleteCard":
         await this.cardDelete();
         break;

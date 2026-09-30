@@ -23,6 +23,7 @@ describe("findAction", () => {
     expect(findAction("j", "card")).toBe("moveDown");
     expect(findAction("k", "card")).toBe("moveUp");
     expect(findAction("i", "card")).toBe("startEdit");
+    expect(findAction("c", "card")).toBe("createColumn");
   });
 
   it("should find multi-key sequence action", () => {

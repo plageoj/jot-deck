@@ -26,7 +26,12 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "Shift+ArrowRight", action: "reorderColumnRight", modes: ["column"], description: "Move column right" },
   { sequence: "o", action: "createCard", modes: ["column"], description: "New card" },
   { sequence: "n", action: "createCard", modes: ["column"], description: "New card" },
-  { sequence: "c", action: "createColumn", modes: ["column"], description: "New column" },
+  {
+    sequence: "c",
+    action: "createColumn",
+    modes: ["column", "card"],
+    description: "New column",
+  },
   { sequence: "N", action: "createColumn", modes: ["column", "card"], description: "New column" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "Delete column" },
   { sequence: "Delete", action: "deleteColumn", modes: ["column"], description: "Delete column" },
