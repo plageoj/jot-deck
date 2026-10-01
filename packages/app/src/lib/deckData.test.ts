@@ -611,6 +611,7 @@ describe("DeckData CRUD", () => {
     expect(data.error).toContain("Card was modified since it was read");
     mockBackend.updateCardContentCasOwned = original;
     expect(await data.saveCardEdit(session!, "new content")).toBe(true);
+    await data.finishCardEdit(session!);
   });
 
   it("keeps a session after a failed release so it can be retried", async () => {
@@ -623,6 +624,25 @@ describe("DeckData CRUD", () => {
     expect(await data.finishCardEdit(session!)).toBe(false);
     mockBackend.releaseCardLock = original;
     expect(await data.finishCardEdit(session!)).toBe(true);
+  });
+
+  it("renews an active edit session lease and stops renewal after release", async () => {
+    vi.useFakeTimers();
+    const original = mockBackend.acquireCardLock!;
+    const acquireCardLock = vi.fn(original);
+    mockBackend.acquireCardLock = acquireCardLock;
+
+    const session = await data.startCardEdit("card-1");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(acquireCardLock).toHaveBeenCalledWith("card-1", session!.owner);
+
+    await data.finishCardEdit(session!);
+    const callsAfterRelease = acquireCardLock.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(acquireCardLock).toHaveBeenCalledTimes(callsAfterRelease);
+
+    mockBackend.acquireCardLock = original;
+    vi.useRealTimers();
   });
 
   it("deleteColumn forwards the id to the backend", async () => {
