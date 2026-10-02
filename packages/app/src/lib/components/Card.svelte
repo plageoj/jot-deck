@@ -21,6 +21,10 @@
     onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: () => void;
     onExitEdit?: (session: EditSession) => void;
+    onRegisterExit?: (
+      session: EditSession,
+      exit: (() => Promise<boolean>) | null,
+    ) => void;
     onFocusCard?: () => void;
     onTagClick?: (tagName: string) => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
@@ -38,6 +42,7 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onRegisterExit,
     onFocusCard,
     onTagClick,
     onTagSuggestions,
@@ -48,16 +53,20 @@
   let streaming = $derived(streamingText !== null && streamingText !== undefined);
   let displayContent = $derived(streaming ? (streamingText ?? "") : card.content);
 
-  async function handleSave(content: string, release: boolean): Promise<boolean> {
-    return editSession ? (await onSave?.(editSession, content, release)) ?? false : false;
+  async function handleSave(
+    session: EditSession,
+    content: string,
+    release: boolean,
+  ): Promise<boolean> {
+    return (await onSave?.(session, content, release)) ?? false;
   }
 
-  async function handleCancel(): Promise<boolean> {
-    return editSession ? (await onCancelEdit?.(editSession)) ?? false : false;
+  async function handleCancel(session: EditSession): Promise<boolean> {
+    return (await onCancelEdit?.(session)) ?? false;
   }
 
-  function handleExit() {
-    if (editSession) onExitEdit?.(editSession);
+  function handleExit(session: EditSession) {
+    onExitEdit?.(session);
   }
 
   function handleClick() {
@@ -85,12 +94,14 @@
   onclick={handleClick}
   onkeydown={() => {}}
 >
-  {#if editing && !streaming}
+  {#if editing && !streaming && editSession}
+    {@const session = editSession}
     <CardEditor
       content={card.content}
-      onSave={handleSave}
-      onCancel={handleCancel}
-      onExitEdit={handleExit}
+      onSave={(content, release) => handleSave(session, content, release)}
+      onCancel={() => handleCancel(session)}
+      onExitEdit={() => handleExit(session)}
+      onRegisterExit={(exit) => onRegisterExit?.(session, exit)}
       {onTagSuggestions}
     />
   {:else}

@@ -20,16 +20,18 @@
     onSave: (content: string, release: boolean) => Promise<boolean>;
     onCancel: () => Promise<boolean>;
     onExitEdit?: () => void;
+    onRegisterExit?: (exit: (() => Promise<boolean>) | null) => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
 
-  let { content, onSave, onCancel, onExitEdit, onTagSuggestions }: Props =
+  let { content, onSave, onCancel, onExitEdit, onRegisterExit, onTagSuggestions }: Props =
     $props();
 
   let editorContainer: HTMLDivElement;
   let view: EditorView | null = null;
   let cancelled = false;
   let exited = false;
+  let terminalAction: Promise<boolean> | null = null;
 
   function getContent(): string {
     return view?.state.doc.toString() ?? content;
@@ -39,18 +41,34 @@
     void onSave(getContent(), false);
   }
 
-  async function saveAndExit() {
-    if (await onSave(getContent(), true)) {
-      exited = true;
-      onExitEdit?.();
-    }
+  function saveAndExit(): Promise<boolean> {
+    if (terminalAction) return terminalAction;
+    const action = onSave(getContent(), true).then((saved) => {
+      if (saved) {
+        exited = true;
+        onExitEdit?.();
+      } else if (terminalAction === action) {
+        terminalAction = null;
+      }
+      return saved;
+    });
+    terminalAction = action;
+    return action;
   }
 
-  async function cancel() {
-    if (await onCancel()) {
-      cancelled = true;
-      onExitEdit?.();
-    }
+  function cancel(): Promise<boolean> {
+    if (terminalAction) return terminalAction;
+    const action = onCancel().then((cancelledEdit) => {
+      if (cancelledEdit) {
+        cancelled = true;
+        onExitEdit?.();
+      } else if (terminalAction === action) {
+        terminalAction = null;
+      }
+      return cancelledEdit;
+    });
+    terminalAction = action;
+    return action;
   }
 
   function tagCompletionSource(
@@ -75,6 +93,7 @@
   }
 
   onMount(() => {
+    onRegisterExit?.(saveAndExit);
     const vimEnabled = settingsStore.state.vimEnabled;
 
     if (vimEnabled) {
@@ -253,13 +272,12 @@
   });
 
   onDestroy(() => {
-    // Auto-save on destroy (when switching to another card)
-    // Don't save if explicitly cancelled with :q
+    onRegisterExit?.(null);
+    // The route normally asks this editor to save before replacing it. Retain
+    // this fallback for external unmounts, and keep its terminal callback
+    // bound to this editor instance.
     if (view && !cancelled && !exited) {
-      exited = true;
-      void (async () => {
-        if (await onSave(getContent(), true)) onExitEdit?.();
-      })();
+      void saveAndExit();
     }
     view?.destroy();
   });

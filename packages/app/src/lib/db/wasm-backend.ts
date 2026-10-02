@@ -24,6 +24,7 @@ import type {
 
 // SQL.js WASM binary URL - loaded from CDN
 const SQL_WASM_URL = "https://sql.js.org/dist/sql-wasm.wasm";
+const LOCK_LEASE_MS = 120_000;
 
 // Type for a row of values from sql.js
 type SqlRow = SqlValue[];
@@ -526,15 +527,24 @@ export class WasmBackend implements DatabaseBackend {
   async acquireCardLock(id: string, holder: string): Promise<Card> {
     await this.init();
     const db = this.ensureDb();
-    const card = await this.getCard(id);
-    if (card.locked_by && card.locked_by !== holder) {
-      throw new Error(`Card is locked by ${card.locked_by}`);
+    const now = this.now();
+    const cutoff = new Date(Date.now() - LOCK_LEASE_MS).toISOString();
+    db.run(
+      `UPDATE cards SET locked_by = ?, locked_at = ?
+       WHERE id = ? AND deleted_at IS NULL
+         AND (locked_by IS NULL OR locked_by = ? OR locked_at IS NULL OR locked_at < ?)`,
+      [
+        holder,
+        now,
+        id,
+        holder,
+        cutoff,
+      ],
+    );
+    if (db.getRowsModified() !== 1) {
+      const card = await this.getCard(id);
+      throw new Error(`Card is locked by ${card.locked_by ?? "another editor"}`);
     }
-    db.run("UPDATE cards SET locked_by = ?, locked_at = ? WHERE id = ?", [
-      holder,
-      this.now(),
-      id,
-    ]);
     return this.getCard(id);
   }
 
@@ -576,9 +586,14 @@ export class WasmBackend implements DatabaseBackend {
   ): Promise<Card> {
     await this.init();
     const db = this.ensureDb();
-    const card = await this.getCard(id);
-    if (card.locked_by !== holder) throw new Error("Card edit lock is not held");
-    return this.updateCardContentCas(id, content, expectedUpdatedAt);
+    return this.updateCardContentWithLease(
+      db,
+      id,
+      holder,
+      content,
+      expectedUpdatedAt,
+      false,
+    );
   }
 
   async updateCardContentCasAndRelease(
@@ -587,13 +602,52 @@ export class WasmBackend implements DatabaseBackend {
     content: string,
     expectedUpdatedAt: string,
   ): Promise<Card> {
-    const updated = await this.updateCardContentCasOwned(
+    await this.init();
+    return this.updateCardContentWithLease(
+      this.ensureDb(),
       id,
       holder,
       content,
       expectedUpdatedAt,
+      true,
     );
-    return this.releaseCardLock(id, holder).then(() => this.getCard(updated.id));
+  }
+
+  /**
+   * Match the core contract: verify the current owner, unexpired lease, and CAS
+   * version in the write itself. Tag synchronization shares the transaction.
+   */
+  private async updateCardContentWithLease(
+    db: Database,
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+    release: boolean,
+  ): Promise<Card> {
+    const now = this.now();
+    const cutoff = new Date(Date.now() - LOCK_LEASE_MS).toISOString();
+    db.run("BEGIN");
+    try {
+      db.run(
+        `UPDATE cards
+         SET content = ?, updated_at = ?, locked_at = ${release ? "NULL" : "?"}${release ? ", locked_by = NULL" : ""}
+         WHERE id = ? AND locked_by = ? AND updated_at = ? AND deleted_at IS NULL
+           AND locked_at >= ?`,
+        release
+          ? [content, now, id, holder, expectedUpdatedAt, cutoff]
+          : [content, now, now, id, holder, expectedUpdatedAt, cutoff],
+      );
+      if (db.getRowsModified() !== 1) {
+        throw new Error("Card edit lock is not held, has expired, or the card was modified");
+      }
+      await this.syncCardTags(id, content);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    return this.getCard(id);
   }
 
   async releaseCardLock(id: string, holder: string): Promise<Card> {

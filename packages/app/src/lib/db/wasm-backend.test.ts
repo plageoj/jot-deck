@@ -26,7 +26,7 @@ describe("WasmBackend reporter surface", () => {
 });
 
 describe("WasmBackend GUI card edit surface", () => {
-  it("locks, CAS-updates, and releases a card", async () => {
+  it("locks, lease-aware CAS-updates, and atomically releases a card", async () => {
     const backend = new WasmBackend();
     const deck = await backend.createDeck({ name: "Test deck" });
     const column = await backend.createColumn({
@@ -41,15 +41,32 @@ describe("WasmBackend GUI card edit surface", () => {
     const locked = await backend.acquireCardLock(card.id, "user");
     expect(locked.id).toBe(card.id);
 
-    const updated = await backend.updateCardContentCas(
+    const updated = await backend.updateCardContentCasAndRelease(
       card.id,
+      "user",
       "after #new",
       locked.updated_at,
     );
     expect(updated.content).toBe("after #new");
+    expect(updated.locked_by).toBeNull();
+    expect(updated.locked_at).toBeNull();
+  });
 
-    const released = await backend.releaseCardLock(card.id, "user");
-    expect(released.content).toBe("after #new");
+  it("does not let a non-owner save or release another editor's lease", async () => {
+    const backend = new WasmBackend();
+    const deck = await backend.createDeck({ name: "Test deck" });
+    const column = await backend.createColumn({ deck_id: deck.id, name: "Inbox" });
+    const card = await backend.createCard({ column_id: column.id, content: "before" });
+    const locked = await backend.acquireCardLock(card.id, "owner");
+
+    await expect(
+      backend.updateCardContentCasOwned(card.id, "other", "after", locked.updated_at),
+    ).rejects.toThrow("Card edit lock is not held");
+    await backend.releaseCardLock(card.id, "other");
+
+    const unchanged = await backend.getCard(card.id);
+    expect(unchanged.content).toBe("before");
+    expect(unchanged.locked_by).toBe("owner");
   });
 
   it("rejects a stale CAS update without changing the card", async () => {

@@ -92,6 +92,8 @@
 
   let deckComponent = $state<DeckComponent | null>(null);
   let editSession = $state<EditSession | null>(null);
+  let activeEditorExit: (() => Promise<boolean>) | null = null;
+  let editTransition = Promise.resolve();
 
   // Settings: hydrate from SQLite, then apply reactively whenever the store
   // changes (theme attribute + font CSS variables on <html>). The first apply
@@ -174,7 +176,15 @@
     return data.cardsByColumn[column?.id]?.[focus.focusedCardIndex]?.id === cardId;
   }
 
-  async function startCardEdit(cardId: string) {
+  function startCardEdit(cardId: string) {
+    const transition = editTransition.then(() => startCardEditImpl(cardId));
+    editTransition = transition.catch(() => {});
+    return transition;
+  }
+
+  async function startCardEditImpl(cardId: string) {
+    if (editSession?.cardId === cardId) return;
+    if (editSession && !(await exitActiveEditor(editSession))) return;
     const session = await data.startCardEdit(cardId);
     if (!session) return;
     if (isCardFocused(cardId)) {
@@ -185,6 +195,20 @@
       // in flight. Do not enter an editor the user no longer selected.
       await data.finishCardEdit(session);
     }
+  }
+
+  async function exitActiveEditor(session: EditSession): Promise<boolean> {
+    // A mounted editor owns the only copy of its unsaved document. Let its
+    // terminal callback commit and release before changing the focused editor.
+    const exited = activeEditorExit
+      ? await activeEditorExit()
+      : await data.finishCardEdit(session);
+    if (exited && editSession === session) {
+      editSession = null;
+      activeEditorExit = null;
+      focus.exitEdit();
+    }
+    return exited;
   }
 
   function handleRenameDeck(deck: Deck) {
@@ -283,8 +307,12 @@
       onExitEdit={(session) => {
         if (editSession === session) {
           editSession = null;
+          activeEditorExit = null;
           focus.exitEdit();
         }
+      }}
+      onRegisterExit={(session, exit) => {
+        if (editSession === session) activeEditorExit = exit;
       }}
       filteredCardIds={data.filteredCardIds}
       activeTag={data.activeTagFilter}

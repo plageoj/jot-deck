@@ -645,6 +645,40 @@ describe("DeckData CRUD", () => {
     vi.useRealTimers();
   });
 
+  it("waits for an in-flight lease renewal before releasing the session", async () => {
+    vi.useFakeTimers();
+    const originalAcquire = mockBackend.acquireCardLock!;
+    const originalRelease = mockBackend.releaseCardLock!;
+    let resolveRenewal!: (card: Card) => void;
+    const renewal = new Promise<Card>((resolve) => {
+      resolveRenewal = resolve;
+    });
+    const acquireCardLock = vi.fn((id: string, holder: string) =>
+      acquireCardLock.mock.calls.length === 1
+        ? originalAcquire(id, holder)
+        : renewal,
+    );
+    const releaseCardLock = vi.fn(originalRelease);
+    mockBackend.acquireCardLock = acquireCardLock;
+    mockBackend.releaseCardLock = releaseCardLock;
+
+    const session = await data.startCardEdit("card-1");
+    vi.advanceTimersByTime(30_000);
+    await Promise.resolve();
+
+    const releasing = data.finishCardEdit(session!);
+    await Promise.resolve();
+    expect(releaseCardLock).not.toHaveBeenCalled();
+
+    resolveRenewal(makeCard("card-1", "col-active", { lockedBy: session!.owner }));
+    await expect(releasing).resolves.toBe(true);
+    expect(releaseCardLock).toHaveBeenCalledWith("card-1", session!.owner);
+
+    mockBackend.acquireCardLock = originalAcquire;
+    mockBackend.releaseCardLock = originalRelease;
+    vi.useRealTimers();
+  });
+
   it("deleteColumn forwards the id to the backend", async () => {
     const ok = await data.deleteColumn("col-active");
     expect(ok).toBe(true);

@@ -50,6 +50,9 @@ export class DeckData {
     EditSession,
     ReturnType<typeof setInterval>
   >();
+  /** A release waits for an already-started renewal before unlocking. */
+  private readonly editLeaseRenewals = new Map<EditSession, Promise<void>>();
+  private readonly releasingEditSessions = new Set<EditSession>();
 
   async init() {
     this.db = await getDatabase();
@@ -675,12 +678,7 @@ export class DeckData {
     const generation = this.history.currentGeneration;
     try {
       const updated = release
-        ? await this.db.updateCardContentCasAndRelease(
-            session.cardId,
-            session.owner,
-            content,
-            session.expectedUpdatedAt,
-          )
+        ? await this.saveAndReleaseCardEdit(session, content)
         : await this.db.updateCardContentCasOwned(
             session.cardId,
             session.owner,
@@ -689,10 +687,7 @@ export class DeckData {
           );
       this.replaceCard(updated);
       session.expectedUpdatedAt = updated.updated_at;
-      if (release) {
-        this.stopEditLeaseRenewal(session);
-        this.editSessions.delete(session.cardId);
-      }
+      if (release) this.completeCardEdit(session);
       await this.loadDeckTags();
       if (record && previousContent !== null && previousContent !== content) {
         this.history.push(
@@ -717,10 +712,10 @@ export class DeckData {
   async finishCardEdit(session: EditSession): Promise<boolean> {
     if (this.editSessions.get(session.cardId) !== session) return true;
     try {
+      await this.prepareCardEditRelease(session);
       const released = await this.db.releaseCardLock(session.cardId, session.owner);
       this.replaceCard(released);
-      this.stopEditLeaseRenewal(session);
-      this.editSessions.delete(session.cardId);
+      this.completeCardEdit(session);
       return true;
     } catch (e) {
       this.error = `Failed to release card edit: ${e}`;
@@ -742,17 +737,58 @@ export class DeckData {
     this.editLeaseTimers.delete(session);
   }
 
-  private async renewEditLease(session: EditSession) {
-    if (this.editSessions.get(session.cardId) !== session) {
+  private async saveAndReleaseCardEdit(session: EditSession, content: string): Promise<Card> {
+    await this.prepareCardEditRelease(session);
+    return this.db.updateCardContentCasAndRelease(
+      session.cardId,
+      session.owner,
+      content,
+      session.expectedUpdatedAt,
+    );
+  }
+
+  /** Prevent an in-flight renewal from reacquiring a lock after its release. */
+  private async prepareCardEditRelease(session: EditSession) {
+    this.releasingEditSessions.add(session);
+    this.stopEditLeaseRenewal(session);
+    await this.editLeaseRenewals.get(session);
+  }
+
+  private completeCardEdit(session: EditSession) {
+    this.stopEditLeaseRenewal(session);
+    this.releasingEditSessions.delete(session);
+    this.editSessions.delete(session.cardId);
+  }
+
+  private renewEditLease(session: EditSession) {
+    if (
+      this.editSessions.get(session.cardId) !== session ||
+      this.releasingEditSessions.has(session)
+    ) {
       this.stopEditLeaseRenewal(session);
-      return;
+      return Promise.resolve();
     }
-    try {
-      const locked = await this.db.acquireCardLock(session.cardId, session.owner);
-      this.replaceCard(locked);
-    } catch (e) {
-      this.error = `Failed to renew card edit lock: ${e}`;
-    }
+    const renewal = this.db.acquireCardLock(session.cardId, session.owner)
+      .then((locked) => {
+        if (
+          this.editSessions.get(session.cardId) === session &&
+          !this.releasingEditSessions.has(session)
+        ) {
+          this.replaceCard(locked);
+        }
+      })
+      .catch((e) => {
+        if (!this.releasingEditSessions.has(session)) {
+          this.error = `Failed to renew card edit lock: ${e}`;
+        }
+      })
+      .finally(() => {
+        if (this.editLeaseRenewals.get(session) === renewal) {
+          this.editLeaseRenewals.delete(session);
+        }
+      });
+    this.editLeaseRenewals.set(session, renewal);
+    return renewal;
   }
 
   private replaceCard(updatedCard: Card) {

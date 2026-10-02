@@ -19,6 +19,10 @@
     onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: (cardId: string) => void;
     onExitEdit?: (session: EditSession) => void;
+    onRegisterExit?: (
+      session: EditSession,
+      exit: (() => Promise<boolean>) | null,
+    ) => void;
     onFocusColumn?: (columnIndex: number) => void;
     onFocusCard?: (columnIndex: number, cardIndex: number) => void;
     onTagClick?: (tagName: string) => void;
@@ -40,6 +44,7 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onRegisterExit,
     onFocusColumn,
     onFocusCard,
     onTagClick,
@@ -76,6 +81,7 @@
         {onCancelEdit}
         {onStartEdit}
         {onExitEdit}
+        {onRegisterExit}
         onFocusColumn={onFocusColumn ? () => onFocusColumn(index) : undefined}
         onFocusCard={onFocusCard ? (cardIndex: number) => onFocusCard(index, cardIndex) : undefined}
         {onTagClick}
