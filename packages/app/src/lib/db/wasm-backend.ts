@@ -24,6 +24,7 @@ import type {
 
 // SQL.js WASM binary URL - loaded from CDN
 const SQL_WASM_URL = "https://sql.js.org/dist/sql-wasm.wasm";
+const LOCK_LEASE_MS = 120_000;
 
 // Type for a row of values from sql.js
 type SqlRow = SqlValue[];
@@ -520,6 +521,142 @@ export class WasmBackend implements DatabaseBackend {
     // Sync tags
     await this.syncCardTags(id, content);
 
+    return this.getCard(id);
+  }
+
+  async acquireCardLock(id: string, holder: string): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    const now = this.now();
+    const cutoff = new Date(Date.now() - LOCK_LEASE_MS).toISOString();
+    db.run(
+      `UPDATE cards SET locked_by = ?, locked_at = ?
+       WHERE id = ? AND deleted_at IS NULL
+         AND (locked_by IS NULL OR locked_by = ? OR locked_at IS NULL OR locked_at < ?)`,
+      [
+        holder,
+        now,
+        id,
+        holder,
+        cutoff,
+      ],
+    );
+    if (db.getRowsModified() !== 1) {
+      const card = await this.getCard(id);
+      throw new Error(`Card is locked by ${card.locked_by ?? "another editor"}`);
+    }
+    return this.getCard(id);
+  }
+
+  async updateCardContentCas(
+    id: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    const card = await this.getCard(id);
+    if (card.updated_at !== expectedUpdatedAt) {
+      throw new Error("Card was modified since it was read");
+    }
+    const now = this.now();
+    db.run("BEGIN");
+    try {
+      db.run(
+        "UPDATE cards SET content = ?, updated_at = ? WHERE id = ? AND updated_at = ?",
+        [content, now, id, expectedUpdatedAt],
+      );
+      if (db.getRowsModified() !== 1) {
+        throw new Error("Card was modified since it was read");
+      }
+      await this.syncCardTags(id, content);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    return this.getCard(id);
+  }
+
+  async updateCardContentCasOwned(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    return this.updateCardContentWithLease(
+      db,
+      id,
+      holder,
+      content,
+      expectedUpdatedAt,
+      false,
+    );
+  }
+
+  async updateCardContentCasAndRelease(
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+  ): Promise<Card> {
+    await this.init();
+    return this.updateCardContentWithLease(
+      this.ensureDb(),
+      id,
+      holder,
+      content,
+      expectedUpdatedAt,
+      true,
+    );
+  }
+
+  /**
+   * Match the core contract: verify the current owner, unexpired lease, and CAS
+   * version in the write itself. Tag synchronization shares the transaction.
+   */
+  private async updateCardContentWithLease(
+    db: Database,
+    id: string,
+    holder: string,
+    content: string,
+    expectedUpdatedAt: string,
+    release: boolean,
+  ): Promise<Card> {
+    const now = this.now();
+    const cutoff = new Date(Date.now() - LOCK_LEASE_MS).toISOString();
+    db.run("BEGIN");
+    try {
+      db.run(
+        `UPDATE cards
+         SET content = ?, updated_at = ?, locked_at = ${release ? "NULL" : "?"}${release ? ", locked_by = NULL" : ""}
+         WHERE id = ? AND locked_by = ? AND updated_at = ? AND deleted_at IS NULL
+           AND locked_at >= ?`,
+        release
+          ? [content, now, id, holder, expectedUpdatedAt, cutoff]
+          : [content, now, now, id, holder, expectedUpdatedAt, cutoff],
+      );
+      if (db.getRowsModified() !== 1) {
+        throw new Error("Card edit lock is not held, has expired, or the card was modified");
+      }
+      await this.syncCardTags(id, content);
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+    return this.getCard(id);
+  }
+
+  async releaseCardLock(id: string, holder: string): Promise<Card> {
+    await this.init();
+    const db = this.ensureDb();
+    db.run(
+      "UPDATE cards SET locked_by = NULL, locked_at = NULL WHERE id = ? AND locked_by = ?",
+      [id, holder],
+    );
     return this.getCard(id);
   }
 

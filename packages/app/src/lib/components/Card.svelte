@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Card } from "$lib/types";
+  import type { EditSession } from "$lib/deckData.svelte";
   import { settingsStore } from "$lib/settings.svelte";
   import CardEditor from "./CardEditor.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
@@ -9,16 +10,21 @@
     card: Card;
     focused?: boolean;
     editing?: boolean;
+    editSession?: EditSession | null;
     dimmed?: boolean;
     activeTag?: string | null;
     /** In-progress streamed text from a Reporter (007 §6.2). When non-null the
      * card is read-only and shows an "AI generating" affordance; the streamed
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
-    onSave?: (content: string) => void;
-    onCancelEdit?: () => void;
+    onSave?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: () => void;
-    onExitEdit?: () => void;
+    onExitEdit?: (session: EditSession) => void;
+    onRegisterExit?: (
+      session: EditSession,
+      exit: (() => Promise<boolean>) | null,
+    ) => void;
     onFocusCard?: () => void;
     onTagClick?: (tagName: string) => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
@@ -28,6 +34,7 @@
     card,
     focused = false,
     editing = false,
+    editSession = null,
     dimmed = false,
     activeTag = null,
     streamingText = null,
@@ -35,6 +42,7 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onRegisterExit,
     onFocusCard,
     onTagClick,
     onTagSuggestions,
@@ -45,12 +53,20 @@
   let streaming = $derived(streamingText !== null && streamingText !== undefined);
   let displayContent = $derived(streaming ? (streamingText ?? "") : card.content);
 
-  function handleSave(content: string) {
-    onSave?.(content);
+  async function handleSave(
+    session: EditSession,
+    content: string,
+    release: boolean,
+  ): Promise<boolean> {
+    return (await onSave?.(session, content, release)) ?? false;
   }
 
-  function handleCancel() {
-    onCancelEdit?.();
+  async function handleCancel(session: EditSession): Promise<boolean> {
+    return (await onCancelEdit?.(session)) ?? false;
+  }
+
+  function handleExit(session: EditSession) {
+    onExitEdit?.(session);
   }
 
   function handleClick() {
@@ -78,12 +94,14 @@
   onclick={handleClick}
   onkeydown={() => {}}
 >
-  {#if editing && !streaming}
+  {#if editing && !streaming && editSession}
+    {@const session = editSession}
     <CardEditor
       content={card.content}
-      onSave={handleSave}
-      onCancel={handleCancel}
-      {onExitEdit}
+      onSave={(content, release) => handleSave(session, content, release)}
+      onCancel={() => handleCancel(session)}
+      onExitEdit={() => handleExit(session)}
+      onRegisterExit={(exit) => onRegisterExit?.(session, exit)}
       {onTagSuggestions}
     />
   {:else}

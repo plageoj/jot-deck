@@ -246,9 +246,125 @@ pub fn update_content_cas(
     }
 
     // 0 行更新: 存在しない/削除済み or updated_at 不一致。区別して返す。
-    Err(classify_write_failure(conn, id, "Cannot update deleted card", |_| {
-        "Card was modified since it was read (expected_updated_at mismatch)".to_string()
-    }))
+    Err(classify_write_failure(
+        conn,
+        id,
+        "Cannot update deleted card",
+        |_| "Card was modified since it was read (expected_updated_at mismatch)".to_string(),
+    ))
+}
+
+/// Update a card while retaining an active lock held by `holder`.
+///
+/// This is the GUI editor's `:w` operation. Ownership, lease, and optimistic
+/// version are checked atomically; a successful write renews the lease while
+/// retaining the lock for subsequent edits.
+pub fn update_content_cas_owned(
+    conn: &Connection,
+    id: &str,
+    holder: &str,
+    content: &str,
+    expected_updated_at: DateTime<Utc>,
+) -> Result<Card> {
+    let now = Utc::now();
+    let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
+    let tx = conn.unchecked_transaction()?;
+    let affected = tx.execute(
+        "UPDATE cards SET content = ?1, updated_at = ?2, locked_at = ?3
+         WHERE id = ?4 AND locked_by = ?5 AND updated_at = ?6
+           AND deleted_at IS NULL AND locked_at >= ?7",
+        params![
+            content,
+            now.to_rfc3339(),
+            lock_timestamp(now),
+            id,
+            holder,
+            expected_updated_at.to_rfc3339(),
+            cutoff,
+        ],
+    )?;
+
+    if affected == 1 {
+        tag::sync_card_tags(&tx, id, content)?;
+        tx.commit()?;
+        return get_by_id(conn, id);
+    }
+
+    drop(tx);
+    Err(classify_owned_write_failure(
+        conn,
+        id,
+        holder,
+        expected_updated_at,
+    ))
+}
+
+/// Update a card and release an active lock held by `holder`.
+///
+/// This is the GUI editor's `:wq` / Ctrl+Enter operation. Ownership, lease,
+/// CAS, content write, and release are one transaction, so another editor
+/// cannot acquire the card between saving and unlocking it.
+pub fn update_content_cas_and_release(
+    conn: &Connection,
+    id: &str,
+    holder: &str,
+    content: &str,
+    expected_updated_at: DateTime<Utc>,
+) -> Result<Card> {
+    let now = Utc::now();
+    let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
+    let tx = conn.unchecked_transaction()?;
+    let affected = tx.execute(
+        "UPDATE cards SET content = ?1, updated_at = ?2, locked_by = NULL, locked_at = NULL
+         WHERE id = ?3 AND locked_by = ?4 AND updated_at = ?5
+           AND deleted_at IS NULL AND locked_at >= ?6",
+        params![
+            content,
+            now.to_rfc3339(),
+            id,
+            holder,
+            expected_updated_at.to_rfc3339(),
+            cutoff,
+        ],
+    )?;
+
+    if affected == 1 {
+        tag::sync_card_tags(&tx, id, content)?;
+        tx.commit()?;
+        return get_by_id(conn, id);
+    }
+
+    drop(tx);
+    Err(classify_owned_write_failure(
+        conn,
+        id,
+        holder,
+        expected_updated_at,
+    ))
+}
+
+fn classify_owned_write_failure(
+    conn: &Connection,
+    id: &str,
+    holder: &str,
+    expected_updated_at: DateTime<Utc>,
+) -> JotDeckError {
+    classify_write_failure(conn, id, "Cannot update deleted card", |card| {
+        if card.updated_at != expected_updated_at {
+            "Card was modified since it was read (expected_updated_at mismatch)".to_string()
+        } else {
+            match card.locked_by.as_deref() {
+                Some(current) if current == holder => {
+                    "Card edit lock has expired; re-acquire before saving".to_string()
+                }
+                current => format!(
+                    "Card edit lock is no longer held by {} (now: {})",
+                    holder,
+                    current.unwrap_or("released")
+                ),
+            }
+        }
+    })
 }
 
 /// 占有ロックを取得する（002 §5.2）。
@@ -273,12 +389,17 @@ pub fn acquire_lock(conn: &Connection, id: &str, locked_by_id: &str) -> Result<C
     }
 
     // 0 行更新: 存在しない/削除済み or 他者が有効占有中。区別して返す。
-    Err(classify_write_failure(conn, id, "Cannot lock deleted card", |card| {
-        format!(
-            "Card is locked by {}",
-            card.locked_by.as_deref().unwrap_or("another editor")
-        )
-    }))
+    Err(classify_write_failure(
+        conn,
+        id,
+        "Cannot lock deleted card",
+        |card| {
+            format!(
+                "Card is locked by {}",
+                card.locked_by.as_deref().unwrap_or("another editor")
+            )
+        },
+    ))
 }
 
 /// ストリーム終了時の確定書き込み（`card.stream.end`, 007 §6.2 / 002 §5.2）。
@@ -317,8 +438,12 @@ pub fn commit_stream_and_release(
 
     // 0 行更新: 存在しない/削除済み or リース失効・他者奪取で holder が有効に保持していない。
     drop(tx); // ロールバック（何も書いていないので実質 no-op）。
-    Err(classify_write_failure(conn, id, "Cannot update deleted card", |card| {
-        match card.locked_by.as_deref() {
+    Err(classify_write_failure(
+        conn,
+        id,
+        "Cannot update deleted card",
+        |card| {
+            match card.locked_by.as_deref() {
             Some(h) if h == holder => format!(
                 "Stream lock for card {} held by {} has expired (lease elapsed); re-acquire before committing",
                 id, holder
@@ -330,7 +455,8 @@ pub fn commit_stream_and_release(
                 other.unwrap_or("released")
             ),
         }
-    }))
+        },
+    ))
 }
 
 /// 占有ロックを解放する（002 §5.2）。`locked_by_id` が現在の所有者と一致するときだけ
@@ -501,7 +627,8 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     // 連動削除された Card は Column の復元時に復元されるので、単体では復元できない
     if card.deleted_with_column {
         return Err(JotDeckError::InvalidOperation(
-            "Cannot restore card that was deleted with column. Restore the column instead.".to_string(),
+            "Cannot restore card that was deleted with column. Restore the column instead."
+                .to_string(),
         ));
     }
 
@@ -917,5 +1044,57 @@ mod tests {
 
         let err = update_content_cas(&conn, &card.id, "x", card.updated_at).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
+    }
+
+    #[test]
+    fn test_owned_cas_retains_and_renews_lock() {
+        let (conn, _, column_id) = setup();
+        let card = new_card(&conn, &column_id);
+        let locked = acquire_lock(&conn, &card.id, "gui:session-a").unwrap();
+
+        let updated =
+            update_content_cas_owned(&conn, &card.id, "gui:session-a", "saved", locked.updated_at)
+                .unwrap();
+
+        assert_eq!(updated.content, "saved");
+        assert_eq!(updated.locked_by.as_deref(), Some("gui:session-a"));
+        assert!(updated.locked_at >= locked.locked_at);
+    }
+
+    #[test]
+    fn test_owned_cas_rejects_another_session() {
+        let (conn, _, column_id) = setup();
+        let card = new_card(&conn, &column_id);
+        acquire_lock(&conn, &card.id, "gui:session-a").unwrap();
+
+        let err =
+            update_content_cas_owned(&conn, &card.id, "gui:session-b", "saved", card.updated_at)
+                .unwrap_err();
+
+        assert!(matches!(err, JotDeckError::Conflict(_)));
+        assert_eq!(
+            get_by_id(&conn, &card.id).unwrap().locked_by.as_deref(),
+            Some("gui:session-a")
+        );
+    }
+
+    #[test]
+    fn test_owned_cas_and_release_commits_and_unlocks_atomically() {
+        let (conn, _, column_id) = setup();
+        let card = new_card(&conn, &column_id);
+        let locked = acquire_lock(&conn, &card.id, "gui:session-a").unwrap();
+
+        let updated = update_content_cas_and_release(
+            &conn,
+            &card.id,
+            "gui:session-a",
+            "saved",
+            locked.updated_at,
+        )
+        .unwrap();
+
+        assert_eq!(updated.content, "saved");
+        assert!(updated.locked_by.is_none());
+        assert!(updated.locked_at.is_none());
     }
 }

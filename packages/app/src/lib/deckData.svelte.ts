@@ -12,6 +12,14 @@ import { FocusManager } from "./focusManager.svelte";
 import { UndoStack } from "./undoStack";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
+const EDIT_LOCK_RENEWAL_MS = 30_000;
+
+export interface EditSession {
+  cardId: string;
+  /** A fresh owner is required for every editor mount, even for the same card. */
+  owner: string;
+  expectedUpdatedAt: string;
+}
 
 export class DeckData {
   private db!: DatabaseBackend;
@@ -37,6 +45,14 @@ export class DeckData {
   // Generic Undo/Redo (001-keybindings.md §4.4). Session-scoped — cleared on
   // deck switch in `selectDeck`, never persisted.
   readonly history = new UndoStack();
+  private readonly editSessions = new Map<string, EditSession>();
+  private readonly editLeaseTimers = new Map<
+    EditSession,
+    ReturnType<typeof setInterval>
+  >();
+  /** A release waits for an already-started renewal before unlocking. */
+  private readonly editLeaseRenewals = new Map<EditSession, Promise<void>>();
+  private readonly releasingEditSessions = new Set<EditSession>();
 
   async init() {
     this.db = await getDatabase();
@@ -627,6 +643,167 @@ export class DeckData {
       }
     }
     await this.loadDeckTags();
+  }
+
+  /** Acquire the repository lock before mounting the GUI editor. */
+  async startCardEdit(cardId: string): Promise<EditSession | null> {
+    try {
+      const existing = this.editSessions.get(cardId);
+      if (existing) return existing;
+      const owner = `gui:${crypto.randomUUID()}`;
+      const locked = await this.db.acquireCardLock(cardId, owner);
+      const session = { cardId, owner, expectedUpdatedAt: locked.updated_at };
+      this.editSessions.set(cardId, session);
+      this.startEditLeaseRenewal(session);
+      this.replaceCard(locked);
+      return session;
+    } catch (e) {
+      this.error = `Failed to edit card: ${e}`;
+      return null;
+    }
+  }
+
+  /** Commit a GUI edit using its owner and version. `release` is :wq/Ctrl+Enter. */
+  async saveCardEdit(
+    session: EditSession,
+    content: string,
+    release = false,
+    record = true,
+  ): Promise<boolean> {
+    if (this.editSessions.get(session.cardId) !== session) {
+      this.error = "Cannot save card: edit lock is not held";
+      return false;
+    }
+    const previousContent = this.findCardContent(session.cardId);
+    const generation = this.history.currentGeneration;
+    try {
+      const updated = release
+        ? await this.saveAndReleaseCardEdit(session, content)
+        : await this.db.updateCardContentCasOwned(
+            session.cardId,
+            session.owner,
+            content,
+            session.expectedUpdatedAt,
+          );
+      this.replaceCard(updated);
+      session.expectedUpdatedAt = updated.updated_at;
+      if (release) this.completeCardEdit(session);
+      await this.loadDeckTags();
+      if (record && previousContent !== null && previousContent !== content) {
+        this.history.push(
+          {
+            undo: () => this.saveCardImpl(session.cardId, previousContent),
+            redo: () => this.saveCardImpl(session.cardId, content),
+          },
+          generation,
+        );
+      }
+      return true;
+    } catch (e) {
+      this.error = `Failed to save card: ${e}`;
+      return false;
+    }
+  }
+
+  async cancelCardEdit(session: EditSession): Promise<boolean> {
+    return this.finishCardEdit(session);
+  }
+
+  async finishCardEdit(session: EditSession): Promise<boolean> {
+    if (this.editSessions.get(session.cardId) !== session) return true;
+    try {
+      await this.prepareCardEditRelease(session);
+      const released = await this.db.releaseCardLock(session.cardId, session.owner);
+      this.replaceCard(released);
+      this.completeCardEdit(session);
+      return true;
+    } catch (e) {
+      this.error = `Failed to release card edit: ${e}`;
+      // Keep the session so the UI can retry without abandoning the lock owner.
+      return false;
+    }
+  }
+
+  private startEditLeaseRenewal(session: EditSession) {
+    const timer = setInterval(() => {
+      void this.renewEditLease(session);
+    }, EDIT_LOCK_RENEWAL_MS);
+    this.editLeaseTimers.set(session, timer);
+  }
+
+  private stopEditLeaseRenewal(session: EditSession) {
+    const timer = this.editLeaseTimers.get(session);
+    if (timer !== undefined) clearInterval(timer);
+    this.editLeaseTimers.delete(session);
+  }
+
+  private async saveAndReleaseCardEdit(session: EditSession, content: string): Promise<Card> {
+    await this.prepareCardEditRelease(session);
+    return this.db.updateCardContentCasAndRelease(
+      session.cardId,
+      session.owner,
+      content,
+      session.expectedUpdatedAt,
+    );
+  }
+
+  /** Prevent an in-flight renewal from reacquiring a lock after its release. */
+  private async prepareCardEditRelease(session: EditSession) {
+    this.releasingEditSessions.add(session);
+    this.stopEditLeaseRenewal(session);
+    await this.editLeaseRenewals.get(session);
+  }
+
+  private completeCardEdit(session: EditSession) {
+    this.stopEditLeaseRenewal(session);
+    this.releasingEditSessions.delete(session);
+    this.editSessions.delete(session.cardId);
+  }
+
+  private renewEditLease(session: EditSession) {
+    if (
+      this.editSessions.get(session.cardId) !== session ||
+      this.releasingEditSessions.has(session)
+    ) {
+      this.stopEditLeaseRenewal(session);
+      return Promise.resolve();
+    }
+    const renewal = this.db.acquireCardLock(session.cardId, session.owner)
+      .then((locked) => {
+        if (
+          this.editSessions.get(session.cardId) === session &&
+          !this.releasingEditSessions.has(session)
+        ) {
+          this.replaceCard(locked);
+        }
+      })
+      .catch((e) => {
+        if (!this.releasingEditSessions.has(session)) {
+          this.error = `Failed to renew card edit lock: ${e}`;
+        }
+      })
+      .finally(() => {
+        if (this.editLeaseRenewals.get(session) === renewal) {
+          this.editLeaseRenewals.delete(session);
+        }
+      });
+    this.editLeaseRenewals.set(session, renewal);
+    return renewal;
+  }
+
+  private replaceCard(updatedCard: Card) {
+    for (const columnId of Object.keys(this.cardsByColumn)) {
+      const cards = this.cardsByColumn[columnId];
+      const index = cards.findIndex((c) => c.id === updatedCard.id);
+      if (index !== -1) {
+        this.cardsByColumn[columnId] = [
+          ...cards.slice(0, index),
+          updatedCard,
+          ...cards.slice(index + 1),
+        ];
+        return;
+      }
+    }
   }
 
   async saveCard(cardId: string, content: string, record = true) {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Column, Card } from "$lib/types";
+  import type { EditSession } from "$lib/deckData.svelte";
   import ColumnComponent from "./Column.svelte";
 
   interface Props {
@@ -8,15 +9,20 @@
     focusedColumnIndex?: number;
     focusedCardIndex?: number;
     editingCardId?: string | null;
+    editSession?: EditSession | null;
     filteredCardIds?: Set<string> | null;
     activeTag?: string | null;
     /** card_id → in-progress streamed text (007 §6.2). */
     streamingText?: Record<string, string>;
     onAddCard?: (columnId: string) => void;
-    onSaveCard?: (cardId: string, content: string) => void;
-    onCancelEdit?: () => void;
+    onSaveCard?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: (cardId: string) => void;
-    onExitEdit?: () => void;
+    onExitEdit?: (session: EditSession) => void;
+    onRegisterExit?: (
+      session: EditSession,
+      exit: (() => Promise<boolean>) | null,
+    ) => void;
     onFocusColumn?: (columnIndex: number) => void;
     onFocusCard?: (columnIndex: number, cardIndex: number) => void;
     onTagClick?: (tagName: string) => void;
@@ -29,6 +35,7 @@
     focusedColumnIndex = -1,
     focusedCardIndex = -1,
     editingCardId = null,
+    editSession = null,
     filteredCardIds = null,
     activeTag = null,
     streamingText = {},
@@ -37,6 +44,7 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onRegisterExit,
     onFocusColumn,
     onFocusCard,
     onTagClick,
@@ -64,6 +72,7 @@
         focused={isCurrentColumn}
         focusedCardIndex={isCurrentColumn ? focusedCardIndex : -1}
         {editingCardId}
+        {editSession}
         {filteredCardIds}
         {activeTag}
         {streamingText}
@@ -72,6 +81,7 @@
         {onCancelEdit}
         {onStartEdit}
         {onExitEdit}
+        {onRegisterExit}
         onFocusColumn={onFocusColumn ? () => onFocusColumn(index) : undefined}
         onFocusCard={onFocusCard ? (cardIndex: number) => onFocusCard(index, cardIndex) : undefined}
         {onTagClick}

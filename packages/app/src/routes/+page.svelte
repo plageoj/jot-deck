@@ -17,7 +17,7 @@
     TrashPalette,
     UpdateBanner,
   } from "$lib/components";
-  import { DeckData } from "$lib/deckData.svelte";
+  import { DeckData, type EditSession } from "$lib/deckData.svelte";
   import { FocusManager } from "$lib/focusManager.svelte";
   import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
   import {
@@ -91,6 +91,9 @@
   });
 
   let deckComponent = $state<DeckComponent | null>(null);
+  let editSession = $state<EditSession | null>(null);
+  let activeEditorExit: (() => Promise<boolean>) | null = null;
+  let editTransition = Promise.resolve();
 
   // Settings: hydrate from SQLite, then apply reactively whenever the store
   // changes (theme attribute + font CSS variables on <html>). The first apply
@@ -115,6 +118,7 @@
       const col = data.columns[focus.focusedColumnIndex];
       if (col) handleDeleteColumn(col);
     };
+    actions.onStartEdit = startCardEdit;
     window.addEventListener("keydown", actions.handleKeydown);
     await Promise.all([data.init(), settingsStore.load()]);
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
@@ -166,6 +170,46 @@
       trashItems = [];
     }
   });
+
+  function isCardFocused(cardId: string) {
+    const column = data.columns[focus.focusedColumnIndex];
+    return data.cardsByColumn[column?.id]?.[focus.focusedCardIndex]?.id === cardId;
+  }
+
+  function startCardEdit(cardId: string) {
+    const transition = editTransition.then(() => startCardEditImpl(cardId));
+    editTransition = transition.catch(() => {});
+    return transition;
+  }
+
+  async function startCardEditImpl(cardId: string) {
+    if (editSession?.cardId === cardId) return;
+    if (editSession && !(await exitActiveEditor(editSession))) return;
+    const session = await data.startCardEdit(cardId);
+    if (!session) return;
+    if (isCardFocused(cardId)) {
+      editSession = session;
+      focus.startEdit(cardId);
+    } else {
+      // Navigation may have moved focus while the asynchronous lock request was
+      // in flight. Do not enter an editor the user no longer selected.
+      await data.finishCardEdit(session);
+    }
+  }
+
+  async function exitActiveEditor(session: EditSession): Promise<boolean> {
+    // A mounted editor owns the only copy of its unsaved document. Let its
+    // terminal callback commit and release before changing the focused editor.
+    const exited = activeEditorExit
+      ? await activeEditorExit()
+      : await data.finishCardEdit(session);
+    if (exited && editSession === session) {
+      editSession = null;
+      activeEditorExit = null;
+      focus.exitEdit();
+    }
+    return exited;
+  }
 
   function handleRenameDeck(deck: Deck) {
     renamingDeck = deck;
@@ -240,19 +284,36 @@
       focusedColumnIndex={focus.focusedColumnIndex}
       focusedCardIndex={focus.focusMode === "card" ? focus.focusedCardIndex : -1}
       editingCardId={focus.editingCardId}
+      {editSession}
       streamingText={data.streamingText}
       onAddCard={async (columnId) => {
         const card = await data.createCard(columnId);
-        if (card) focus.editingCardId = card.id;
+        if (card) {
+          focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === columnId);
+          focus.focusedCardIndex = (data.cardsByColumn[columnId] ?? []).findIndex(
+            (candidate) => candidate.id === card.id,
+          );
+          await startCardEdit(card.id);
+        }
       }}
-      onSaveCard={(cardId, content) => data.saveCard(cardId, content)}
-      onCancelEdit={() => focus.cancelEdit()}
+      onSaveCard={async (session, content, release) =>
+        data.saveCardEdit(session, content, release)}
+      onCancelEdit={(session) => data.cancelCardEdit(session)}
       onStartEdit={(cardId) => {
         // A card being streamed by a Reporter is read-only (007 §7).
         if (data.isStreaming(cardId)) return;
-        focus.startEdit(cardId);
+        void startCardEdit(cardId);
       }}
-      onExitEdit={() => focus.exitEdit()}
+      onExitEdit={(session) => {
+        if (editSession === session) {
+          editSession = null;
+          activeEditorExit = null;
+          focus.exitEdit();
+        }
+      }}
+      onRegisterExit={(session, exit) => {
+        if (editSession === session) activeEditorExit = exit;
+      }}
       filteredCardIds={data.filteredCardIds}
       activeTag={data.activeTagFilter}
       onFocusColumn={(i) => focus.handleFocusColumn(i)}
