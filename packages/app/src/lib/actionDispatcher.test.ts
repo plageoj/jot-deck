@@ -716,6 +716,16 @@ describe("ActionDispatcher card-mode actions", () => {
     expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
     expect(focus.focusMode).toBe("column");
   });
+
+  it("createColumn keeps card focus when the column cannot be created", async () => {
+    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(null);
+
+    await dispatcher.executeCardAction("createColumn");
+
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(1);
+  });
 });
 
 describe("ActionDispatcher.executeCommand", () => {

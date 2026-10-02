@@ -346,14 +346,15 @@ export class ActionDispatcher {
     }
   }
 
-  private async columnCreateColumn() {
+  private async columnCreateColumn(): Promise<boolean> {
     const { data, focus } = this;
     const col = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
-    if (col) {
-      focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === col.id);
-      if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
-      focus.scrollToFocusedColumn();
-    }
+    if (!col) return false;
+
+    focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === col.id);
+    if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
+    focus.scrollToFocusedColumn();
+    return true;
   }
 
   private async columnDelete() {
@@ -425,9 +426,10 @@ export class ActionDispatcher {
         await this.cardCreate(this.focus.focusedCardIndex);
         break;
       case "createColumn":
-        await this.columnCreateColumn();
-        // A newly created column has no card to retain card focus on.
-        this.focus.focusMode = "column";
+        if (await this.columnCreateColumn()) {
+          // A newly created column has no card to retain card focus on.
+          this.focus.focusMode = "column";
+        }
         break;
       case "deleteCard":
         await this.cardDelete();

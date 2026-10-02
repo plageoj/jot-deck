@@ -183,6 +183,35 @@ describe("resolveKeybindings", () => {
     ).toBe(false);
   });
 
+  it("preserves the column-only c binding signature", () => {
+    const columnCreate = DEFAULT_KEYBINDINGS.find(
+      (b) =>
+        b.action === "createColumn" &&
+        b.sequence === "c" &&
+        b.modes.length === 1 &&
+        b.modes[0] === "column",
+    )!;
+    const resolved = resolveKeybindings({ [signatureOf(columnCreate)]: null });
+
+    expect(signatureOf(columnCreate)).toBe("createColumn column c");
+    expect(
+      resolved.some(
+        (b) =>
+          b.action === "createColumn" &&
+          b.sequence === "c" &&
+          b.modes.includes("column"),
+      ),
+    ).toBe(false);
+    expect(
+      resolved.some(
+        (b) =>
+          b.action === "createColumn" &&
+          b.sequence === "c" &&
+          b.modes.includes("card"),
+      ),
+    ).toBe(true);
+  });
+
   it("ignores overrides whose signature matches no default", () => {
     expect(resolveKeybindings({ "nonexistent sig key": "z" })).toEqual(
       DEFAULT_KEYBINDINGS,
