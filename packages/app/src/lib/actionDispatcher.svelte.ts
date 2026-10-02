@@ -348,11 +348,23 @@ export class ActionDispatcher {
 
   private async columnCreateColumn(): Promise<boolean> {
     const { data, focus } = this;
-    const col = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
+    const focusMode = focus.focusMode;
+    const focusedColumnIndex = focus.focusedColumnIndex;
+    const focusedCardIndex = focus.focusedCardIndex;
+    const col = await data.createColumnAtPosition(focusedColumnIndex + 1);
     if (!col) return false;
 
-    focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === col.id);
-    if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
+    if (
+      focus.focusMode !== focusMode ||
+      focus.focusedColumnIndex !== focusedColumnIndex ||
+      focus.focusedCardIndex !== focusedCardIndex
+    )
+      return false;
+
+    const createdColumnIndex = data.columns.findIndex((c) => c.id === col.id);
+    if (createdColumnIndex === -1) return false;
+
+    focus.focusedColumnIndex = createdColumnIndex;
     focus.scrollToFocusedColumn();
     return true;
   }

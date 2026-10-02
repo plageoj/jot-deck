@@ -465,6 +465,15 @@ describe("DeckData CRUD", () => {
     expect(col).not.toBeNull();
   });
 
+  it("createColumnAtPosition returns null when reloading columns fails", async () => {
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockRejectedValueOnce(
+      new Error("reload failed"),
+    );
+
+    await expect(data.createColumnAtPosition(0)).resolves.toBeNull();
+    expect(data.error).toContain("Failed to reload columns");
+  });
+
   it("createCard without position appends and returns the new card", async () => {
     const card = await data.createCard("col-active", "hello");
     expect(card).not.toBeNull();
@@ -766,7 +775,7 @@ describe("DeckData CRUD", () => {
 
   it("reloadColumns is a no-op when no current deck", async () => {
     data.currentDeck = null;
-    await expect(data.reloadColumns()).resolves.toBeUndefined();
+    await expect(data.reloadColumns()).resolves.toBe(false);
   });
 });
 

@@ -726,6 +726,37 @@ describe("ActionDispatcher card-mode actions", () => {
     expect(focus.focusedColumnIndex).toBe(0);
     expect(focus.focusedCardIndex).toBe(1);
   });
+
+  it("createColumn keeps card focus when the created column is not loaded", async () => {
+    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(
+      makeColumn("missing-column", "deck-1", { position: 1 }),
+    );
+
+    await dispatcher.executeCardAction("createColumn");
+
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(1);
+  });
+
+  it("createColumn preserves a later edit-mode transition", async () => {
+    let resolveColumn: (column: Column | null) => void;
+    const createdColumn = makeColumn("created-async", "deck-1", { position: 1 });
+    const createColumn = new Promise<Column | null>((resolve) => {
+      resolveColumn = resolve;
+    });
+    vi.spyOn(data, "createColumnAtPosition").mockReturnValue(createColumn);
+
+    const creating = dispatcher.executeCardAction("createColumn");
+    await dispatcher.executeCardAction("startEdit");
+    data.columns = [...data.columns, createdColumn];
+    resolveColumn!(createdColumn);
+    await creating;
+
+    expect(focus.focusMode).toBe("edit");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.editingCardId).toBe("c-0-b");
+  });
 });
 
 describe("ActionDispatcher.executeCommand", () => {
