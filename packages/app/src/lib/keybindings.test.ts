@@ -23,6 +23,7 @@ describe("findAction", () => {
     expect(findAction("j", "card")).toBe("moveDown");
     expect(findAction("k", "card")).toBe("moveUp");
     expect(findAction("i", "card")).toBe("startEdit");
+    expect(findAction("c", "card")).toBe("createColumn");
   });
 
   it("should find multi-key sequence action", () => {
@@ -180,6 +181,35 @@ describe("resolveKeybindings", () => {
         (b) => b.action === "openTagFilter",
       ),
     ).toBe(false);
+  });
+
+  it("preserves the column-only c binding signature", () => {
+    const columnCreate = DEFAULT_KEYBINDINGS.find(
+      (b) =>
+        b.action === "createColumn" &&
+        b.sequence === "c" &&
+        b.modes.length === 1 &&
+        b.modes[0] === "column",
+    )!;
+    const resolved = resolveKeybindings({ [signatureOf(columnCreate)]: null });
+
+    expect(signatureOf(columnCreate)).toBe("createColumn column c");
+    expect(
+      resolved.some(
+        (b) =>
+          b.action === "createColumn" &&
+          b.sequence === "c" &&
+          b.modes.includes("column"),
+      ),
+    ).toBe(false);
+    expect(
+      resolved.some(
+        (b) =>
+          b.action === "createColumn" &&
+          b.sequence === "c" &&
+          b.modes.includes("card"),
+      ),
+    ).toBe(true);
   });
 
   it("ignores overrides whose signature matches no default", () => {

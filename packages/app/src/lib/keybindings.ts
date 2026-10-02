@@ -27,6 +27,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "o", action: "createCard", modes: ["column"], description: "New card" },
   { sequence: "n", action: "createCard", modes: ["column"], description: "New card" },
   { sequence: "c", action: "createColumn", modes: ["column"], description: "New column" },
+  { sequence: "c", action: "createColumn", modes: ["card"], description: "New column" },
   { sequence: "N", action: "createColumn", modes: ["column", "card"], description: "New column" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "Delete column" },
   { sequence: "Delete", action: "deleteColumn", modes: ["column"], description: "Delete column" },

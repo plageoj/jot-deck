@@ -203,13 +203,15 @@ export class DeckData {
     this.cardsByColumn = Object.fromEntries(entries);
   }
 
-  async reloadColumns() {
-    if (!this.currentDeck) return;
+  async reloadColumns(): Promise<boolean> {
+    if (!this.currentDeck) return false;
     try {
       this.columns = await this.db.getColumnsByDeck(this.currentDeck.id);
       await this.loadCardsForColumns();
+      return true;
     } catch (e) {
       this.error = `Failed to reload columns: ${e}`;
+      return false;
     }
   }
 
@@ -570,7 +572,7 @@ export class DeckData {
         deck_id: this.currentDeck.id,
         position,
       });
-      await this.reloadColumns();
+      if (!(await this.reloadColumns())) return null;
       if (record) this.recordColumnCreate(col.id, generation);
       return col;
     } catch (e) {

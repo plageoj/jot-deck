@@ -97,7 +97,7 @@ export class ActionDispatcher {
     const result = this.keyProcessor.process(key, focus.focusMode);
     if (result.type === "action") {
       event.preventDefault();
-      this.executeAction(result.action);
+      void this.executeAction(result.action);
     } else if (result.type === "prefix") {
       event.preventDefault();
     }
@@ -109,7 +109,7 @@ export class ActionDispatcher {
     const action = findAction(key, "column");
     if (action === "showCommandPalette" || action === "showDeckPalette") {
       event.preventDefault();
-      this.executeAction(action);
+      void this.executeAction(action);
     }
   }
 
@@ -159,10 +159,10 @@ export class ActionDispatcher {
       action === "redo"
     ) {
       event.preventDefault();
-      this.executeAction(action);
+      void this.executeAction(action);
     } else if (action === "createColumn") {
       event.preventDefault();
-      this.executeColumnAction("createColumn");
+      void this.executeColumnAction("createColumn");
     }
   }
 
@@ -346,14 +346,27 @@ export class ActionDispatcher {
     }
   }
 
-  private async columnCreateColumn() {
+  private async columnCreateColumn(): Promise<boolean> {
     const { data, focus } = this;
-    const col = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
-    if (col) {
-      focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === col.id);
-      if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
-      focus.scrollToFocusedColumn();
-    }
+    const focusMode = focus.focusMode;
+    const focusedColumnIndex = focus.focusedColumnIndex;
+    const focusedCardIndex = focus.focusedCardIndex;
+    const col = await data.createColumnAtPosition(focusedColumnIndex + 1);
+    if (!col) return false;
+
+    if (
+      focus.focusMode !== focusMode ||
+      focus.focusedColumnIndex !== focusedColumnIndex ||
+      focus.focusedCardIndex !== focusedCardIndex
+    )
+      return false;
+
+    const createdColumnIndex = data.columns.findIndex((c) => c.id === col.id);
+    if (createdColumnIndex === -1) return false;
+
+    focus.focusedColumnIndex = createdColumnIndex;
+    focus.scrollToFocusedColumn();
+    return true;
   }
 
   private async columnDelete() {
@@ -423,6 +436,12 @@ export class ActionDispatcher {
         break;
       case "createCardAbove":
         await this.cardCreate(this.focus.focusedCardIndex);
+        break;
+      case "createColumn":
+        if (await this.columnCreateColumn()) {
+          // A newly created column has no card to retain card focus on.
+          this.focus.focusMode = "column";
+        }
         break;
       case "deleteCard":
         await this.cardDelete();
@@ -624,10 +643,10 @@ export class ActionDispatcher {
     this.focus.closePalette();
     switch (action) {
       case "newDeck":
-        this.data.createDeck();
+        void this.data.createDeck();
         break;
       case "restoreOnboarding":
-        this.data.restoreOnboardingDeck();
+        void this.data.restoreOnboardingDeck();
         break;
       case "switchDeck":
         this.focus.openPalette("deck");
@@ -639,7 +658,7 @@ export class ActionDispatcher {
         this.onDeleteDeck?.();
         break;
       case "newColumn":
-        this.data.createColumn();
+        void this.data.createColumn();
         break;
       case "renameColumn":
         this.onRenameColumn?.();
@@ -651,7 +670,7 @@ export class ActionDispatcher {
         this.focus.showCheatsheet = true;
         break;
       default:
-        this.executeAction(action);
+        void this.executeAction(action);
         break;
     }
   }
@@ -666,7 +685,7 @@ export class ActionDispatcher {
     if (deck && deck.id !== this.data.currentDeck?.id) {
       // Focus indices and mode are restored from persisted state via the
       // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
-      this.data.selectDeck(deck);
+      void this.data.selectDeck(deck);
     }
   }
 
