@@ -700,6 +700,7 @@ export class DeckData {
       }
       return true;
     } catch (e) {
+      if (release) this.abortCardEditRelease(session);
       this.error = `Failed to save card: ${e}`;
       return false;
     }
@@ -718,6 +719,7 @@ export class DeckData {
       this.completeCardEdit(session);
       return true;
     } catch (e) {
+      this.abortCardEditRelease(session);
       this.error = `Failed to release card edit: ${e}`;
       // Keep the session so the UI can retry without abandoning the lock owner.
       return false;
@@ -758,6 +760,16 @@ export class DeckData {
     this.stopEditLeaseRenewal(session);
     this.releasingEditSessions.delete(session);
     this.editSessions.delete(session.cardId);
+  }
+
+  private abortCardEditRelease(session: EditSession) {
+    this.releasingEditSessions.delete(session);
+    if (
+      this.editSessions.get(session.cardId) === session &&
+      !this.editLeaseTimers.has(session)
+    ) {
+      this.startEditLeaseRenewal(session);
+    }
   }
 
   private renewEditLease(session: EditSession) {
