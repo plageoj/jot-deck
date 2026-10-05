@@ -98,7 +98,7 @@ export class ActionDispatcher {
     const result = this.keyProcessor.process(key, focus.focusMode);
     if (result.type === "action") {
       event.preventDefault();
-      this.executeAction(result.action);
+      this.dispatchAction(result.action);
     } else if (result.type === "prefix") {
       event.preventDefault();
     }
@@ -110,7 +110,7 @@ export class ActionDispatcher {
     const action = findAction(key, "column");
     if (action === "showCommandPalette" || action === "showDeckPalette") {
       event.preventDefault();
-      this.executeAction(action);
+      this.dispatchAction(action);
     }
   }
 
@@ -160,10 +160,10 @@ export class ActionDispatcher {
       action === "redo"
     ) {
       event.preventDefault();
-      this.executeAction(action);
+      this.dispatchAction(action);
     } else if (action === "createColumn") {
       event.preventDefault();
-      this.executeColumnAction("createColumn");
+      this.runTask(this.executeColumnAction("createColumn"));
     }
   }
 
@@ -260,6 +260,16 @@ export class ActionDispatcher {
     } else if (this.focus.focusMode === "card") {
       await this.executeCardAction(actionName, param);
     }
+  }
+
+  private dispatchAction(action: string) {
+    this.runTask(this.executeAction(action));
+  }
+
+  private runTask(task: Promise<unknown>) {
+    void task.catch((error) => {
+      this.data.error = `Failed to execute action: ${error}`;
+    });
   }
 
   // ============================================
@@ -636,10 +646,10 @@ export class ActionDispatcher {
     this.focus.closePalette();
     switch (action) {
       case "newDeck":
-        this.data.createDeck();
+        this.runTask(this.data.createDeck());
         break;
       case "restoreOnboarding":
-        this.data.restoreOnboardingDeck();
+        this.runTask(this.data.restoreOnboardingDeck());
         break;
       case "switchDeck":
         this.focus.openPalette("deck");
@@ -663,7 +673,7 @@ export class ActionDispatcher {
         this.focus.showCheatsheet = true;
         break;
       default:
-        this.executeAction(action);
+        this.dispatchAction(action);
         break;
     }
   }
