@@ -572,7 +572,21 @@ export class DeckData {
         deck_id: this.currentDeck.id,
         position,
       });
-      if (!(await this.reloadColumns())) return null;
+      if (!(await this.reloadColumns())) {
+        // The column was created before the reload failed. Keep local state and
+        // history consistent with the database so retrying cannot create a duplicate.
+        if (!this.columns.some((column) => column.id === col.id)) {
+          this.columns = [
+            ...this.columns.map((column) =>
+              column.position >= position
+                ? { ...column, position: column.position + 1 }
+                : column,
+            ),
+            col,
+          ].sort((a, b) => a.position - b.position);
+        }
+        this.cardsByColumn[col.id] ??= [];
+      }
       if (record) this.recordColumnCreate(col.id, generation);
       return col;
     } catch (e) {

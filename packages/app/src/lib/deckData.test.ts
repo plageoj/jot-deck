@@ -465,12 +465,17 @@ describe("DeckData CRUD", () => {
     expect(col).not.toBeNull();
   });
 
-  it("createColumnAtPosition returns null when reloading columns fails", async () => {
+  it("createColumnAtPosition keeps the created column when reloading columns fails", async () => {
     vi.spyOn(mockBackend, "getColumnsByDeck").mockRejectedValueOnce(
       new Error("reload failed"),
     );
 
-    await expect(data.createColumnAtPosition(0)).resolves.toBeNull();
+    const col = await data.createColumnAtPosition(0);
+
+    expect(col).not.toBeNull();
+    expect(data.columns.map((column) => column.id)).toContain(col!.id);
+    await data.history.undo();
+    expect(state.deleteColumnCalls).toContain(col!.id);
     expect(data.error).toContain("Failed to reload columns");
   });
 
