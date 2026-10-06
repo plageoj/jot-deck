@@ -17,6 +17,7 @@ export class ActionDispatcher {
   onDeleteDeck: (() => void) | null = null;
   onRenameColumn: (() => void) | null = null;
   onDeleteColumn: (() => void) | null = null;
+  onStartEdit: ((cardId: string) => void | Promise<void>) | null = null;
 
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;
@@ -97,7 +98,7 @@ export class ActionDispatcher {
     const result = this.keyProcessor.process(key, focus.focusMode);
     if (result.type === "action") {
       event.preventDefault();
-      void this.executeAction(result.action);
+      this.dispatchAction(result.action);
     } else if (result.type === "prefix") {
       event.preventDefault();
     }
@@ -109,7 +110,7 @@ export class ActionDispatcher {
     const action = findAction(key, "column");
     if (action === "showCommandPalette" || action === "showDeckPalette") {
       event.preventDefault();
-      void this.executeAction(action);
+      this.dispatchAction(action);
     }
   }
 
@@ -159,10 +160,10 @@ export class ActionDispatcher {
       action === "redo"
     ) {
       event.preventDefault();
-      void this.executeAction(action);
+      this.dispatchAction(action);
     } else if (action === "createColumn") {
       event.preventDefault();
-      void this.executeColumnAction("createColumn");
+      this.runTask(this.executeColumnAction("createColumn"));
     }
   }
 
@@ -261,6 +262,16 @@ export class ActionDispatcher {
     }
   }
 
+  private dispatchAction(action: string) {
+    this.runTask(this.executeAction(action));
+  }
+
+  private runTask(task: Promise<unknown>) {
+    void task.catch((error) => {
+      this.data.error = `Failed to execute action: ${error}`;
+    });
+  }
+
   // ============================================
   // Column focus actions
   // ============================================
@@ -342,7 +353,13 @@ export class ActionDispatcher {
     const column = this.focusedColumn;
     if (column) {
       const card = await data.createCard(column.id);
-      if (card) focus.editingCardId = card.id;
+      if (card) {
+        const cards = data.cardsByColumn[column.id] ?? [];
+        focus.focusedCardIndex = cards.findIndex((candidate) => candidate.id === card.id);
+        focus.focusMode = "card";
+        if (this.onStartEdit) await this.onStartEdit(card.id);
+        else focus.editingCardId = card.id;
+      }
     }
   }
 
@@ -544,7 +561,14 @@ export class ActionDispatcher {
   private cardStartEdit() {
     const card = this.focusedCard;
     // A card being streamed by a Reporter is read-only (007 §7).
-    if (card && !this.data.isStreaming(card.id)) this.focus.startEdit(card.id);
+    if (card && !this.data.isStreaming(card.id)) {
+      if (this.onStartEdit) {
+        const onStartEdit = this.onStartEdit;
+        this.runTask(Promise.resolve().then(() => onStartEdit(card.id)));
+      } else {
+        this.focus.startEdit(card.id);
+      }
+    }
   }
 
   private async cardCreate(position: number) {
@@ -556,7 +580,9 @@ export class ActionDispatcher {
         const updated = data.cardsByColumn[column.id] ?? [];
         focus.focusedCardIndex = updated.findIndex((c) => c.id === newCard.id);
         if (focus.focusedCardIndex === -1) focus.focusedCardIndex = 0;
-        focus.startEdit(newCard.id);
+        focus.focusMode = "card";
+        if (this.onStartEdit) await this.onStartEdit(newCard.id);
+        else focus.startEdit(newCard.id);
       }
     }
   }
@@ -643,10 +669,10 @@ export class ActionDispatcher {
     this.focus.closePalette();
     switch (action) {
       case "newDeck":
-        void this.data.createDeck();
+        this.runTask(this.data.createDeck());
         break;
       case "restoreOnboarding":
-        void this.data.restoreOnboardingDeck();
+        this.runTask(this.data.restoreOnboardingDeck());
         break;
       case "switchDeck":
         this.focus.openPalette("deck");
@@ -658,7 +684,7 @@ export class ActionDispatcher {
         this.onDeleteDeck?.();
         break;
       case "newColumn":
-        void this.data.createColumn();
+        this.runTask(this.data.createColumn());
         break;
       case "renameColumn":
         this.onRenameColumn?.();
@@ -670,7 +696,7 @@ export class ActionDispatcher {
         this.focus.showCheatsheet = true;
         break;
       default:
-        void this.executeAction(action);
+        this.dispatchAction(action);
         break;
     }
   }
@@ -685,7 +711,7 @@ export class ActionDispatcher {
     if (deck && deck.id !== this.data.currentDeck?.id) {
       // Focus indices and mode are restored from persisted state via the
       // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
-      void this.data.selectDeck(deck);
+      this.runTask(this.data.selectDeck(deck));
     }
   }
 

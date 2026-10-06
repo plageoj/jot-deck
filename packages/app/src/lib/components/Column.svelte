@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Column, Card } from "$lib/types";
+  import type { EditSession } from "$lib/deckData.svelte";
   import CardComponent from "./Card.svelte";
 
   interface Props {
@@ -8,16 +9,21 @@
     focused?: boolean;
     focusedCardIndex?: number;
     editingCardId?: string | null;
+    editSession?: EditSession | null;
     filteredCardIds?: Set<string> | null;
     activeTag?: string | null;
     /** card_id → in-progress streamed text for cards receiving a Reporter
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
     onAddCard?: () => void;
-    onSaveCard?: (cardId: string, content: string) => void;
-    onCancelEdit?: () => void;
+    onSaveCard?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: (cardId: string) => void;
-    onExitEdit?: () => void;
+    onExitEdit?: (session: EditSession) => void;
+    onRegisterExit?: (
+      session: EditSession,
+      exit: (() => Promise<boolean>) | null,
+    ) => void;
     onFocusColumn?: () => void;
     onFocusCard?: (cardIndex: number) => void;
     onTagClick?: (tagName: string) => void;
@@ -30,6 +36,7 @@
     focused = false,
     focusedCardIndex = -1,
     editingCardId = null,
+    editSession = null,
     filteredCardIds = null,
     activeTag = null,
     streamingText = {},
@@ -38,6 +45,7 @@
     onCancelEdit,
     onStartEdit,
     onExitEdit,
+    onRegisterExit,
     onFocusColumn,
     onFocusCard,
     onTagClick,
@@ -85,13 +93,15 @@
           {card}
           focused={index === focusedCardIndex}
           editing={editingCardId === card.id}
+          editSession={editSession?.cardId === card.id ? editSession : null}
           dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
           streamingText={streamingText[card.id] ?? null}
           {activeTag}
-          onSave={(content) => onSaveCard?.(card.id, content)}
+          onSave={onSaveCard}
           {onCancelEdit}
           onStartEdit={() => onStartEdit?.(card.id)}
           {onExitEdit}
+          {onRegisterExit}
           onFocusCard={onFocusCard ? () => onFocusCard(index) : undefined}
           {onTagClick}
           {onTagSuggestions}
