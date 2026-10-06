@@ -2068,6 +2068,7 @@ dependencies = [
 name = "jot-deck-tauri"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "jot-deck-core",
  "jot-deck-reporter-host",
  "serde",

@@ -152,10 +152,8 @@ Reporter（外部ストリーミング入力アダプタ）と汎用エージェ
 Reporter・MCP 書き込みのどちらより先に入れる。両パスが依存する。
 * `cards` テーブルへ `locked_by` / `locked_at` を追加するスキーマ移行（既存 DB 向けの移行ガード付き）
 * カード編集の競合制御（占有ロック＋楽観ロック、`002` §5）― core の `acquire_lock` / `release_lock` / `commit_stream_and_release` / `update_content_cas` に集約し、Reporter の streaming 占有・MCP patch の楽観ロックが共通で乗る
+* GUI 編集パスも編集開始時に占有ロックを取得し、保存時は `updated_at` を条件に CAS 更新、保存・破棄・編集終了時にロックを解放する
 * GUI の**外部変更観測**: `PRAGMA data_version` の約 1s ポーリングで `external-db-change` を emit し、frontend 側で 250ms コアレスしてカラムを再読み込みする（ブリッジ/CLI の外部書き込み用）。ホスト内 Reporter の書き込みはホストが `reporter-change` イベントで直接通知する
-
-#### 未実装
-* GUI 自身の編集パスが占有ロック / CAS に参加していない（`update_card_content` は `expected_updated_at` を取らず、ロックも取得しない）。エージェント間・Reporter 間の競合は制御されるが、人間の GUI 編集と外部書き込みの競合は未制御
 
 ### 成果物（Reporter 基盤）
 * ローカル書き込み口 ✅（ホスト spawn ＋ stdio、認証スコープ・採番一元化・変更通知。`crates/reporter-host`）
@@ -248,7 +246,7 @@ Phase 5 で内部的に切り出した配管パッケージ（`007` §9.5）を�
 | **Tauri 統合** | Phase 2 | 完了 |
 | **ローカル動作版** | Phase 3.1-3.10 | 完了 |
 | **AI KB 化（MCP 読み取り面）** | Phase 4 | 完了 |
-| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージの切り出し / GUI 編集パスの競合制御。参照実装 Reporter は別リポジトリで開発中） |
+| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージの切り出し。参照実装 Reporter は別リポジトリで開発中） |
 | **MVP リリース（Reporter 課金）** | Phase 6 | 未着手 |
 | **チュートリアル** | Phase 7 | 未着手 |
 | **同期機能リリース** | Phase 8 | 未着手 |
