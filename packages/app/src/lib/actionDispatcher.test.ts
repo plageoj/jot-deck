@@ -771,9 +771,15 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(calls).toEqual([1]);
   });
 
-  it("newColumn delegates to data.createColumn", async () => {
+  it("newColumn inserts to the right of the focused column and focuses it", async () => {
+    state.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
+    data.columns = [...state.columns];
+    focus.focusedColumnIndex = 0;
     await dispatcher.executeCommand("newColumn");
-    expect(state.createColumnCalls).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
+    });
+    expect(state.createColumnCalls).toEqual([{ deck_id: "deck-1", position: 1 }]);
   });
 
   it("default branch forwards unknown actions through executeAction", async () => {
