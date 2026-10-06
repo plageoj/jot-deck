@@ -15,6 +15,8 @@ pnpm dev              # Start Tauri dev server (main app)
 pnpm web:dev          # Start landing page dev server
 ```
 
+When starting work in a fresh worktree, run `pnpm install` from the repository root before working with the app or web packages so workspace dependencies are available.
+
 ### Testing
 ```bash
 pnpm --filter app test        # Run frontend tests in watch mode
