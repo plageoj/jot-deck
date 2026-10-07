@@ -3,6 +3,8 @@ const STATE_MARKER = '<!-- coderabbit-review-queue-state -->';
 const STATE_VERSION = 1;
 const REQUEST_COOLDOWN_MS = 60 * 60 * 1000;
 const CODERABBIT_BOT = 'coderabbitai[bot]';
+const WORKFLOW_BOT = 'github-actions[bot]';
+const TRUSTED_STATE_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const RATE_LIMIT_MARKER = 'rate limited by coderabbit.ai';
 const RATE_LIMIT_DELAY = /Next included review available in\s+(\d+)\s+(minute|minutes|hour|hours)/i;
 const REVIEW_COMMAND = '@coderabbitai review';
@@ -72,7 +74,14 @@ function parseState(body) {
   if (!match) return null;
   const state = JSON.parse(match[1]);
   if (state.version !== STATE_VERSION ||
-      !Array.isArray(state.blockedPrs)) {
+      !Array.isArray(state.blockedPrs) ||
+      !state.blockedPrs.every(number => Number.isInteger(number) && number > 0) ||
+      ![null, undefined].includes(state.lastRequestAt) &&
+        !Number.isFinite(Date.parse(state.lastRequestAt)) ||
+      ![null, undefined].includes(state.cooldownUntil) &&
+        !Number.isFinite(Date.parse(state.cooldownUntil)) ||
+      ![null, undefined].includes(state.lastRequestPr) &&
+        (!Number.isInteger(state.lastRequestPr) || state.lastRequestPr < 1)) {
     throw new Error('CodeRabbit queue state comment has an unsupported format.');
   }
   return { ...defaultState(), ...state };
@@ -104,10 +113,25 @@ async function run({ github, context, core }) {
     issue_number: STATE_ISSUE_NUMBER,
     per_page: 100,
   });
-  let stateComment = stateComments
-    .filter(comment => comment.body?.includes(STATE_MARKER))
-    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
-  let state = stateComment ? parseState(stateComment.body) : defaultState();
+  const trustedStateComments = stateComments
+    .filter(comment => comment.body?.includes(STATE_MARKER) &&
+      (comment.user?.login === WORKFLOW_BOT ||
+        TRUSTED_STATE_ASSOCIATIONS.has(comment.author_association)))
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
+  let stateComment = null;
+  let state = null;
+  for (const comment of trustedStateComments) {
+    try {
+      state = parseState(comment.body);
+      if (state) {
+        stateComment = comment;
+        break;
+      }
+    } catch (error) {
+      core.warning(`Ignoring malformed CodeRabbit queue state comment ${comment.id}: ${error.message}`);
+    }
+  }
+  if (!stateComment) state = defaultState();
 
   if (!stateComment) {
     const created = await github.rest.issues.createComment({
@@ -207,7 +231,9 @@ async function run({ github, context, core }) {
     if (pr.draft || state.blockedPrs.includes(pr.number)) continue;
     const botComments = comments.filter(comment => comment.user?.login === CODERABBIT_BOT);
     const workflowRequests = comments
-      .filter(comment => comment.body?.trim() === REVIEW_COMMAND)
+      .filter(comment => comment.body?.trim() === REVIEW_COMMAND &&
+        (comment.user?.login === WORKFLOW_BOT ||
+          TRUSTED_STATE_ASSOCIATIONS.has(comment.author_association)))
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
     const latestRequest = workflowRequests[0];
     const hasCoderabbitReview = reviews.some(review =>
@@ -224,10 +250,21 @@ async function run({ github, context, core }) {
     if (hasCoderabbitReview) continue;
     if (latestRequest) {
       const requestTime = Date.parse(latestRequest.created_at);
-      const gotRateLimited = botComments.some(comment =>
-        Date.parse(comment.created_at) > requestTime &&
-        comment.body?.toLowerCase().includes(RATE_LIMIT_MARKER));
-      if (!gotRateLimited) continue;
+      const headCommit = await github.rest.repos.getCommit({
+        owner,
+        repo,
+        ref: pr.head.sha,
+      });
+      const headCommitDate = Date.parse(
+        headCommit.data.commit.committer?.date ??
+        headCommit.data.commit.author?.date,
+      );
+      if (requestTime >= headCommitDate) {
+        const gotRateLimited = botComments.some(comment =>
+          Date.parse(comment.created_at) > requestTime &&
+          comment.body?.toLowerCase().includes(RATE_LIMIT_MARKER));
+        if (!gotRateLimited) continue;
+      }
     }
     candidates.push(pr);
   }
