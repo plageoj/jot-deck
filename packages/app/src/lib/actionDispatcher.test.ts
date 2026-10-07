@@ -775,11 +775,13 @@ describe("ActionDispatcher.executeCommand", () => {
     state.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
     data.columns = [...state.columns];
     focus.focusedColumnIndex = 0;
+    focus.previousFocusMode = "card";
     await dispatcher.executeCommand("newColumn");
     await vi.waitFor(() => {
       expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
     });
     expect(state.createColumnCalls).toEqual([{ deck_id: "deck-1", position: 1 }]);
+    expect(focus.focusMode).toBe("column");
   });
 
   it("default branch forwards unknown actions through executeAction", async () => {

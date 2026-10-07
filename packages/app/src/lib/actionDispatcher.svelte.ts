@@ -378,6 +378,9 @@ export class ActionDispatcher {
     const index = data.columns.findIndex((column) => column.id === columnId);
     if (index !== -1) {
       focus.focusedColumnIndex = index;
+      if ((data.cardsByColumn[columnId] ?? []).length === 0) {
+        focus.focusMode = "column";
+      }
       focus.scrollToFocusedColumn();
     }
   }
