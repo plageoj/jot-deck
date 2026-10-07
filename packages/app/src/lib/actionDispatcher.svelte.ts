@@ -4,6 +4,7 @@ import type { Card, Column } from "./types";
 import { findAction } from "./keybindings";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
+import { executeGlobalAction } from "./actionDispatchHelpers";
 
 const HALF_PAGE_SIZE = 5;
 
@@ -172,51 +173,6 @@ export class ActionDispatcher {
   // ============================================
 
   async executeAction(action: string) {
-    if (action === "showCommandPalette") {
-      this.focus.openPalette("command");
-      return;
-    }
-
-    if (action === "showDeckPalette") {
-      this.focus.openPalette("deck");
-      return;
-    }
-
-    if (action === "showColumnPalette") {
-      this.focus.openPalette("column");
-      return;
-    }
-
-    if (action === "openTagFilter") {
-      this.focus.openPalette("tag");
-      return;
-    }
-
-    if (action === "showTrashPalette") {
-      this.focus.openPalette("trash");
-      return;
-    }
-
-    if (action === "showSettings") {
-      this.focus.showSettings = true;
-      return;
-    }
-
-    if (action === "showKeybindings") {
-      this.focus.showKeybindings = true;
-      return;
-    }
-
-    if (action === "showAbout") {
-      this.focus.showAbout = true;
-      return;
-    }
-
-    if (action === "showReporters") {
-      this.focus.showReporters = true;
-      return;
-    }
-
     if (action === "checkForUpdates") {
       // Surface the result inline in the About dialog, then kick off the
       // check — a manual check that finds nothing is otherwise silent.
@@ -225,28 +181,9 @@ export class ActionDispatcher {
       return;
     }
 
-    if (action === "clearTagFilter") {
-      this.data.clearTagFilter();
-      return;
-    }
-
-    if (action === "undo") {
-      try {
-        await this.data.history.undo();
-      } catch (e) {
-        this.data.error = `Failed to undo: ${e}`;
-      }
-      return;
-    }
-
-    if (action === "redo") {
-      try {
-        await this.data.history.redo();
-      } catch (e) {
-        this.data.error = `Failed to redo: ${e}`;
-      }
-      return;
-    }
+    const globalAction = executeGlobalAction(action, this.data, this.focus);
+    if (globalAction === true) return;
+    if (globalAction instanceof Promise && (await globalAction)) return;
 
     const [actionName, param] = action.split(":");
 
