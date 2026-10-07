@@ -563,8 +563,12 @@ export class DeckData {
       if (record && previousName !== undefined && previousName !== name) {
         this.history.push(
           {
-            undo: () => this.renameColumnImpl(id, previousName),
-            redo: () => this.renameColumnImpl(id, name),
+            undo: async () => {
+              await this.renameColumnImpl(id, previousName);
+            },
+            redo: async () => {
+              await this.renameColumnImpl(id, name);
+            },
           },
           generation,
         );
