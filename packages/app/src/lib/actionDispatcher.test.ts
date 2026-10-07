@@ -784,6 +784,23 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(focus.focusMode).toBe("column");
   });
 
+  it("newColumn preserves card focus when the resulting column has cards", async () => {
+    const column = makeColumn("col-0", "deck-1", { position: 0 });
+    state.columns = [column];
+    data.columns = [column];
+    data.cardsByColumn[column.id] = [makeCard("card-0", column.id)];
+    focus.focusedColumnIndex = 0;
+    focus.previousFocusMode = "card";
+    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(column);
+
+    await dispatcher.executeCommand("newColumn");
+    await vi.waitFor(() => {
+      expect(data.columns[focus.focusedColumnIndex]?.id).toBe(column.id);
+    });
+
+    expect(focus.focusMode).toBe("card");
+  });
+
   it("default branch forwards unknown actions through executeAction", async () => {
     await dispatcher.executeCommand("openTagFilter");
     expect(focus.activePalette).toBe("tag");
