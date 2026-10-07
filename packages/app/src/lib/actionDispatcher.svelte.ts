@@ -302,6 +302,9 @@ export class ActionDispatcher {
       case "createColumn":
         await this.columnCreateColumn();
         break;
+      case "renameColumn":
+        this.onRenameColumn?.();
+        break;
       case "deleteColumn":
         await this.columnDelete();
         break;
@@ -434,6 +437,9 @@ export class ActionDispatcher {
         break;
       case "startEdit":
         this.cardStartEdit();
+        break;
+      case "renameColumn":
+        this.onRenameColumn?.();
         break;
       case "createCardBelow":
         await this.cardCreate(this.focus.focusedCardIndex + 1);
