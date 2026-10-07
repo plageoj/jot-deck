@@ -22,9 +22,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Require a human-authenticated token
+        if: ${{ secrets.CODERABBIT_REVIEW_PAT == '' }}
+        run: |
+          echo "::error::Set the CODERABBIT_REVIEW_PAT repository secret to a human user's token."
+          exit 1
+
       - name: Request one eligible CodeRabbit review
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.CODERABBIT_REVIEW_PAT }}
           script: |
             await require('./.github/scripts/coderabbit-review-queue.js').run({
               github, context, core,
