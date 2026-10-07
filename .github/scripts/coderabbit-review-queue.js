@@ -6,6 +6,52 @@ const CODERABBIT_BOT = 'coderabbitai[bot]';
 const RATE_LIMIT_MARKER = 'rate limited by coderabbit.ai';
 const RATE_LIMIT_DELAY = /Next included review available in\s+(\d+)\s+(minute|minutes|hour|hours)/i;
 const REVIEW_COMMAND = '@coderabbitai review';
+const FAILED_CHECK_CONCLUSIONS = new Set([
+  'action_required',
+  'failure',
+  'startup_failure',
+  'timed_out',
+]);
+
+async function getPrBlockReason(github, owner, repo, pr) {
+  const [pull, checkRuns, statuses] = await Promise.all([
+    github.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: pr.number,
+    }),
+    github.paginate(github.rest.checks.listForRef, {
+      owner,
+      repo,
+      ref: pr.head.sha,
+      filter: 'latest',
+      per_page: 100,
+    }),
+    github.paginate(github.rest.repos.listCommitStatusesForRef, {
+      owner,
+      repo,
+      ref: pr.head.sha,
+      per_page: 100,
+    }),
+  ]);
+
+  if (pull.data.mergeable === false || pull.data.mergeable_state === 'dirty') {
+    return 'merge conflict';
+  }
+  if (checkRuns.some(check => FAILED_CHECK_CONCLUSIONS.has(check.conclusion))) {
+    return 'failed check run';
+  }
+
+  const latestStatusByContext = new Map();
+  statuses
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+    .forEach(status => latestStatusByContext.set(status.context, status));
+  if ([...latestStatusByContext.values()].some(status =>
+    status.state === 'failure' || status.state === 'error')) {
+    return 'failed commit status';
+  }
+  return null;
+}
 
 function defaultState() {
   return {
@@ -193,7 +239,20 @@ async function run({ github, context, core }) {
 
   candidates.sort((a, b) =>
     Date.parse(a.created_at) - Date.parse(b.created_at) || a.number - b.number);
-  const selected = candidates[0];
+  let selected = null;
+  for (const pr of candidates) {
+    const blockReason = await getPrBlockReason(github, owner, repo, pr);
+    if (blockReason) {
+      core.info(`Skipping PR #${pr.number}: ${blockReason}.`);
+      continue;
+    }
+    selected = pr;
+    break;
+  }
+  if (!selected) {
+    core.info('All waiting PRs are blocked by failed checks or merge conflicts.');
+    return;
+  }
   const requestTime = new Date().toISOString();
 
   // Persist the shared cooldown before posting, so retries cannot spam comments
