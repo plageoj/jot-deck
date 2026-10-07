@@ -3,7 +3,6 @@ const STATE_MARKER = '<!-- coderabbit-review-queue-state -->';
 const STATE_VERSION = 1;
 const REQUEST_COOLDOWN_MS = 60 * 60 * 1000;
 const CODERABBIT_BOT = 'coderabbitai[bot]';
-const WORKFLOW_BOT = 'github-actions[bot]';
 const RATE_LIMIT_MARKER = 'rate limited by coderabbit.ai';
 const RATE_LIMIT_DELAY = /Next included review available in\s+(\d+)\s+(minute|minutes|hour|hours)/i;
 const REVIEW_COMMAND = '@coderabbitai review';
@@ -59,9 +58,9 @@ async function run({ github, context, core }) {
     issue_number: STATE_ISSUE_NUMBER,
     per_page: 100,
   });
-  let stateComment = stateComments.find(comment =>
-    comment.user?.login === WORKFLOW_BOT &&
-    comment.body?.includes(STATE_MARKER));
+  let stateComment = stateComments
+    .filter(comment => comment.body?.includes(STATE_MARKER))
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
   let state = stateComment ? parseState(stateComment.body) : defaultState();
 
   if (!stateComment) {
@@ -162,8 +161,7 @@ async function run({ github, context, core }) {
     if (pr.draft || state.blockedPrs.includes(pr.number)) continue;
     const botComments = comments.filter(comment => comment.user?.login === CODERABBIT_BOT);
     const workflowRequests = comments
-      .filter(comment => comment.user?.login === WORKFLOW_BOT &&
-        comment.body?.trim() === REVIEW_COMMAND)
+      .filter(comment => comment.body?.trim() === REVIEW_COMMAND)
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
     const latestRequest = workflowRequests[0];
     const hasCoderabbitReview = reviews.some(review =>
