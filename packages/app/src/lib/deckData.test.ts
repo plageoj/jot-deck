@@ -526,6 +526,38 @@ describe("DeckData CRUD", () => {
     expect(data.error).toContain("Failed to reload columns");
   });
 
+  it("createColumnAtPosition does not update a deck selected during reload", async () => {
+    const createdColumn = makeColumn("created-in-deck-1", "deck-1", { position: 1 });
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let rejectReload: (error: Error) => void;
+    let signalReloadStarted!: () => void;
+    const reloadStarted = new Promise<void>((resolve) => {
+      signalReloadStarted = resolve;
+    });
+
+    vi.spyOn(mockBackend, "createColumn").mockResolvedValueOnce(createdColumn);
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectReload = reject;
+          signalReloadStarted();
+        }),
+    );
+
+    const creating = data.createColumnAtPosition(1);
+    await reloadStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    data.history.clear();
+    rejectReload!(new Error("reload failed"));
+
+    await expect(creating).resolves.toEqual(createdColumn);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+  });
+
   it("createCard without position appends and returns the new card", async () => {
     const card = await data.createCard("col-active", "hello");
     expect(card).not.toBeNull();
