@@ -2,14 +2,14 @@ name: Queue CodeRabbit reviews
 
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
   checks: read
   issues: write
-  pull-requests: read
+  pull-requests: write
   statuses: read
 
 concurrency:
