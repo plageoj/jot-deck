@@ -558,6 +558,61 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
+  it("reloadColumns ignores a successful result for a deck that is no longer active", async () => {
+    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let resolveReload!: (columns: Column[]) => void;
+    const reloadStarted = new Promise<void>((resolve) => {
+      vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
+        () =>
+          new Promise((reloadResolve) => {
+            resolveReload = reloadResolve;
+            resolve();
+          }),
+      );
+    });
+
+    const reloading = data.reloadColumns();
+    await reloadStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    resolveReload([staleColumn]);
+
+    await expect(reloading).resolves.toBe(false);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+  });
+
+  it("reloadColumns ignores a deck switch while loading cards", async () => {
+    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let resolveCards!: (cards: Card[]) => void;
+    const cardsStarted = new Promise<void>((resolve) => {
+      vi.spyOn(mockBackend, "getCardsByColumn").mockImplementationOnce(
+        () =>
+          new Promise((cardsResolve) => {
+            resolveCards = cardsResolve;
+            resolve();
+          }),
+      );
+    });
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockResolvedValueOnce([staleColumn]);
+
+    const reloading = data.reloadColumns();
+    await cardsStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    resolveCards([]);
+
+    await expect(reloading).resolves.toBe(false);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+  });
+
   it("createCard without position appends and returns the new card", async () => {
     const card = await data.createCard("col-active", "hello");
     expect(card).not.toBeNull();

@@ -205,9 +205,9 @@ export class DeckData {
     }
   }
 
-  async loadCardsForColumns() {
+  private async getCardsForColumns(columns: Column[]): Promise<Record<string, Card[]>> {
     const entries = await Promise.all(
-      this.columns.map(async (col) => {
+      columns.map(async (col) => {
         try {
           return [col.id, await this.db.getCardsByColumn(col.id)] as const;
         } catch (e) {
@@ -216,17 +216,30 @@ export class DeckData {
         }
       }),
     );
-    this.cardsByColumn = Object.fromEntries(entries);
+    return Object.fromEntries(entries);
+  }
+
+  async loadCardsForColumns() {
+    this.cardsByColumn = await this.getCardsForColumns(this.columns);
   }
 
   async reloadColumns(): Promise<boolean> {
     if (!this.currentDeck) return false;
+    const deckId = this.currentDeck.id;
     try {
-      this.columns = await this.db.getColumnsByDeck(this.currentDeck.id);
-      await this.loadCardsForColumns();
+      const columns = await this.db.getColumnsByDeck(deckId);
+      if (this.currentDeck?.id !== deckId) return false;
+
+      const cardsByColumn = await this.getCardsForColumns(columns);
+      if (this.currentDeck?.id !== deckId) return false;
+
+      this.columns = columns;
+      this.cardsByColumn = cardsByColumn;
       return true;
     } catch (e) {
-      this.error = `Failed to reload columns: ${e}`;
+      if (this.currentDeck?.id === deckId) {
+        this.error = `Failed to reload columns: ${e}`;
+      }
       return false;
     }
   }
