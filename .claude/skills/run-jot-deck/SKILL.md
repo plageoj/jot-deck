@@ -108,7 +108,7 @@ Linux; the browser path above covers all frontend work.
 ## Test / check
 
 ```bash
-pnpm --filter app test:run    # vitest — 275 tests
+pnpm --filter app test:run    # vitest — all tests should pass
 pnpm --filter app check       # svelte-check — 0 errors expected
 ```
 
@@ -127,7 +127,7 @@ pnpm --filter app check       # svelte-check — 0 errors expected
   see `wasm-backend.ts`). The app needs network on first load; offline → blank app.
 - **Data is in-memory** in the browser path — a reload starts fresh. The `smoke`
   flow always creates its own clean deck via the deck switcher (`Ctrl+P` →
-  "+ New Deck").
+  "New deck").
 - **`pnpm dev` needs port 1420 free** (`strictPort: true`). A stale dev server
   makes a new one exit silently — kill it (`pkill -f 'vite/bin/vite.js'`) first.
 
