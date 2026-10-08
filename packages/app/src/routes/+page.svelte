@@ -91,7 +91,9 @@
   });
 
   let deckComponent = $state<DeckComponent | null>(null);
-  let editSession = $state<EditSession | null>(null);
+  // Raw: DeckData tracks sessions by object identity, so the editor must
+  // receive the exact object it returned — not a deep $state proxy of it.
+  let editSession = $state.raw<EditSession | null>(null);
   let activeEditorExit: (() => Promise<boolean>) | null = null;
   let editTransition = Promise.resolve();
 
