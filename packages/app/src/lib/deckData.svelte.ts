@@ -205,12 +205,21 @@ export class DeckData {
     }
   }
 
-  private async getCardsForColumns(columns: Column[]): Promise<Record<string, Card[]>> {
+  /**
+   * Fetch cards for each column. By default a failed column degrades to an empty
+   * list; with `strict`, the first failure rejects so callers can keep their
+   * current card state instead of replacing it with empty columns.
+   */
+  private async getCardsForColumns(
+    columns: Column[],
+    strict = false,
+  ): Promise<Record<string, Card[]>> {
     const entries = await Promise.all(
       columns.map(async (col) => {
         try {
           return [col.id, await this.db.getCardsByColumn(col.id)] as const;
         } catch (e) {
+          if (strict) throw e;
           console.error(`Failed to load cards for column ${col.id}:`, e);
           return [col.id, []] as const;
         }
@@ -230,7 +239,7 @@ export class DeckData {
       const columns = await this.db.getColumnsByDeck(deckId);
       if (this.currentDeck?.id !== deckId) return false;
 
-      const cardsByColumn = await this.getCardsForColumns(columns);
+      const cardsByColumn = await this.getCardsForColumns(columns, true);
       if (this.currentDeck?.id !== deckId) return false;
 
       this.columns = columns;

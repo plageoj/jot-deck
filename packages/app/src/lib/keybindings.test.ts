@@ -291,6 +291,22 @@ describe("setKeybindingOverrides", () => {
     ]);
     expect(findAction("z", "card")).toBe("undo");
   });
+
+  it("lets a user-added binding win over a default on the same key", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "c", action: "copyCard", modes: ["card"], description: "Copy card" },
+    ]);
+    expect(findAction("c", "card")).toBe("copyCard");
+    expect(findAction("c", "column")).toBe("createColumn");
+  });
+
+  it("lets a remapped default win over a default on the same key", () => {
+    const copyCard = DEFAULT_KEYBINDINGS.find(
+      (b) => b.action === "copyCard" && b.sequence === "yy",
+    )!;
+    setKeybindingOverrides({ [signatureOf(copyCard)]: "c" });
+    expect(findAction("c", "card")).toBe("copyCard");
+  });
 });
 
 describe("findKeybindingConflicts", () => {
