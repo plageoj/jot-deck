@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Card, Column, Deck } from "$lib/types";
-import type { DatabaseBackend } from "$lib/db";
+import type { Card, Column, Deck } from "#lib/types.ts";
+import type { DatabaseBackend } from "#lib/db/index.ts";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 import { updaterStore } from "./updater.svelte";
 
@@ -105,7 +105,7 @@ const mockBackend: Partial<DatabaseBackend> = {
   },
 };
 
-vi.mock("$lib/db", () => ({
+vi.mock("#lib/db/index.ts", () => ({
   getDatabase: async () => mockBackend,
 }));
 

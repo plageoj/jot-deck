@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { settingsStore } from "$lib/settings.svelte";
+  import { settingsStore } from "#lib/settings.svelte.ts";
   import {
     DEFAULT_KEYBINDINGS,
     findKeybindingConflicts,
@@ -8,8 +8,8 @@
     signatureOf,
     type FocusMode,
     type KeybindingConflict,
-  } from "$lib/keybindings";
-  import { normalizeKey } from "$lib/keyProcessor";
+  } from "#lib/keybindings.ts";
+  import { normalizeKey } from "#lib/keyProcessor.ts";
 
   interface Props {
     onClose: () => void;

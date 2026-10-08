@@ -1,5 +1,5 @@
-import type { FocusMode } from "$lib/keybindings";
-import type { Card } from "$lib/types";
+import type { FocusMode } from "#lib/keybindings.ts";
+import type { Card } from "#lib/types.ts";
 import type { DeckData } from "./deckData.svelte";
 
 export type PaletteType = "column" | "deck" | "tag" | "trash" | "command" | null;

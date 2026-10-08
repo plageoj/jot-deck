@@ -35,7 +35,7 @@ This skill drives the **frontend through the WASM SQLite backend**, which is a
 
 ## Prerequisites
 
-- Node (v24 tested) and `pnpm` (v10.33, pinned via `packageManager`).
+- Node (v24 tested) and `pnpm` (v12.10, pinned via `packageManager`).
 - No system packages needed for the browser path — headless Chromium is fetched
   by Playwright into `~/.cache/ms-playwright`.
 

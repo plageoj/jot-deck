@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { type FocusMode, getKeybindingsForMode } from "$lib/keybindings";
+  import { type FocusMode, getKeybindingsForMode } from "#lib/keybindings.ts";
 
   interface Props {
     mode: FocusMode;

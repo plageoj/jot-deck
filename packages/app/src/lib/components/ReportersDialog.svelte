@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { isTauri } from "$lib/db";
-  import type { ReporterConfig } from "$lib/types";
+  import { isTauri } from "#lib/db/index.ts";
+  import type { ReporterConfig } from "#lib/types.ts";
 
   interface Props {
     /** Deck whose Reporters are being managed (007 registrations are per-deck). */
