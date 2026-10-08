@@ -33,3 +33,5 @@ Thumbs.db
 .claude/settings.local.json
 .claude/settings.json
 .claude/hooks/
+.claude/worktrees
+.playwright-mcp
