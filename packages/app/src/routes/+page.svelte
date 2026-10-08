@@ -104,7 +104,10 @@
     applySettingsToDocument(settingsStore.state);
   });
 
+  let pageMounted = false;
+
   onMount(async () => {
+    pageMounted = true;
     focus.onScrollToColumn = (index) => deckComponent?.scrollToColumn(index);
     actions.onRenameDeck = () => {
       if (data.currentDeck) handleRenameDeck(data.currentDeck);
@@ -123,6 +126,7 @@
     actions.onStartEdit = startCardEdit;
     window.addEventListener("keydown", actions.handleKeydown);
     await Promise.all([data.init(), settingsStore.load()]);
+    if (!pageMounted) return;
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
     void data.watchExternalChanges();
     // Non-blocking — failures surface in the banner, never throw out of mount.
@@ -146,6 +150,7 @@
   });
 
   onDestroy(() => {
+    pageMounted = false;
     window.removeEventListener("keydown", actions.handleKeydown);
     actions.destroy();
     data.stopWatchingExternalChanges();
