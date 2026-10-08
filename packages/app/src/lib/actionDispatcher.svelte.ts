@@ -236,6 +236,7 @@ export class ActionDispatcher {
       } catch (e) {
         this.data.error = `Failed to undo: ${e}`;
       }
+      this.focus.clampToCurrentDeck();
       return;
     }
 
@@ -245,6 +246,7 @@ export class ActionDispatcher {
       } catch (e) {
         this.data.error = `Failed to redo: ${e}`;
       }
+      this.focus.clampToCurrentDeck();
       return;
     }
 

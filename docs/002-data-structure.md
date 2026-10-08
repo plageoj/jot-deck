@@ -22,7 +22,7 @@ Deck (1) ─────< Column (n) ─────< Card (n)
 | 属性 | 説明 |
 |:---|:---|
 | **name** | Column 名（表示用） |
-| **position** | 表示順序 |
+| **position** | 表示順序。Deck 内の生存カラムで 0 始まりの欠番なし連番を保つ（GUI は表示 index をそのまま position として送るため）。範囲外の挿入・移動先は末尾に丸め、起動時に欠番を詰め直す。Card の position も Column 内で同じ規則 |
 | **description** | このカラムに何を入れるかの 1 行説明（分類軸）。外部エージェントの振り分け精度に効く（`008-mcp-server.md` §4.6） |
 | **private** | 非公開フラグ。true のカラムは外部の書き込み口・MCP から一切読み書きできない（`008-mcp-server.md` §4.5） |
 

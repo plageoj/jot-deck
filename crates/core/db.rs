@@ -122,6 +122,31 @@ fn migrate(conn: &Connection) -> Result<()> {
     if !column_exists(conn, "cards", "locked_at")? {
         add_column_ignoring_duplicate(conn, "ALTER TABLE cards ADD COLUMN locked_at TEXT")?;
     }
+    compact_positions(conn)?;
+    Ok(())
+}
+
+/// 生存中の Column（Deck ごと）と Card（Column ごと）の position を 0 始まりの
+/// 連番に詰め直す（冪等）。
+///
+/// フロントエンドは表示上の index をそのまま position として送るため、欠番があると
+/// 並べ替えが見た目に反映されない。過去のバグで生じた欠番を起動時に修復する。
+/// 並び順は変えないので `updated_at` は更新しない。
+fn compact_positions(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "UPDATE columns SET position = r.rn
+         FROM (
+             SELECT id, ROW_NUMBER() OVER (PARTITION BY deck_id ORDER BY position, id) - 1 AS rn
+             FROM columns WHERE deleted_at IS NULL
+         ) AS r
+         WHERE columns.id = r.id AND columns.position != r.rn;
+         UPDATE cards SET position = r.rn
+         FROM (
+             SELECT id, ROW_NUMBER() OVER (PARTITION BY column_id ORDER BY position, id) - 1 AS rn
+             FROM cards WHERE deleted_at IS NULL
+         ) AS r
+         WHERE cards.id = r.id AND cards.position != r.rn;",
+    )?;
     Ok(())
 }
 
@@ -287,6 +312,52 @@ mod tests {
         // ヘルパーはそれを飲み込む。
         add_column_ignoring_duplicate(&conn, "ALTER TABLE columns ADD COLUMN private INTEGER")
             .unwrap();
+    }
+
+    #[test]
+    fn test_init_db_compacts_position_gaps() {
+        let conn = create_in_memory().unwrap();
+        conn.execute_batch(
+            "INSERT INTO decks (id, name, sort_order, created_at, updated_at)
+                 VALUES ('d', 'D', 'position', 't', 't');
+             INSERT INTO columns (id, deck_id, name, position, created_at, updated_at, deleted_at) VALUES
+                 ('c1', 'd', 'A', 0, 't', 't', NULL),
+                 ('c2', 'd', 'B', 1, 't', 't', NULL),
+                 ('c3', 'd', 'X', 1, 't', 't', 't'),
+                 ('c4', 'd', 'S', 3, 't', 't', NULL);
+             INSERT INTO cards (id, column_id, content, position, created_at, updated_at) VALUES
+                 ('k1', 'c1', 'a', 2, 't', 't'),
+                 ('k2', 'c1', 'b', 7, 't', 't');",
+        )
+        .unwrap();
+
+        init_db(&conn).unwrap();
+
+        let cols: Vec<(String, i32)> = conn
+            .prepare("SELECT id, position FROM columns ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        // 削除済みの c3 は触らない
+        assert_eq!(
+            cols,
+            vec![
+                ("c1".to_string(), 0),
+                ("c2".to_string(), 1),
+                ("c3".to_string(), 1),
+                ("c4".to_string(), 2),
+            ]
+        );
+        let cards: Vec<i32> = conn
+            .prepare("SELECT position FROM cards ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(cards, vec![0, 1]);
     }
 
     #[test]

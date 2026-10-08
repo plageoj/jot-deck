@@ -536,6 +536,24 @@ describe("ActionDispatcher column-mode actions", () => {
     await dispatcher.executeColumnAction("createColumn");
     expect(state.createColumnCalls).toHaveLength(1);
   });
+
+  it("undo clamps a focus index left past the last column", async () => {
+    // Undoing a column create shrinks the list under the focused index; the
+    // next createColumn must not insert past the end (issue #81).
+    focus.focusedColumnIndex = 2;
+    data.history.push({
+      undo: async () => {
+        data.columns = data.columns.slice(0, 2);
+      },
+      redo: async () => {},
+    });
+
+    await dispatcher.executeAction("undo");
+    expect(focus.focusedColumnIndex).toBe(1);
+
+    await dispatcher.executeColumnAction("createColumn");
+    expect(state.createColumnCalls[0].position).toBe(2);
+  });
 });
 
 describe("ActionDispatcher card-mode actions", () => {

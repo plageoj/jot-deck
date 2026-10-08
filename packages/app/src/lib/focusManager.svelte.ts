@@ -79,6 +79,25 @@ export class FocusManager {
     }
   }
 
+  /**
+   * Pull focus back into range after columns/cards change underneath it
+   * (e.g. undo/redo of a create or delete). A stale column index would
+   * otherwise be sent to the backend as an insert/move position.
+   */
+  clampToCurrentDeck() {
+    const lastColumn = Math.max(0, this.data.columns.length - 1);
+    this.focusedColumnIndex = Math.min(Math.max(this.focusedColumnIndex, 0), lastColumn);
+    const column = this.data.columns[this.focusedColumnIndex];
+    const cards = column ? this.data.cardsByColumn[column.id] ?? [] : [];
+    this.focusedCardIndex = Math.min(
+      Math.max(this.focusedCardIndex, 0),
+      Math.max(0, cards.length - 1),
+    );
+    if (this.focusMode === "card" && cards.length === 0) {
+      this.focusMode = "column";
+    }
+  }
+
   startEdit(cardId: string) {
     this.editingCardId = cardId;
     this.focusMode = "edit";
