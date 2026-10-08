@@ -22,17 +22,13 @@ export class ExternalChangeEvents {
   async start(): Promise<void> {
     if (!isTauri() || this.unlisten.length > 0) return;
     const { listen } = await import("@tauri-apps/api/event");
-    this.unlisten.push(
+    this.unlisten = [
       await listen("external-db-change", () => this.requestExternalChange()),
-    );
-    this.unlisten.push(
       await listen("reporter-change", () => this.requestExternalChange()),
-    );
-    this.unlisten.push(
       await listen<ReporterStreamEvent>("reporter-stream", ({ payload }) => {
         this.options.onReporterStream(payload);
       }),
-    );
+    ];
     // Reconcile once after subscribing in case a commit landed between the
     // initial load and listener registration.
     this.options.onExternalChange();
