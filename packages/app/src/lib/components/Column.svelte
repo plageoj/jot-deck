@@ -1,6 +1,6 @@
 <script lang="ts">
-  import type { Column, Card } from "$lib/types";
-  import type { EditSession } from "$lib/deckData.svelte";
+  import type { Column, Card } from "#lib/types.ts";
+  import type { EditSession } from "#lib/deckData.svelte.ts";
   import CardComponent from "./Card.svelte";
 
   interface Props {

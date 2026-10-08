@@ -9,7 +9,7 @@
     LINE_HEIGHT_MIN,
     type SettingsState,
     type ThemeMode,
-  } from "$lib/settings.svelte";
+  } from "#lib/settings.svelte.ts";
 
   interface Props {
     settings: SettingsState;

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import ReportersDialog from "./ReportersDialog.svelte";
-import type { ReporterConfig } from "$lib/types";
+import type { ReporterConfig } from "#lib/types.ts";
 
 // jsdom's <dialog> support varies; stub the modal methods so onMount's
 // showModal() and the close button never throw regardless of jsdom version.
@@ -20,7 +20,7 @@ beforeAll(() => {
 const mockEnv = { tauri: false };
 const mockListen = vi.fn(async (_event: string, _handler: unknown) => () => {});
 
-vi.mock("$lib/db", () => ({ isTauri: () => mockEnv.tauri }));
+vi.mock("#lib/db/index.ts", () => ({ isTauri: () => mockEnv.tauri }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mockListen }));
 
 function makeReporter(

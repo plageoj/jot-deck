@@ -1,7 +1,7 @@
 <script lang="ts">
-  import type { Card } from "$lib/types";
-  import type { EditSession } from "$lib/deckData.svelte";
-  import { settingsStore } from "$lib/settings.svelte";
+  import type { Card } from "#lib/types.ts";
+  import type { EditSession } from "#lib/deckData.svelte.ts";
+  import { settingsStore } from "#lib/settings.svelte.ts";
   import CardEditor from "./CardEditor.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
   import TagHighlight from "./TagHighlight.svelte";

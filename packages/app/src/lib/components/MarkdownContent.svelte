@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { parseInlineMarkdown, type MarkdownSegment } from "$lib/markdown";
+  import { parseInlineMarkdown, type MarkdownSegment } from "#lib/markdown.ts";
 
   interface Props {
     content: string;

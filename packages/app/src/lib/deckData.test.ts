@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import type { Card, Column, Deck, ReporterConfig } from "$lib/types";
-import type { DatabaseBackend } from "$lib/db";
+import type { Card, Column, Deck, ReporterConfig } from "#lib/types.ts";
+import type { DatabaseBackend } from "#lib/db/index.ts";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 
 let nextId = 0;
@@ -177,7 +177,7 @@ const mockBackend: Partial<DatabaseBackend> = {
 const mockEnv = { tauri: false };
 const mockListen = vi.fn(async (_event: string, _handler: () => void) => () => {});
 
-vi.mock("$lib/db", () => ({
+vi.mock("#lib/db/index.ts", () => ({
   getDatabase: async () => mockBackend,
   isTauri: () => mockEnv.tauri,
 }));
