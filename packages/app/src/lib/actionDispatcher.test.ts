@@ -208,6 +208,7 @@ describe("ActionDispatcher with no columns loaded", () => {
     await flushPromises();
 
     expect(state.createColumnCalls).toHaveLength(1);
+    expect(state.createColumnCalls[0]).toEqual({ deck_id: "deck-1", position: 0 });
     expect(event.defaultPrevented).toBe(true);
   });
 
@@ -779,9 +780,41 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(calls).toEqual([1]);
   });
 
-  it("newColumn delegates to data.createColumn", async () => {
+  it("newColumn inserts to the right of the focused column and focuses it", async () => {
+    state.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
+    data.columns = [...state.columns];
+    focus.focusedColumnIndex = 0;
+    focus.previousFocusMode = "card";
+    const scrolledIndices: number[] = [];
+    focus.onScrollToColumn = (index) => scrolledIndices.push(index);
     await dispatcher.executeCommand("newColumn");
-    expect(state.createColumnCalls).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
+    });
+    expect(state.createColumnCalls).toEqual([{ deck_id: "deck-1", position: 1 }]);
+    expect(focus.focusMode).toBe("column");
+    expect(scrolledIndices).toEqual([1]);
+  });
+
+  it("newColumn preserves card focus when the resulting column has cards", async () => {
+    const current = makeColumn("col-0", "deck-1", { position: 0 });
+    const created = makeColumn("col-1", "deck-1", { position: 1 });
+    state.columns = [current, created];
+    data.columns = [current, created];
+    data.cardsByColumn[created.id] = [makeCard("card-0", created.id)];
+    focus.focusedColumnIndex = 0;
+    focus.previousFocusMode = "card";
+    const createColumnAtPosition = vi
+      .spyOn(data, "createColumnAtPosition")
+      .mockResolvedValue(created);
+
+    await dispatcher.executeCommand("newColumn");
+    await vi.waitFor(() => {
+      expect(createColumnAtPosition).toHaveBeenCalledWith(1);
+      expect(focus.focusedColumnIndex).toBe(1);
+    });
+
+    expect(focus.focusMode).toBe("card");
   });
 
   it("default branch forwards unknown actions through executeAction", async () => {

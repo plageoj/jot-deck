@@ -367,11 +367,25 @@ export class ActionDispatcher {
   }
 
   private async columnCreateColumn() {
+    await this.createColumnAfterFocusedColumn();
+  }
+
+  private async createColumnAfterFocusedColumn() {
     const { data, focus } = this;
-    const col = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
-    if (col) {
-      focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === col.id);
-      if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
+    const position =
+      data.columns.length === 0 ? 0 : focus.focusedColumnIndex + 1;
+    const col = await data.createColumnAtPosition(position);
+    if (col) this.focusCreatedColumn(col.id);
+  }
+
+  private focusCreatedColumn(columnId: string) {
+    const { data, focus } = this;
+    const index = data.columns.findIndex((column) => column.id === columnId);
+    if (index !== -1) {
+      focus.focusedColumnIndex = index;
+      if ((data.cardsByColumn[columnId] ?? []).length === 0) {
+        focus.focusMode = "column";
+      }
       focus.scrollToFocusedColumn();
     }
   }
@@ -671,7 +685,7 @@ export class ActionDispatcher {
         this.onDeleteDeck?.();
         break;
       case "newColumn":
-        this.data.createColumn();
+        this.runTask(this.createColumnFromPalette());
         break;
       case "renameColumn":
         this.onRenameColumn?.();
@@ -686,6 +700,10 @@ export class ActionDispatcher {
         this.dispatchAction(action);
         break;
     }
+  }
+
+  private async createColumnFromPalette() {
+    await this.createColumnAfterFocusedColumn();
   }
 
   // ============================================
