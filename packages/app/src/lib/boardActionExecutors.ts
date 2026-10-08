@@ -172,11 +172,17 @@ export class BoardActionExecutors {
 
   private async columnCreateColumn(): Promise<void> {
     const { data, focus } = this.context();
-    const column = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
+    const position = data.columns.length === 0 ? 0 : focus.focusedColumnIndex + 1;
+    const column = await data.createColumnAtPosition(position);
     if (!column) return;
-    focus.focusedColumnIndex = data.columns.findIndex((candidate) => candidate.id === column.id);
-    if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
-    focus.scrollToFocusedColumn();
+    const index = data.columns.findIndex((candidate) => candidate.id === column.id);
+    if (index !== -1) {
+      focus.focusedColumnIndex = index;
+      if ((data.cardsByColumn[column.id] ?? []).length === 0) {
+        focus.focusMode = "column";
+      }
+      focus.scrollToFocusedColumn();
+    }
   }
 
   private async columnDelete(): Promise<void> {

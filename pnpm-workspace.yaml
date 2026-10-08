@@ -1,9 +1,9 @@
 packages:
   - packages/*
 
-onlyBuiltDependencies:
-  - esbuild
-  - sharp
+allowBuilds:
+  esbuild: true
+  sharp: true
 
 overrides:
   cookie@<0.7.0: ">=0.7.0 <1.0.0"

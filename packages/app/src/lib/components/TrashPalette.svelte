@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TrashItem } from "$lib/types";
+  import type { TrashItem } from "#lib/types.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
 
   interface Props {

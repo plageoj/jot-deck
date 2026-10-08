@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { COMMANDS } from "$lib/commands";
+  import { COMMANDS } from "#lib/commands.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
 
   interface Props {

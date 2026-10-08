@@ -26,7 +26,7 @@ src/lib/db/
 * **ブラウザ環境**（Tauri なし）: `WasmBackend` を使用
 
 ```typescript
-import { getDatabase } from "$lib/db";
+import { getDatabase } from "#lib/db/index.ts";
 
 // 自動的に適切なバックエンドを選択
 const db = await getDatabase();

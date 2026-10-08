@@ -281,7 +281,7 @@ export class ActionDispatcher {
         this.onDeleteDeck?.();
         break;
       case "newColumn":
-        this.data.createColumn();
+        this.runTask(this.createColumnFromPalette());
         break;
       case "renameColumn":
         this.onRenameColumn?.();
@@ -296,6 +296,10 @@ export class ActionDispatcher {
         this.dispatchAction(action);
         break;
     }
+  }
+
+  private async createColumnFromPalette() {
+    await this.boardActions.executeColumnAction("createColumn");
   }
 
   // ============================================

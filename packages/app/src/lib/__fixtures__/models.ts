@@ -1,4 +1,4 @@
-import type { Card, Column, Deck } from "$lib/types";
+import type { Card, Column, Deck } from "#lib/types.ts";
 
 export function makeDeck(id: string, name = id): Deck {
   return {

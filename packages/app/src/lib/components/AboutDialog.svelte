@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { updaterStore } from "$lib/updater.svelte";
+  import { updaterStore } from "#lib/updater.svelte.ts";
 
   interface Props {
     onClose: () => void;

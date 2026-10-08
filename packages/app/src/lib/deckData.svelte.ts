@@ -6,8 +6,8 @@ import {
   type Tag,
   type TrashItem,
   type ReporterConfig,
-} from "$lib/types";
-import { getDatabase, type DatabaseBackend } from "$lib/db";
+} from "#lib/types.ts";
+import { getDatabase, type DatabaseBackend } from "#lib/db/index.ts";
 import { FocusManager } from "./focusManager.svelte";
 import { UndoStack } from "./undoStack";
 import { ReporterStreamController } from "./reporterStream";

@@ -16,17 +16,17 @@
     TagPalette,
     TrashPalette,
     UpdateBanner,
-  } from "$lib/components";
-  import { DeckData, type EditSession } from "$lib/deckData.svelte";
-  import { FocusManager } from "$lib/focusManager.svelte";
-  import { ActionDispatcher } from "$lib/actionDispatcher.svelte";
+  } from "#lib/components/index.ts";
+  import { DeckData, type EditSession } from "#lib/deckData.svelte.ts";
+  import { FocusManager } from "#lib/focusManager.svelte.ts";
+  import { ActionDispatcher } from "#lib/actionDispatcher.svelte.ts";
   import {
     applySettingsToDocument,
     settingsStore,
-  } from "$lib/settings.svelte";
-  import { updaterStore } from "$lib/updater.svelte";
-  import type { Column, Deck, TrashItem } from "$lib/types";
-  import "$lib/styles/theme.css";
+  } from "#lib/settings.svelte.ts";
+  import { updaterStore } from "#lib/updater.svelte.ts";
+  import type { Column, Deck, TrashItem } from "#lib/types.ts";
+  import "#lib/styles/theme.css";
 
   const data = new DeckData();
   const focus = new FocusManager(data);
@@ -91,7 +91,9 @@
   });
 
   let deckComponent = $state<DeckComponent | null>(null);
-  let editSession = $state<EditSession | null>(null);
+  // Raw: DeckData tracks sessions by object identity, so the editor must
+  // receive the exact object it returned — not a deep $state proxy of it.
+  let editSession = $state.raw<EditSession | null>(null);
   let activeEditorExit: (() => Promise<boolean>) | null = null;
   let editTransition = Promise.resolve();
 

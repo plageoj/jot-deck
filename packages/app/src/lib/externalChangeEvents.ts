@@ -1,4 +1,4 @@
-import { isTauri } from "$lib/db";
+import { isTauri } from "#lib/db/index.ts";
 
 interface ReporterStreamEvent {
   kind: "begin" | "delta" | "end";

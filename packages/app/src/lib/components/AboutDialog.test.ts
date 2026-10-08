@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import { beforeAll, afterEach, describe, it, expect, vi } from "vitest";
 import AboutDialog from "./AboutDialog.svelte";
-import { updaterStore } from "$lib/updater.svelte";
+import { updaterStore } from "#lib/updater.svelte.ts";
 
 // jsdom's <dialog> support varies; stub the modal methods so onMount's
 // showModal() and the close button never throw regardless of jsdom version.

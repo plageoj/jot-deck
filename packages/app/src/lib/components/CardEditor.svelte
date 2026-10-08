@@ -12,8 +12,8 @@
     type CompletionContext,
     type CompletionResult,
   } from "@codemirror/autocomplete";
-  import { TAG_PATTERN } from "$lib/types";
-  import { settingsStore } from "$lib/settings.svelte";
+  import { TAG_PATTERN } from "#lib/types.ts";
+  import { settingsStore } from "#lib/settings.svelte.ts";
 
   interface Props {
     content: string;
