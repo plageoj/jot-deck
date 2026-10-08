@@ -622,6 +622,17 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
+  it("reloadColumns keeps current cards when a card fetch fails", async () => {
+    const before = { ...data.cardsByColumn };
+    const columnsBefore = data.columns;
+    vi.spyOn(mockBackend, "getCardsByColumn").mockRejectedValueOnce(new Error("db gone"));
+
+    await expect(data.reloadColumns()).resolves.toBe(false);
+    expect(data.columns).toBe(columnsBefore);
+    expect(data.cardsByColumn).toEqual(before);
+    expect(data.error).toContain("Failed to reload columns");
+  });
+
   it("createCard without position appends and returns the new card", async () => {
     const card = await data.createCard("col-active", "hello");
     expect(card).not.toBeNull();
