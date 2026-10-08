@@ -491,6 +491,15 @@ describe("DeckData CRUD", () => {
     expect(data.columns.find((c) => c.id === "col-active")?.name).toBe(
       "Renamed Col",
     );
+
+    await data.history.undo();
+    expect(data.columns.find((c) => c.id === "col-active")?.name).toBe(
+      "col-active-name",
+    );
+    await data.history.redo();
+    expect(data.columns.find((c) => c.id === "col-active")?.name).toBe(
+      "Renamed Col",
+    );
   });
 
   it("createColumn appends a new column with empty cards array", async () => {

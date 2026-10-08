@@ -564,10 +564,30 @@ export class DeckData {
     return this.db.listRunningReporters();
   }
 
-  async renameColumn(id: string, name: string): Promise<Column | null> {
+  private async renameColumnImpl(id: string, name: string): Promise<Column> {
+    const updated = await this.db.updateColumn(id, name);
+    this.columns = this.columns.map((c) => (c.id === id ? updated : c));
+    return updated;
+  }
+
+  async renameColumn(id: string, name: string, record = true): Promise<Column | null> {
+    const previousName = this.columns.find((c) => c.id === id)?.name;
+    const generation = this.history.currentGeneration;
     try {
-      const updated = await this.db.updateColumn(id, name);
-      this.columns = this.columns.map((c) => (c.id === id ? updated : c));
+      const updated = await this.renameColumnImpl(id, name);
+      if (record && previousName !== undefined && previousName !== name) {
+        this.history.push(
+          {
+            undo: async () => {
+              await this.renameColumnImpl(id, previousName);
+            },
+            redo: async () => {
+              await this.renameColumnImpl(id, name);
+            },
+          },
+          generation,
+        );
+      }
       return updated;
     } catch (e) {
       this.error = `Failed to rename column: ${e}`;

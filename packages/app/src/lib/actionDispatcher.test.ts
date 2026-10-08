@@ -823,6 +823,14 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(calls).toEqual([1]);
   });
 
+  it("renameColumn triggers its callback from column and card focus actions", async () => {
+    const calls: number[] = [];
+    dispatcher.onRenameColumn = () => calls.push(1);
+    await dispatcher.executeColumnAction("renameColumn");
+    await dispatcher.executeCardAction("renameColumn");
+    expect(calls).toEqual([1, 1]);
+  });
+
   it("deleteColumn triggers the onDeleteColumn callback", () => {
     const calls: number[] = [];
     dispatcher.onDeleteColumn = () => calls.push(1);
