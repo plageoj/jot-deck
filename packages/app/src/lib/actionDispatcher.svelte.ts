@@ -369,7 +369,9 @@ export class ActionDispatcher {
 
   private async createColumnAfterFocusedColumn() {
     const { data, focus } = this;
-    const col = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
+    const position =
+      data.columns.length === 0 ? 0 : focus.focusedColumnIndex + 1;
+    const col = await data.createColumnAtPosition(position);
     if (col) this.focusCreatedColumn(col.id);
   }
 
