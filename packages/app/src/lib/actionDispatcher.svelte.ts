@@ -5,13 +5,13 @@ import { findAction } from "./keybindings";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
 import { executeGlobalAction } from "./actionDispatchHelpers";
-
-const HALF_PAGE_SIZE = 5;
+import { BoardActionExecutors } from "./boardActionExecutors";
 
 export class ActionDispatcher {
   private readonly data: DeckData;
   private readonly focus: FocusManager;
   private readonly keyProcessor = new KeySequenceProcessor();
+  private readonly boardActions: BoardActionExecutors;
 
   // Callbacks for actions that require UI interaction
   onRenameDeck: (() => void) | null = null;
@@ -23,6 +23,16 @@ export class ActionDispatcher {
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;
     this.focus = focus;
+    this.boardActions = new BoardActionExecutors(() => ({
+      data: this.data,
+      focus: this.focus,
+      focusedColumn: this.focusedColumn,
+      focusedCards: this.focusedCards,
+      focusedCard: this.focusedCard,
+      startEdit: this.onStartEdit,
+      renameColumn: this.onRenameColumn,
+      runTask: (task) => this.runTask(task),
+    }));
   }
 
   // ============================================
@@ -214,117 +224,7 @@ export class ActionDispatcher {
   // ============================================
 
   async executeColumnAction(action: string, _param?: string) {
-    switch (action) {
-      case "moveLeft":
-        this.columnMoveLeft();
-        break;
-      case "moveRight":
-        this.columnMoveRight();
-        break;
-      case "enterCardFocusFirst":
-        this.columnEnterCardFocus(0);
-        break;
-      case "enterCardFocusLast":
-        this.columnEnterCardFocus(this.focusedCards.length - 1);
-        break;
-      case "reorderColumnLeft":
-        await this.columnReorder(-1);
-        break;
-      case "reorderColumnRight":
-        await this.columnReorder(1);
-        break;
-      case "createCard":
-        await this.columnCreateCard();
-        break;
-      case "createColumn":
-        await this.columnCreateColumn();
-        break;
-      case "renameColumn":
-        this.onRenameColumn?.();
-        break;
-      case "deleteColumn":
-        await this.columnDelete();
-        break;
-    }
-  }
-
-  private columnMoveLeft() {
-    const { focus } = this;
-    if (focus.focusedColumnIndex > 0) {
-      focus.focusedColumnIndex--;
-      focus.scrollToFocusedColumn();
-    }
-  }
-
-  private columnMoveRight() {
-    const { data, focus } = this;
-    if (focus.focusedColumnIndex < data.columns.length - 1) {
-      focus.focusedColumnIndex++;
-      focus.scrollToFocusedColumn();
-    }
-  }
-
-  private columnEnterCardFocus(index: number) {
-    const { focus } = this;
-    if (this.focusedCards.length > 0) {
-      focus.focusMode = "card";
-      focus.focusedCardIndex = index;
-    }
-  }
-
-  private async columnReorder(direction: -1 | 1) {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    const targetIndex = focus.focusedColumnIndex + direction;
-    const inBounds =
-      direction < 0
-        ? focus.focusedColumnIndex > 0
-        : focus.focusedColumnIndex < data.columns.length - 1;
-    if (inBounds && column) {
-      if (await data.moveColumn(column.id, targetIndex)) {
-        focus.focusedColumnIndex = targetIndex;
-        focus.scrollToFocusedColumn();
-      }
-    }
-  }
-
-  private async columnCreateCard() {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    if (column) {
-      const card = await data.createCard(column.id);
-      if (card) {
-        const cards = data.cardsByColumn[column.id] ?? [];
-        focus.focusedCardIndex = cards.findIndex((candidate) => candidate.id === card.id);
-        focus.focusMode = "card";
-        if (this.onStartEdit) await this.onStartEdit(card.id);
-        else focus.editingCardId = card.id;
-      }
-    }
-  }
-
-  private async columnCreateColumn() {
-    const { data, focus } = this;
-    const col = await data.createColumnAtPosition(focus.focusedColumnIndex + 1);
-    if (col) {
-      focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === col.id);
-      if (focus.focusedColumnIndex === -1) focus.focusedColumnIndex = 0;
-      focus.scrollToFocusedColumn();
-    }
-  }
-
-  private async columnDelete() {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    if (column) {
-      if (await data.deleteColumn(column.id)) {
-        focus.focusedColumnIndex = Math.min(
-          focus.focusedColumnIndex,
-          Math.max(0, data.columns.length - 1),
-        );
-        focus.scrollToFocusedColumn();
-      }
-    }
+    await this.boardActions.executeColumnAction(action);
   }
 
   // ============================================
@@ -332,234 +232,7 @@ export class ActionDispatcher {
   // ============================================
 
   async executeCardAction(action: string, _param?: string) {
-    switch (action) {
-      case "moveDown":
-        this.cardMove(1);
-        break;
-      case "moveUp":
-        this.cardMove(-1);
-        break;
-      case "moveLeft":
-        this.cardMoveColumn(-1);
-        break;
-      case "moveRight":
-        this.cardMoveColumn(1);
-        break;
-      case "goFirst":
-        this.focus.focusedCardIndex = 0;
-        break;
-      case "goLast":
-        this.focus.focusedCardIndex = this.focusedCards.length - 1;
-        break;
-      case "scrollHalfPageUp":
-        this.cardScrollHalfPage(-1);
-        break;
-      case "scrollHalfPageDown":
-        this.cardScrollHalfPage(1);
-        break;
-      case "exitToColumn":
-        this.focus.focusMode = "column";
-        break;
-      case "moveCardLeft":
-        await this.cardMoveToAdjacentColumn(-1);
-        break;
-      case "moveCardRight":
-        await this.cardMoveToAdjacentColumn(1);
-        break;
-      case "reorderCardDown":
-        await this.cardReorder(1);
-        break;
-      case "reorderCardUp":
-        await this.cardReorder(-1);
-        break;
-      case "startEdit":
-        this.cardStartEdit();
-        break;
-      case "renameColumn":
-        this.onRenameColumn?.();
-        break;
-      case "createCardBelow":
-        await this.cardCreate(this.focus.focusedCardIndex + 1);
-        break;
-      case "createCardAbove":
-        await this.cardCreate(this.focus.focusedCardIndex);
-        break;
-      case "deleteCard":
-        await this.cardDelete();
-        break;
-      case "copyCard":
-        this.cardCopy();
-        break;
-      case "pasteBelow":
-        await this.cardPasteBelow();
-        break;
-      case "pasteAbove":
-        await this.cardPasteAbove();
-        break;
-      case "scoreUp":
-        await this.cardScore(1);
-        break;
-      case "scoreDown":
-        await this.cardScore(-1);
-        break;
-    }
-  }
-
-  private cardMove(direction: -1 | 1) {
-    const { focus } = this;
-    const cards = this.focusedCards;
-    if (direction > 0) {
-      if (focus.focusedCardIndex < cards.length - 1) focus.focusedCardIndex++;
-    } else if (focus.focusedCardIndex > 0) {
-      focus.focusedCardIndex--;
-    }
-  }
-
-  private cardMoveColumn(direction: -1 | 1) {
-    const { data, focus } = this;
-    const inBounds =
-      direction < 0
-        ? focus.focusedColumnIndex > 0
-        : focus.focusedColumnIndex < data.columns.length - 1;
-    if (inBounds) {
-      focus.saveCurrentCardIndex();
-      focus.focusedColumnIndex += direction;
-      focus.restoreCardIndex();
-      // Empty destination column has no card to focus — drop to column mode,
-      // matching jumpToColumn / selectColumnFromPalette.
-      if (this.focusedCards.length === 0) focus.focusMode = "column";
-      focus.scrollToFocusedColumn();
-    }
-  }
-
-  private cardScrollHalfPage(direction: -1 | 1) {
-    const { focus } = this;
-    const cards = this.focusedCards;
-    if (direction < 0) {
-      focus.focusedCardIndex = Math.max(
-        0,
-        focus.focusedCardIndex - HALF_PAGE_SIZE,
-      );
-    } else {
-      focus.focusedCardIndex = Math.min(
-        cards.length - 1,
-        focus.focusedCardIndex + HALF_PAGE_SIZE,
-      );
-    }
-  }
-
-  private async cardMoveToAdjacentColumn(direction: -1 | 1) {
-    const { data, focus } = this;
-    const card = this.focusedCard;
-    const inBounds =
-      direction < 0
-        ? focus.focusedColumnIndex > 0
-        : focus.focusedColumnIndex < data.columns.length - 1;
-    if (inBounds && card) {
-      const targetColumn = data.columns[focus.focusedColumnIndex + direction];
-      if (await data.moveCardToColumn(card.id, targetColumn.id)) {
-        focus.focusedColumnIndex += direction;
-        const newCards = data.cardsByColumn[targetColumn.id] ?? [];
-        focus.focusedCardIndex = newCards.length - 1;
-        focus.scrollToFocusedColumn();
-      }
-    }
-  }
-
-  private async cardReorder(direction: -1 | 1) {
-    const { focus, data } = this;
-    const card = this.focusedCard;
-    const cards = this.focusedCards;
-    const targetIndex = focus.focusedCardIndex + direction;
-    const inBounds =
-      direction > 0
-        ? focus.focusedCardIndex < cards.length - 1
-        : focus.focusedCardIndex > 0;
-    if (inBounds && card) {
-      if (await data.moveCard(card.id, targetIndex)) {
-        focus.focusedCardIndex = targetIndex;
-      }
-    }
-  }
-
-  private cardStartEdit() {
-    const card = this.focusedCard;
-    // A card being streamed by a Reporter is read-only (007 §7).
-    if (card && !this.data.isStreaming(card.id)) {
-      if (this.onStartEdit) {
-        const onStartEdit = this.onStartEdit;
-        this.runTask(Promise.resolve().then(() => onStartEdit(card.id)));
-      } else {
-        this.focus.startEdit(card.id);
-      }
-    }
-  }
-
-  private async cardCreate(position: number) {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    if (column) {
-      const newCard = await data.createCard(column.id, "", position);
-      if (newCard) {
-        const updated = data.cardsByColumn[column.id] ?? [];
-        focus.focusedCardIndex = updated.findIndex((c) => c.id === newCard.id);
-        if (focus.focusedCardIndex === -1) focus.focusedCardIndex = 0;
-        focus.focusMode = "card";
-        if (this.onStartEdit) await this.onStartEdit(newCard.id);
-        else focus.startEdit(newCard.id);
-      }
-    }
-  }
-
-  private async cardDelete() {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    const card = this.focusedCard;
-    if (card) {
-      if (await data.deleteCard(card.id)) {
-        const updated = data.cardsByColumn[column.id] ?? [];
-        focus.focusedCardIndex = Math.min(
-          focus.focusedCardIndex,
-          Math.max(0, updated.length - 1),
-        );
-        if (updated.length === 0) focus.focusMode = "column";
-      }
-    }
-  }
-
-  private cardCopy() {
-    const card = this.focusedCard;
-    if (card) this.focus.clipboardCard = { ...card };
-  }
-
-  private async cardPasteBelow() {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    if (focus.clipboardCard && column) {
-      const pasted = await data.createCard(
-        column.id,
-        focus.clipboardCard.content,
-        focus.focusedCardIndex + 1,
-      );
-      if (pasted) focus.focusedCardIndex++;
-    }
-  }
-
-  private async cardPasteAbove() {
-    const { data, focus } = this;
-    const column = this.focusedColumn;
-    if (focus.clipboardCard && column) {
-      await data.createCard(
-        column.id,
-        focus.clipboardCard.content,
-        focus.focusedCardIndex,
-      );
-    }
-  }
-
-  private async cardScore(delta: 1 | -1) {
-    const card = this.focusedCard;
-    if (card) await this.data.updateCardScore(card.id, delta);
+    await this.boardActions.executeCardAction(action);
   }
 
   // ============================================

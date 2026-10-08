@@ -7,10 +7,11 @@ import {
   type TrashItem,
   type ReporterConfig,
 } from "$lib/types";
-import { getDatabase, isTauri, type DatabaseBackend } from "$lib/db";
+import { getDatabase, type DatabaseBackend } from "$lib/db";
 import { FocusManager } from "./focusManager.svelte";
 import { UndoStack } from "./undoStack";
 import { ReporterStreamController } from "./reporterStream";
+import { ExternalChangeEvents } from "./externalChangeEvents";
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
 const EDIT_LOCK_RENEWAL_MS = 30_000;
@@ -241,10 +242,12 @@ export class DeckData {
   /** Bumped (debounced) each time an external DB change is observed. Read from a
    * reactive $effect that decides when to actually reload. */
   externalChangeTick = $state(0);
-  private externalUnlisten: (() => void) | null = null;
-  private reporterUnlisten: (() => void) | null = null;
-  private reporterStreamUnlisten: (() => void) | null = null;
-  private externalReloadTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly externalEvents = new ExternalChangeEvents({
+    onExternalChange: () => {
+      this.externalChangeTick++;
+    },
+    onReporterStream: (event) => this.reporterStreams.handle(event),
+  });
   private readonly reporterStreams = new ReporterStreamController({
     getStreamingText: () => this.streamingText,
     setStreamingText: (value) => {
@@ -252,53 +255,20 @@ export class DeckData {
     },
     reloadColumn: async (columnId) => {
       if (!this.cardsByColumn[columnId]) {
-        this.scheduleExternalReload();
+        this.externalEvents.requestExternalChange();
         return;
       }
       const cards = await this.db.getCardsByColumn(columnId);
       if (this.cardsByColumn[columnId]) this.cardsByColumn[columnId] = cards;
       await this.loadDeckTags();
     },
-    scheduleReload: () => this.scheduleExternalReload(),
+    scheduleReload: () => this.externalEvents.requestExternalChange(),
   });
-
-  /** Coalesce a burst of change signals into one `externalChangeTick` bump. */
-  private scheduleExternalReload(): void {
-    if (this.externalReloadTimer) clearTimeout(this.externalReloadTimer);
-    this.externalReloadTimer = setTimeout(() => {
-      this.externalReloadTimer = null;
-      this.externalChangeTick++;
-    }, 250);
-  }
 
   /** Subscribe to external DB changes (Tauri only). No-op in the browser (WASM)
    * backend, which is single-process. */
   async watchExternalChanges(): Promise<void> {
-    if (!isTauri()) return;
-    const { listen } = await import("@tauri-apps/api/event");
-    // Other processes (CLI / MCP bridge) committing to the shared DB, detected
-    // by the `data_version` poller.
-    this.externalUnlisten = await listen("external-db-change", () => {
-      this.scheduleExternalReload();
-    });
-    // A spawned Reporter committing a write (007-reporter-protocol.md). A Reporter
-    // shares the GUI's own connection, so its writes never bump `data_version`
-    // and the host signals them explicitly — funnel into the same reload path.
-    this.reporterUnlisten = await listen("reporter-change", () => {
-      this.scheduleExternalReload();
-    });
-    // A Reporter's ephemeral stream (007 §6.2): begin/delta/end. These drive the
-    // in-memory overlay, NOT the debounced DB reload — deltas never touch SQLite.
-    this.reporterStreamUnlisten = await listen<{
-      kind: "begin" | "delta" | "end";
-      card_id: string;
-      column_id?: string;
-      chunk?: string;
-    }>("reporter-stream", ({ payload }) => this.reporterStreams.handle(payload));
-    // Reconcile once right after subscribing: a commit landing between the
-    // initial load and listener registration would otherwise be missed (the
-    // backend emits its detection only once).
-    this.externalChangeTick++;
+    await this.externalEvents.start();
   }
 
   /** Whether a card is currently receiving a Reporter stream (read-only). */
@@ -339,16 +309,7 @@ export class DeckData {
   }
 
   stopWatchingExternalChanges() {
-    if (this.externalReloadTimer) {
-      clearTimeout(this.externalReloadTimer);
-      this.externalReloadTimer = null;
-    }
-    this.externalUnlisten?.();
-    this.externalUnlisten = null;
-    this.reporterUnlisten?.();
-    this.reporterUnlisten = null;
-    this.reporterStreamUnlisten?.();
-    this.reporterStreamUnlisten = null;
+    this.externalEvents.stop();
     // After the listeners are gone no `end` event can arrive, so any open stream
     // overlay would be permanently stale. Cancel pending timers and drop all
     // overlay state (deltas + streaming text) so nothing stays stuck read-only.
