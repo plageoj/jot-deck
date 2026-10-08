@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { updaterStore } from "$lib/updater.svelte";
+  import { updaterStore } from "#lib/updater.svelte.ts";
 
   const status = $derived(updaterStore.status);
 

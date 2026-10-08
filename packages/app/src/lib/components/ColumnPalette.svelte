@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Column, Card } from "$lib/types";
+  import type { Column, Card } from "#lib/types.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
   import PaletteIcon from "./PaletteIcon.svelte";
 

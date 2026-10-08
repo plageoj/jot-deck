@@ -78,8 +78,9 @@ async function typeInEditor(page, text) {
 async function saveAndExitEditor(page) {
   await page.keyboard.press("Control+Enter");
   // The editor detaches once the card is saved; wait for that instead of a
-  // blind delay so the next `o` doesn't race the still-open editor.
-  await page.locator(".cm-editor").waitFor({ state: "hidden", timeout: 5000 }).catch(() => {});
+  // blind delay so the next `o` doesn't race the still-open editor. A failed
+  // save keeps the editor open, so a timeout here is a real failure.
+  await page.locator(".cm-editor").waitFor({ state: "hidden", timeout: 5000 });
 }
 
 // Open the deck switcher and create a clean, empty deck with one column.
@@ -89,7 +90,7 @@ async function saveAndExitEditor(page) {
 async function createFreshDeckWithColumn(page) {
   await page.keyboard.press("Control+p");
   // .click() auto-waits for the switcher and button to be actionable.
-  await page.locator(".footer-btn", { hasText: "+ New Deck" }).click();
+  await page.locator(".palette-item", { hasText: "New deck" }).click();
   // A fresh deck has no columns — create one if prompted (the check's own
   // timeout covers the deck-switch render, so no fixed sleep needed).
   const createCol = page.locator("text=Create Column");

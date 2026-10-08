@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { TAG_PATTERN } from "$lib/types";
+  import { TAG_PATTERN } from "#lib/types.ts";
 
 
   interface Props {
