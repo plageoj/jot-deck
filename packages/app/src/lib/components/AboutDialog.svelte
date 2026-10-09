@@ -30,6 +30,7 @@
     dialogRef?.showModal();
     if (isTauri) {
       void loadAppInfo();
+      void updaterStore.check();
     }
   });
 
