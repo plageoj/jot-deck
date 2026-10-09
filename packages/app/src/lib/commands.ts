@@ -11,6 +11,7 @@ export const COMMANDS: Command[] = [
   { id: "restore-onboarding", label: "Restore Getting Started Deck", action: "restoreOnboarding" },
   { id: "rename-deck", label: "Rename Deck", action: "renameDeck" },
   { id: "delete-deck", label: "Delete Deck", action: "deleteDeck" },
+  { id: "reload-deck", label: "Reload Deck", action: "reloadDeck" },
   { id: "switch-column", label: "Switch Column", shortcut: "g n", action: "showColumnPalette" },
   { id: "new-column", label: "New Column", shortcut: "c", action: "newColumn" },
   { id: "rename-column", label: "Rename Column", action: "renameColumn" },

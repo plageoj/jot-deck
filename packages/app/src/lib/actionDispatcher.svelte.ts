@@ -7,6 +7,23 @@ import { updaterStore } from "./updater.svelte";
 import { executeGlobalAction } from "./actionDispatchHelpers";
 import { BoardActionExecutors } from "./boardActionExecutors";
 
+/** Actions that stay available while the selected deck is not loaded (switch
+ * in progress or failed). Everything else would act on an empty board. */
+const ACTIONS_WITHOUT_LOADED_DECK = new Set([
+  "showCommandPalette",
+  "showDeckPalette",
+  "showSettings",
+  "showKeybindings",
+  "showAbout",
+  "showReporters",
+  "checkForUpdates",
+  "reloadDeck",
+]);
+
+/** Palette commands that act on the board through UI callbacks rather than
+ * `executeAction`, so they need the same guard. */
+const BOARD_COMMANDS = new Set(["newColumn", "renameColumn", "deleteColumn"]);
+
 export class ActionDispatcher {
   private readonly data: DeckData;
   private readonly focus: FocusManager;
@@ -88,6 +105,11 @@ export class ActionDispatcher {
     // Cheatsheet trigger: ? or Ctrl+/
     if (this.toggleCheatsheetIfTrigger(event)) return;
 
+    if (data.deckLoadError || !this.boardAvailable) {
+      this.handleDeckNotLoadedKey(event);
+      return;
+    }
+
     // Clear tag filter with Escape when active
     if (event.key === "Escape" && data.activeTagFilter) {
       event.preventDefault();
@@ -159,6 +181,35 @@ export class ActionDispatcher {
     return false;
   }
 
+  /** False while a selected deck has no committed snapshot. With no deck at
+   * all the board is "available" so the no-columns whitelist still applies. */
+  private get boardAvailable(): boolean {
+    return !this.data.currentDeck || this.data.isDeckLoaded;
+  }
+
+  /** Failure view / deck switch in progress: Enter or r retries a failed
+   * load (fixed keys, not customizable); otherwise only palettes and dialogs. */
+  private handleDeckNotLoadedKey(event: KeyboardEvent) {
+    if (
+      this.data.deckLoadError &&
+      (event.key === "Enter" || event.key === "r") &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey
+    ) {
+      event.preventDefault();
+      this.reloadDeck();
+      return;
+    }
+    const key = normalizeKey(event);
+    if (!key) return;
+    const action = findAction(key, "column");
+    if (action && ACTIONS_WITHOUT_LOADED_DECK.has(action)) {
+      event.preventDefault();
+      this.dispatchAction(action);
+    }
+  }
+
   private handleNoColumnsKey(event: KeyboardEvent) {
     const key = normalizeKey(event);
     if (!key) return;
@@ -183,6 +234,8 @@ export class ActionDispatcher {
   // ============================================
 
   async executeAction(action: string) {
+    if (!this.boardAvailable && !ACTIONS_WITHOUT_LOADED_DECK.has(action)) return;
+
     if (action === "checkForUpdates") {
       // Surface the result inline in the About dialog, then kick off the
       // check — a manual check that finds nothing is otherwise silent.
@@ -211,6 +264,11 @@ export class ActionDispatcher {
 
   private dispatchAction(action: string) {
     this.runTask(this.executeAction(action));
+  }
+
+  /** Reload the selected deck (or the deck list if that failed to load). */
+  reloadDeck() {
+    this.dispatchAction("reloadDeck");
   }
 
   private runTask(task: Promise<unknown>) {
@@ -264,6 +322,7 @@ export class ActionDispatcher {
 
   executeCommand(action: string) {
     this.focus.closePalette();
+    if (!this.boardAvailable && BOARD_COMMANDS.has(action)) return;
     switch (action) {
       case "newDeck":
         this.runTask(this.data.createDeck());
@@ -309,7 +368,8 @@ export class ActionDispatcher {
   selectDeckFromPalette(deckId: string) {
     this.focus.closePalette();
     const deck = this.data.decks.find((d) => d.id === deckId);
-    if (deck && deck.id !== this.data.currentDeck?.id) {
+    // Re-selecting the current deck retries it when it failed to load.
+    if (deck && (deck.id !== this.data.currentDeck?.id || !this.data.isDeckLoaded)) {
       // Focus indices and mode are restored from persisted state via the
       // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
       this.runTask(this.data.selectDeck(deck));

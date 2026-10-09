@@ -41,6 +41,13 @@ export function executeGlobalAction(
     case "clearTagFilter":
       data.clearTagFilter();
       return true;
+    case "reloadDeck":
+      // A same-deck reload can drop the focused column/card, and the
+      // loadedDeckId clamp effect only runs when the deck id changes.
+      return data.reloadDeck().then((committed) => {
+        if (committed) focus.clampToLoadedDeck();
+        return true;
+      });
     case "undo":
       // Undo/redo can shrink the column/card lists under the focused index;
       // clamp it so a stale index is never sent as an insert/move position.
