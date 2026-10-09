@@ -25,6 +25,7 @@ describe("findAction", () => {
     expect(findAction("j", "card")).toBe("moveDown");
     expect(findAction("k", "card")).toBe("moveUp");
     expect(findAction("i", "card")).toBe("startEdit");
+    expect(findAction("c", "card")).toBe("createColumn");
   });
 
   it("should find multi-key sequence action", () => {
@@ -184,6 +185,35 @@ describe("resolveKeybindings", () => {
     ).toBe(false);
   });
 
+  it("preserves the column-only c binding signature", () => {
+    const columnCreate = DEFAULT_KEYBINDINGS.find(
+      (b) =>
+        b.action === "createColumn" &&
+        b.sequence === "c" &&
+        b.modes.length === 1 &&
+        b.modes[0] === "column",
+    )!;
+    const resolved = resolveKeybindings({ [signatureOf(columnCreate)]: null });
+
+    expect(signatureOf(columnCreate)).toBe("createColumn column c");
+    expect(
+      resolved.some(
+        (b) =>
+          b.action === "createColumn" &&
+          b.sequence === "c" &&
+          b.modes.includes("column"),
+      ),
+    ).toBe(false);
+    expect(
+      resolved.some(
+        (b) =>
+          b.action === "createColumn" &&
+          b.sequence === "c" &&
+          b.modes.includes("card"),
+      ),
+    ).toBe(true);
+  });
+
   it("ignores overrides whose signature matches no default", () => {
     expect(resolveKeybindings({ "nonexistent sig key": "z" })).toEqual(
       DEFAULT_KEYBINDINGS,
@@ -262,6 +292,22 @@ describe("setKeybindingOverrides", () => {
       { sequence: "z", action: "undo", modes: ["card"], description: "Undo" },
     ]);
     expect(findAction("z", "card")).toBe("undo");
+  });
+
+  it("lets a user-added binding win over a default on the same key", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "c", action: "copyCard", modes: ["card"], description: "Copy card" },
+    ]);
+    expect(findAction("c", "card")).toBe("copyCard");
+    expect(findAction("c", "column")).toBe("createColumn");
+  });
+
+  it("lets a remapped default win over a default on the same key", () => {
+    const copyCard = DEFAULT_KEYBINDINGS.find(
+      (b) => b.action === "copyCard" && b.sequence === "yy",
+    )!;
+    setKeybindingOverrides({ [signatureOf(copyCard)]: "c" });
+    expect(findAction("c", "card")).toBe("copyCard");
   });
 });
 

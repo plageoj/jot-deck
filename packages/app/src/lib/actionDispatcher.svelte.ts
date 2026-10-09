@@ -299,7 +299,7 @@ export class ActionDispatcher {
   }
 
   private async createColumnFromPalette() {
-    await this.boardActions.executeColumnAction("createColumn");
+    await this.boardActions.createColumnFromPalette();
   }
 
   // ============================================

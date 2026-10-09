@@ -108,6 +108,11 @@ export class BoardActionExecutors {
       case "createCardAbove":
         await this.cardCreate(focus.focusedCardIndex);
         break;
+      case "createColumn":
+        if (await this.columnCreateColumn()) {
+          focus.focusMode = "column";
+        }
+        break;
       case "deleteCard":
         await this.cardDelete();
         break;
@@ -170,19 +175,45 @@ export class BoardActionExecutors {
     else focus.editingCardId = card.id;
   }
 
-  private async columnCreateColumn(): Promise<void> {
+  async createColumnFromPalette(): Promise<void> {
     const { data, focus } = this.context();
+    const position =
+      data.columns.length === 0 ? 0 : focus.focusedColumnIndex + 1;
+    const column = await data.createColumnAtPosition(position);
+    if (column) this.focusCreatedColumn(column.id);
+  }
+
+  private async columnCreateColumn(): Promise<boolean> {
+    const { data, focus } = this.context();
+    const focusMode = focus.focusMode;
+    const focusedColumnIndex = focus.focusedColumnIndex;
+    const focusedCardIndex = focus.focusedCardIndex;
     const position = data.columns.length === 0 ? 0 : focus.focusedColumnIndex + 1;
     const column = await data.createColumnAtPosition(position);
-    if (!column) return;
-    const index = data.columns.findIndex((candidate) => candidate.id === column.id);
-    if (index !== -1) {
-      focus.focusedColumnIndex = index;
-      if ((data.cardsByColumn[column.id] ?? []).length === 0) {
-        focus.focusMode = "column";
-      }
-      focus.scrollToFocusedColumn();
+    if (!column) return false;
+    if (
+      focus.focusMode !== focusMode ||
+      focus.focusedColumnIndex !== focusedColumnIndex ||
+      focus.focusedCardIndex !== focusedCardIndex
+    ) {
+      return false;
     }
+    const index = data.columns.findIndex((candidate) => candidate.id === column.id);
+    if (index === -1) return false;
+    focus.focusedColumnIndex = index;
+    focus.scrollToFocusedColumn();
+    return true;
+  }
+
+  private focusCreatedColumn(columnId: string): void {
+    const { data, focus } = this.context();
+    const index = data.columns.findIndex((candidate) => candidate.id === columnId);
+    if (index === -1) return;
+    focus.focusedColumnIndex = index;
+    if ((data.cardsByColumn[columnId] ?? []).length === 0) {
+      focus.focusMode = "column";
+    }
+    focus.scrollToFocusedColumn();
   }
 
   private async columnDelete(): Promise<void> {
