@@ -638,7 +638,8 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     }
 
     let now = Utc::now();
-    let restore_position = card.position;
+    // 削除後に他の Card も減っていれば保存位置は末尾を越えうる。欠番を作らないよう丸める
+    let restore_position = card.position.clamp(0, get_next_position(conn, &card.column_id)?);
 
     let tx = conn.unchecked_transaction()?;
 
@@ -864,6 +865,30 @@ mod tests {
             .map(|c| (c.content, c.position))
             .collect();
         assert_eq!(positions, vec![("B".to_string(), 0), ("A".to_string(), 1)]);
+    }
+
+    #[test]
+    fn test_restore_card_clamps_past_end() {
+        let (conn, _deck_id, column_id) = setup();
+        let nc = |content: &str| NewCard {
+            column_id: column_id.clone(),
+            content: content.to_string(),
+        };
+        create(&conn, nc("A")).unwrap();
+        let b = create(&conn, nc("B")).unwrap();
+        let c = create(&conn, nc("C")).unwrap();
+
+        // C を消してから B を消すと、C の保存位置 2 は生存カードの末尾を越える
+        soft_delete(&conn, &c.id).unwrap();
+        soft_delete(&conn, &b.id).unwrap();
+        let restored = restore(&conn, &c.id).unwrap();
+        assert_eq!(restored.position, 1);
+        let positions: Vec<(String, i32)> = get_by_column_id(&conn, &column_id)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.content, c.position))
+            .collect();
+        assert_eq!(positions, vec![("A".to_string(), 0), ("C".to_string(), 1)]);
     }
 
     #[test]

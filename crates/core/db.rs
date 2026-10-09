@@ -133,7 +133,8 @@ fn migrate(conn: &Connection) -> Result<()> {
 /// 並べ替えが見た目に反映されない。過去のバグで生じた欠番を起動時に修復する。
 /// 並び順は変えないので `updated_at` は更新しない。
 fn compact_positions(conn: &Connection) -> Result<()> {
-    conn.execute_batch(
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
         "UPDATE columns SET position = r.rn
          FROM (
              SELECT id, ROW_NUMBER() OVER (PARTITION BY deck_id ORDER BY position, id) - 1 AS rn
@@ -147,6 +148,7 @@ fn compact_positions(conn: &Connection) -> Result<()> {
          ) AS r
          WHERE cards.id = r.id AND cards.position != r.rn;",
     )?;
+    tx.commit()?;
     Ok(())
 }
 
