@@ -327,6 +327,16 @@ describe("ActionDispatcher.selectDeckFromPalette", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("reports deck selection failures through the data error state", async () => {
+    vi.spyOn(data, "selectDeck").mockRejectedValue(new Error("deck load failed"));
+
+    dispatcher.selectDeckFromPalette("deck-B");
+
+    await vi.waitFor(() => {
+      expect(data.error).toBe("Failed to execute action: Error: deck load failed");
+    });
+  });
+
   it("does not change anything when deckId is unknown", () => {
     const before = data.currentDeck?.id;
     const spy = vi.spyOn(data, "selectDeck");
