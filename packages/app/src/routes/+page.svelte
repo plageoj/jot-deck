@@ -146,7 +146,9 @@
     // Clamp focus after the reload: an external deletion can leave the focused
     // column/card index out of range, and the loadedDeckId-based clamp effect
     // doesn't run because the deck id is unchanged.
-    void data.reloadFromExternalChange().then(() => focus.clampToLoadedDeck());
+    void data.refreshDeck().then((committed) => {
+      if (committed) focus.clampToLoadedDeck();
+    });
   });
 
   onDestroy(() => {
