@@ -366,8 +366,29 @@ export class ActionDispatcher {
     }
   }
 
-  private async columnCreateColumn() {
-    await this.createColumnAfterFocusedColumn();
+  private async columnCreateColumn(): Promise<boolean> {
+    const { data, focus } = this;
+    const focusMode = focus.focusMode;
+    const focusedColumnIndex = focus.focusedColumnIndex;
+    const focusedCardIndex = focus.focusedCardIndex;
+    const position =
+      data.columns.length === 0 ? 0 : focusedColumnIndex + 1;
+    const col = await data.createColumnAtPosition(position);
+    if (!col) return false;
+
+    if (
+      focus.focusMode !== focusMode ||
+      focus.focusedColumnIndex !== focusedColumnIndex ||
+      focus.focusedCardIndex !== focusedCardIndex
+    )
+      return false;
+
+    const createdColumnIndex = data.columns.findIndex((c) => c.id === col.id);
+    if (createdColumnIndex === -1) return false;
+
+    focus.focusedColumnIndex = createdColumnIndex;
+    focus.scrollToFocusedColumn();
+    return true;
   }
 
   private async createColumnAfterFocusedColumn() {
@@ -460,6 +481,12 @@ export class ActionDispatcher {
         break;
       case "createCardAbove":
         await this.cardCreate(this.focus.focusedCardIndex);
+        break;
+      case "createColumn":
+        if (await this.columnCreateColumn()) {
+          // A newly created column has no card to retain card focus on.
+          this.focus.focusMode = "column";
+        }
         break;
       case "deleteCard":
         await this.cardDelete();
@@ -716,7 +743,7 @@ export class ActionDispatcher {
     if (deck && deck.id !== this.data.currentDeck?.id) {
       // Focus indices and mode are restored from persisted state via the
       // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
-      this.data.selectDeck(deck);
+      this.runTask(this.data.selectDeck(deck));
     }
   }
 

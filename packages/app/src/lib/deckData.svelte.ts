@@ -205,27 +205,51 @@ export class DeckData {
     }
   }
 
-  async loadCardsForColumns() {
+  /**
+   * Fetch cards for each column. By default a failed column degrades to an empty
+   * list; with `strict`, the first failure rejects so callers can keep their
+   * current card state instead of replacing it with empty columns.
+   */
+  private async getCardsForColumns(
+    columns: Column[],
+    strict = false,
+  ): Promise<Record<string, Card[]>> {
     const entries = await Promise.all(
-      this.columns.map(async (col) => {
+      columns.map(async (col) => {
         try {
           return [col.id, await this.db.getCardsByColumn(col.id)] as const;
         } catch (e) {
+          if (strict) throw e;
           console.error(`Failed to load cards for column ${col.id}:`, e);
           return [col.id, []] as const;
         }
       }),
     );
-    this.cardsByColumn = Object.fromEntries(entries);
+    return Object.fromEntries(entries);
   }
 
-  async reloadColumns() {
-    if (!this.currentDeck) return;
+  async loadCardsForColumns() {
+    this.cardsByColumn = await this.getCardsForColumns(this.columns);
+  }
+
+  async reloadColumns(): Promise<boolean> {
+    if (!this.currentDeck) return false;
+    const deckId = this.currentDeck.id;
     try {
-      this.columns = await this.db.getColumnsByDeck(this.currentDeck.id);
-      await this.loadCardsForColumns();
+      const columns = await this.db.getColumnsByDeck(deckId);
+      if (this.currentDeck?.id !== deckId) return false;
+
+      const cardsByColumn = await this.getCardsForColumns(columns, true);
+      if (this.currentDeck?.id !== deckId) return false;
+
+      this.columns = columns;
+      this.cardsByColumn = cardsByColumn;
+      return true;
     } catch (e) {
-      this.error = `Failed to reload columns: ${e}`;
+      if (this.currentDeck?.id === deckId) {
+        this.error = `Failed to reload columns: ${e}`;
+      }
+      return false;
     }
   }
 
@@ -600,13 +624,31 @@ export class DeckData {
     record = true,
   ): Promise<Column | null> {
     if (!this.currentDeck) return null;
+    const deckId = this.currentDeck.id;
     const generation = this.history.currentGeneration;
     try {
       const col = await this.db.createColumn({
-        deck_id: this.currentDeck.id,
+        deck_id: deckId,
         position,
       });
-      await this.reloadColumns();
+      if (this.currentDeck?.id === deckId) {
+        const reloaded = await this.reloadColumns();
+        if (!reloaded && this.currentDeck?.id === deckId) {
+          // The column was created before the reload failed. Keep local state and
+          // history consistent with the database so retrying cannot create a duplicate.
+          if (!this.columns.some((column) => column.id === col.id)) {
+            this.columns = [
+              ...this.columns.map((column) =>
+                column.position >= position
+                  ? { ...column, position: column.position + 1 }
+                  : column,
+              ),
+              col,
+            ].sort((a, b) => a.position - b.position);
+          }
+          this.cardsByColumn[col.id] ??= [];
+        }
+      }
       if (record) this.recordColumnCreate(col.id, generation);
       return col;
     } catch (e) {

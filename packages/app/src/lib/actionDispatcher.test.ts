@@ -39,7 +39,17 @@ const mockBackend: Partial<DatabaseBackend> = {
       params.deck_id,
       { position: params.position },
     );
-    state.columns = [...state.columns, col];
+    state.columns =
+      params.position === undefined
+        ? [...state.columns, col]
+        : [
+            ...state.columns.map((column) =>
+              column.position >= params.position!
+                ? { ...column, position: column.position + 1 }
+                : column,
+            ),
+            col,
+          ].sort((a, b) => a.position - b.position);
     state.cardsByColumn.set(col.id, []);
     return col;
   },
@@ -698,6 +708,55 @@ describe("ActionDispatcher card-mode actions", () => {
     await dispatcher.executeCardAction("createCardAbove");
     expect(state.createCardCalls[0]?.position).toBe(1);
     expect(focus.focusMode).toBe("edit");
+  });
+
+  it("createColumn inserts a column after the focused column", async () => {
+    await dispatcher.executeCardAction("createColumn");
+    expect(state.createColumnCalls[0]?.position).toBe(1);
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
+    expect(focus.focusMode).toBe("column");
+  });
+
+  it("createColumn keeps card focus when the column cannot be created", async () => {
+    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(null);
+
+    await dispatcher.executeCardAction("createColumn");
+
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(1);
+  });
+
+  it("createColumn keeps card focus when the created column is not loaded", async () => {
+    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(
+      makeColumn("missing-column", "deck-1", { position: 1 }),
+    );
+
+    await dispatcher.executeCardAction("createColumn");
+
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(1);
+  });
+
+  it("createColumn preserves a later edit-mode transition", async () => {
+    let resolveColumn: (column: Column | null) => void;
+    const createdColumn = makeColumn("created-async", "deck-1", { position: 1 });
+    const createColumn = new Promise<Column | null>((resolve) => {
+      resolveColumn = resolve;
+    });
+    vi.spyOn(data, "createColumnAtPosition").mockReturnValue(createColumn);
+
+    const creating = dispatcher.executeCardAction("createColumn");
+    await dispatcher.executeCardAction("startEdit");
+    data.columns = [...data.columns, createdColumn];
+    resolveColumn!(createdColumn);
+    await creating;
+
+    expect(focus.focusMode).toBe("edit");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.editingCardId).toBe("c-0-b");
   });
 });
 
