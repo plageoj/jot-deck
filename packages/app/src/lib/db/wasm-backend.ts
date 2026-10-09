@@ -278,16 +278,18 @@ export class WasmBackend implements DatabaseBackend {
     const count = (countResult[0]?.values[0]?.[0] as number) ?? 0;
     const name = params.name || `Column ${count + 1}`;
 
-    // Get max position or use provided position
-    let position: number;
-    if (params.position === undefined) {
-      const maxResult = db.exec(
-        "SELECT COALESCE(MAX(position), -1) FROM columns WHERE deck_id = ? AND deleted_at IS NULL",
-        [params.deck_id]
-      );
-      position = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
-    } else {
-      position = params.position;
+    // Append by default; clamp an explicit position to [0, end] so an
+    // out-of-range index never leaves a gap (mirrors jot-deck-core).
+    const maxResult = db.exec(
+      "SELECT COALESCE(MAX(position), -1) FROM columns WHERE deck_id = ? AND deleted_at IS NULL",
+      [params.deck_id]
+    );
+    const nextPosition = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
+    const position =
+      params.position === undefined
+        ? nextPosition
+        : Math.min(Math.max(params.position, 0), nextPosition);
+    if (position < nextPosition) {
       // Shift existing columns
       db.run(
         `UPDATE columns SET position = position + 1, updated_at = ?
@@ -340,6 +342,12 @@ export class WasmBackend implements DatabaseBackend {
     const column = await this.getColumn(id);
     const now = this.now();
     const oldPosition = column.position;
+    const maxResult = db.exec(
+      "SELECT COALESCE(MAX(position), 0) FROM columns WHERE deck_id = ? AND deleted_at IS NULL",
+      [column.deck_id]
+    );
+    // Clamp to [0, last] so an out-of-range index never leaves a gap
+    position = Math.min(Math.max(position, 0), (maxResult[0]?.values[0]?.[0] as number) ?? 0);
 
     if (position === oldPosition) return column;
 
@@ -477,16 +485,18 @@ export class WasmBackend implements DatabaseBackend {
     const id = ulid();
     const now = this.now();
 
-    // Get max position or use provided position
-    let position: number;
-    if (params.position === undefined) {
-      const maxResult = db.exec(
-        "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ? AND deleted_at IS NULL",
-        [params.column_id]
-      );
-      position = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
-    } else {
-      position = params.position;
+    // Append by default; clamp an explicit position to [0, end] so an
+    // out-of-range index never leaves a gap (mirrors jot-deck-core).
+    const maxResult = db.exec(
+      "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ? AND deleted_at IS NULL",
+      [params.column_id]
+    );
+    const nextPosition = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
+    const position =
+      params.position === undefined
+        ? nextPosition
+        : Math.min(Math.max(params.position, 0), nextPosition);
+    if (position < nextPosition) {
       // Shift existing cards
       db.run(
         `UPDATE cards SET position = position + 1, updated_at = ?
@@ -708,6 +718,12 @@ export class WasmBackend implements DatabaseBackend {
     const card = await this.getCard(id);
     const now = this.now();
     const oldPosition = card.position;
+    const maxResult = db.exec(
+      "SELECT COALESCE(MAX(position), 0) FROM cards WHERE column_id = ? AND deleted_at IS NULL",
+      [card.column_id]
+    );
+    // Clamp to [0, last] so an out-of-range index never leaves a gap
+    position = Math.min(Math.max(position, 0), (maxResult[0]?.values[0]?.[0] as number) ?? 0);
 
     if (position === oldPosition) return card;
 

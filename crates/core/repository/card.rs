@@ -89,6 +89,9 @@ pub fn create_at_position(conn: &Connection, new_card: NewCard, position: i32) -
     let id = Ulid::generate().to_string();
     let now = Utc::now();
 
+    // 末尾より後ろを指定されても欠番を作らないよう [0, 末尾] に丸める
+    let position = position.clamp(0, get_next_position(conn, &new_card.column_id)?);
+
     let tx = conn.unchecked_transaction()?;
 
     // 挿入位置以降の Card の position を +1 する
@@ -551,6 +554,8 @@ pub fn move_to_position(conn: &Connection, id: &str, new_position: i32) -> Resul
         ));
     }
 
+    // 末尾より後ろを指定されても欠番を作らないよう [0, 末尾] に丸める
+    let new_position = new_position.clamp(0, get_next_position(conn, &card.column_id)? - 1);
     let old_position = card.position;
     let now = Utc::now();
 
@@ -633,7 +638,8 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     }
 
     let now = Utc::now();
-    let restore_position = card.position;
+    // 削除後に他の Card も減っていれば保存位置は末尾を越えうる。欠番を作らないよう丸める
+    let restore_position = card.position.clamp(0, get_next_position(conn, &card.column_id)?);
 
     let tx = conn.unchecked_transaction()?;
 
@@ -838,6 +844,51 @@ mod tests {
         assert_eq!(cards[0].content, "A");
         assert_eq!(cards[1].content, "B");
         assert_eq!(cards[2].content, "C");
+    }
+
+    #[test]
+    fn test_create_and_move_card_clamp_past_end() {
+        let (conn, _deck_id, column_id) = setup();
+        let nc = |content: &str| NewCard {
+            column_id: column_id.clone(),
+            content: content.to_string(),
+        };
+        let a = create(&conn, nc("A")).unwrap();
+        let b = create_at_position(&conn, nc("B"), 5).unwrap();
+        assert_eq!(b.position, 1);
+
+        let moved = move_to_position(&conn, &a.id, 5).unwrap();
+        assert_eq!(moved.position, 1);
+        let positions: Vec<(String, i32)> = get_by_column_id(&conn, &column_id)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.content, c.position))
+            .collect();
+        assert_eq!(positions, vec![("B".to_string(), 0), ("A".to_string(), 1)]);
+    }
+
+    #[test]
+    fn test_restore_card_clamps_past_end() {
+        let (conn, _deck_id, column_id) = setup();
+        let nc = |content: &str| NewCard {
+            column_id: column_id.clone(),
+            content: content.to_string(),
+        };
+        create(&conn, nc("A")).unwrap();
+        let b = create(&conn, nc("B")).unwrap();
+        let c = create(&conn, nc("C")).unwrap();
+
+        // C を消してから B を消すと、C の保存位置 2 は生存カードの末尾を越える
+        soft_delete(&conn, &c.id).unwrap();
+        soft_delete(&conn, &b.id).unwrap();
+        let restored = restore(&conn, &c.id).unwrap();
+        assert_eq!(restored.position, 1);
+        let positions: Vec<(String, i32)> = get_by_column_id(&conn, &column_id)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.content, c.position))
+            .collect();
+        assert_eq!(positions, vec![("A".to_string(), 0), ("C".to_string(), 1)]);
     }
 
     #[test]

@@ -110,6 +110,9 @@ pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i3
         new_column.name
     };
 
+    // 末尾より後ろを指定されても欠番を作らないよう [0, 末尾] に丸める
+    let position = position.clamp(0, get_next_position(conn, &new_column.deck_id)?);
+
     let tx = conn.unchecked_transaction()?;
 
     // 挿入位置以降の Column の position を +1 する
@@ -302,6 +305,8 @@ pub fn move_to_position(conn: &Connection, id: &str, new_position: i32) -> Resul
         ));
     }
 
+    // 末尾より後ろを指定されても欠番を作らないよう [0, 末尾] に丸める
+    let new_position = new_position.clamp(0, get_next_position(conn, &column.deck_id)? - 1);
     let old_position = column.position;
     let now = Utc::now();
 
@@ -597,6 +602,76 @@ mod tests {
         assert_eq!(columns[0].name, "B");
         assert_eq!(columns[1].name, "C");
         assert_eq!(columns[2].name, "A");
+    }
+
+    fn positions(conn: &Connection, deck_id: &str) -> Vec<(String, i32)> {
+        get_by_deck_id(conn, deck_id)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.name, c.position))
+            .collect()
+    }
+
+    #[test]
+    fn test_create_at_position_clamps_past_end() {
+        let (conn, deck_id) = setup();
+        let nc = |name: &str| NewColumn {
+            deck_id: deck_id.clone(),
+            name: name.to_string(),
+        };
+        create(&conn, nc("A")).unwrap();
+        create(&conn, nc("B")).unwrap();
+
+        // 末尾より後ろを指定しても欠番を作らない
+        create_at_position(&conn, nc("C"), 5).unwrap();
+        create_at_position(&conn, nc("D"), -1).unwrap();
+        assert_eq!(
+            positions(&conn, &deck_id),
+            vec![
+                ("D".to_string(), 0),
+                ("A".to_string(), 1),
+                ("B".to_string(), 2),
+                ("C".to_string(), 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_move_column_clamps_past_end() {
+        let (conn, deck_id) = setup();
+        let nc = |name: &str| NewColumn {
+            deck_id: deck_id.clone(),
+            name: name.to_string(),
+        };
+        let a = create(&conn, nc("A")).unwrap();
+        create(&conn, nc("B")).unwrap();
+
+        let moved = move_to_position(&conn, &a.id, 5).unwrap();
+        assert_eq!(moved.position, 1);
+        assert_eq!(
+            positions(&conn, &deck_id),
+            vec![("B".to_string(), 0), ("A".to_string(), 1)]
+        );
+    }
+
+    /// Issue #81: undo 後の古いフォーカス index でカラムを作ると末尾より後ろに挿入され、
+    /// 欠番のせいで右端から 2 番目のカラムを右へ動かしても並びが変わらなかった。
+    #[test]
+    fn test_move_second_to_last_right_after_out_of_range_insert() {
+        let (conn, deck_id) = setup();
+        let nc = |name: &str| NewColumn {
+            deck_id: deck_id.clone(),
+            name: name.to_string(),
+        };
+        create(&conn, nc("A")).unwrap();
+        let b = create(&conn, nc("B")).unwrap();
+        let c = create_at_position(&conn, nc("C"), 1).unwrap();
+        soft_delete(&conn, &c.id).unwrap();
+        create_at_position(&conn, nc("S"), 3).unwrap();
+
+        move_to_position(&conn, &b.id, 2).unwrap();
+        let names: Vec<String> = positions(&conn, &deck_id).into_iter().map(|(n, _)| n).collect();
+        assert_eq!(names, vec!["A", "S", "B"]);
     }
 
     #[test]

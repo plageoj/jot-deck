@@ -42,21 +42,29 @@ export function executeGlobalAction(
       data.clearTagFilter();
       return true;
     case "undo":
-      return data.history.undo().then(
-        () => true,
-        (error) => {
-          data.error = `Failed to undo: ${error}`;
-          return true;
-        },
-      );
+      // Undo/redo can shrink the column/card lists under the focused index;
+      // clamp it so a stale index is never sent as an insert/move position.
+      return data.history
+        .undo()
+        .then(
+          () => true,
+          (error) => {
+            data.error = `Failed to undo: ${error}`;
+            return true;
+          },
+        )
+        .finally(() => focus.clampToCurrentDeck());
     case "redo":
-      return data.history.redo().then(
-        () => true,
-        (error) => {
-          data.error = `Failed to redo: ${error}`;
-          return true;
-        },
-      );
+      return data.history
+        .redo()
+        .then(
+          () => true,
+          (error) => {
+            data.error = `Failed to redo: ${error}`;
+            return true;
+          },
+        )
+        .finally(() => focus.clampToCurrentDeck());
     default:
       return false;
   }
