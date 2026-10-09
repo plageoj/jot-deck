@@ -521,6 +521,118 @@ describe("DeckData CRUD", () => {
     expect(col).not.toBeNull();
   });
 
+  it("createColumnAtPosition keeps the created column when reloading columns fails", async () => {
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockRejectedValueOnce(
+      new Error("reload failed"),
+    );
+
+    const col = await data.createColumnAtPosition(0);
+
+    expect(col).not.toBeNull();
+    expect(data.columns.map((column) => column.id)).toContain(col!.id);
+    await data.history.undo();
+    expect(state.deleteColumnCalls).toContain(col!.id);
+    expect(data.error).toContain("Failed to reload columns");
+  });
+
+  it("createColumnAtPosition does not update a deck selected during reload", async () => {
+    const createdColumn = makeColumn("created-in-deck-1", "deck-1", { position: 1 });
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let rejectReload: (error: Error) => void;
+    let signalReloadStarted!: () => void;
+    const reloadStarted = new Promise<void>((resolve) => {
+      signalReloadStarted = resolve;
+    });
+
+    vi.spyOn(mockBackend, "createColumn").mockResolvedValueOnce(createdColumn);
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectReload = reject;
+          signalReloadStarted();
+        }),
+    );
+
+    const creating = data.createColumnAtPosition(1);
+    await reloadStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    data.history.clear();
+    rejectReload!(new Error("reload failed"));
+
+    await expect(creating).resolves.toEqual(createdColumn);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+  });
+
+  it("reloadColumns ignores a successful result for a deck that is no longer active", async () => {
+    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let resolveReload!: (columns: Column[]) => void;
+    const reloadStarted = new Promise<void>((resolve) => {
+      vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
+        () =>
+          new Promise((reloadResolve) => {
+            resolveReload = reloadResolve;
+            resolve();
+          }),
+      );
+    });
+
+    const reloading = data.reloadColumns();
+    await reloadStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    resolveReload([staleColumn]);
+
+    await expect(reloading).resolves.toBe(false);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+  });
+
+  it("reloadColumns ignores a deck switch while loading cards", async () => {
+    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let resolveCards!: (cards: Card[]) => void;
+    const cardsStarted = new Promise<void>((resolve) => {
+      vi.spyOn(mockBackend, "getCardsByColumn").mockImplementationOnce(
+        () =>
+          new Promise((cardsResolve) => {
+            resolveCards = cardsResolve;
+            resolve();
+          }),
+      );
+    });
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockResolvedValueOnce([staleColumn]);
+
+    const reloading = data.reloadColumns();
+    await cardsStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    resolveCards([]);
+
+    await expect(reloading).resolves.toBe(false);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+  });
+
+  it("reloadColumns keeps current cards when a card fetch fails", async () => {
+    const before = { ...data.cardsByColumn };
+    const columnsBefore = data.columns;
+    vi.spyOn(mockBackend, "getCardsByColumn").mockRejectedValueOnce(new Error("db gone"));
+
+    await expect(data.reloadColumns()).resolves.toBe(false);
+    expect(data.columns).toBe(columnsBefore);
+    expect(data.cardsByColumn).toEqual(before);
+    expect(data.error).toContain("Failed to reload columns");
+  });
+
   it("createCard without position appends and returns the new card", async () => {
     const card = await data.createCard("col-active", "hello");
     expect(card).not.toBeNull();
@@ -964,7 +1076,7 @@ describe("DeckData CRUD", () => {
 
   it("reloadColumns is a no-op when no current deck", async () => {
     data.currentDeck = null;
-    await expect(data.reloadColumns()).resolves.toBeUndefined();
+    await expect(data.reloadColumns()).resolves.toBe(false);
   });
 });
 

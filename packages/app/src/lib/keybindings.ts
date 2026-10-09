@@ -27,6 +27,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "o", action: "createCard", modes: ["column"], description: "New card" },
   { sequence: "n", action: "createCard", modes: ["column"], description: "New card" },
   { sequence: "c", action: "createColumn", modes: ["column"], description: "New column" },
+  { sequence: "c", action: "createColumn", modes: ["card"], description: "New column" },
   { sequence: "N", action: "createColumn", modes: ["column", "card"], description: "New column" },
   { sequence: "r", action: "renameColumn", modes: ["column", "card"], description: "Rename column" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "Delete column" },
@@ -153,6 +154,8 @@ interface ResolvedBinding extends KeyBinding {
    * `sequence` is remapped — so it can identify the binding being edited.
    */
   signature: string;
+  /** True for user-remapped defaults and user-added bindings. */
+  customized: boolean;
 }
 
 /**
@@ -170,14 +173,14 @@ function resolveWithSignatures(
     if (Object.hasOwn(overrides, signature)) {
       const seq = overrides[signature];
       if (seq === null || seq === "") continue; // disabled
-      resolved.push({ ...binding, sequence: seq, signature });
+      resolved.push({ ...binding, sequence: seq, signature, customized: true });
     } else {
-      resolved.push({ ...binding, signature });
+      resolved.push({ ...binding, signature, customized: false });
     }
   }
   for (const binding of additions) {
     if (binding.sequence) {
-      resolved.push({ ...binding, signature: signatureOf(binding) });
+      resolved.push({ ...binding, signature: signatureOf(binding), customized: true });
     }
   }
   return resolved;
@@ -193,12 +196,16 @@ export function resolveKeybindings(
   overrides: KeybindingOverrides = {},
   additions: KeyBinding[] = []
 ): KeyBinding[] {
-  return resolveWithSignatures(overrides, additions).map((b) => ({
+  return resolveWithSignatures(overrides, additions).map(toKeyBinding);
+}
+
+function toKeyBinding(b: ResolvedBinding): KeyBinding {
+  return {
     sequence: b.sequence,
     action: b.action,
     modes: b.modes,
     description: b.description,
-  }));
+  };
 }
 
 export interface KnownAction {
@@ -237,6 +244,10 @@ export function getKnownActions(): KnownAction[] {
 // getKeybindingsForMode. Starts as the defaults; the settings layer calls
 // setKeybindingOverrides() once persisted customizations have loaded.
 let activeBindings: KeyBinding[] = DEFAULT_KEYBINDINGS;
+// Same bindings, ordered so the user's customizations win findAction lookups
+// over untouched defaults that share a key (e.g. a default added later on a key
+// the user had already claimed).
+let lookupBindings: KeyBinding[] = DEFAULT_KEYBINDINGS;
 
 /**
  * Replace the active bindings with defaults + the given overrides + the user's
@@ -246,14 +257,19 @@ export function setKeybindingOverrides(
   overrides: KeybindingOverrides,
   additions: KeyBinding[] = []
 ): void {
-  activeBindings = resolveKeybindings(overrides, additions);
+  const resolved = resolveWithSignatures(overrides, additions);
+  activeBindings = resolved.map(toKeyBinding);
+  lookupBindings = [
+    ...resolved.filter((b) => b.customized),
+    ...resolved.filter((b) => !b.customized),
+  ].map(toKeyBinding);
 }
 
 /**
  * Find the action for a given key sequence and focus mode
  */
 export function findAction(sequence: string, mode: FocusMode): string | null {
-  const binding = activeBindings.find(
+  const binding = lookupBindings.find(
     (b) => b.sequence === sequence && b.modes.includes(mode)
   );
   return binding?.action ?? null;
