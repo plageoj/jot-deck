@@ -312,7 +312,7 @@ export class ActionDispatcher {
     if (deck && deck.id !== this.data.currentDeck?.id) {
       // Focus indices and mode are restored from persisted state via the
       // setCurrentDeck/clampToLoadedDeck effects in +page.svelte.
-      this.data.selectDeck(deck);
+      this.runTask(this.data.selectDeck(deck));
     }
   }
 
