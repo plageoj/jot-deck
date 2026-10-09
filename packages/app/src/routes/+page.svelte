@@ -7,6 +7,7 @@
     CommandPalette,
     ConfirmDialog,
     DeckSwitcher,
+    ErrorBanner,
     KeybindingCheatsheet,
     KeybindingsDialog,
     RenameDialog,
@@ -146,7 +147,9 @@
     // Clamp focus after the reload: an external deletion can leave the focused
     // column/card index out of range, and the loadedDeckId-based clamp effect
     // doesn't run because the deck id is unchanged.
-    void data.reloadFromExternalChange().then(() => focus.clampToLoadedDeck());
+    void data.refreshDeck().then((committed) => {
+      if (committed) focus.clampToLoadedDeck();
+    });
   });
 
   onDestroy(() => {
@@ -246,7 +249,7 @@
     <button onclick={() => focus.openPalette("deck")} title="Manage Decks (Ctrl+P)"
       >Manage Decks</button
     >
-    <button onclick={() => data.createColumn()} disabled={!data.currentDeck}
+    <button onclick={() => data.createColumn()} disabled={!data.isDeckLoaded}
       >New Column</button
     >
     <button
@@ -262,6 +265,10 @@
     >
   </header>
 
+  {#if data.error}
+    <ErrorBanner message={data.error} onDismiss={() => (data.error = null)} />
+  {/if}
+
   {#if data.activeTagFilter}
     <TagFilterBar
       tagName={data.activeTagFilter}
@@ -271,13 +278,20 @@
 
   {#if data.loading}
     <div class="status">Loading...</div>
-  {:else if data.error}
-    <div class="status error">{data.error}</div>
+  {:else if data.deckLoadError}
+    <div class="status error" role="alert">
+      <p>{data.deckLoadError}</p>
+      <button onclick={() => actions.reloadDeck()}>Retry (Enter)</button>
+    </div>
   {:else if !data.currentDeck}
     <div class="status">
       <p>No decks yet. Create your first deck!</p>
       <button onclick={() => data.createDeck()}>Create Deck</button>
     </div>
+  {:else if !data.isDeckLoaded}
+    <!-- Deck switch in progress: keep the board blank rather than flashing
+         the empty-deck prompt for a deck that may well have columns. -->
+    <div class="status"></div>
   {:else if data.columns.length === 0}
     <div class="status">
       <p>No columns in this deck. Create your first column!</p>

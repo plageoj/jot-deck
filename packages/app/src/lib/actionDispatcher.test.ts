@@ -1265,3 +1265,108 @@ describe("ActionDispatcher card-mode cross-column and paste actions", () => {
     expect(focus.focusMode).toBe("column");
   });
 });
+
+describe("ActionDispatcher while the selected deck is not loaded", () => {
+  let data: InstanceType<typeof DeckData>;
+  let focus: InstanceType<typeof FocusManager>;
+  let dispatcher: InstanceType<typeof ActionDispatcher>;
+
+  beforeEach(async () => {
+    resetState();
+    state.decks = [makeDeck("deck-1"), makeDeck("deck-2")];
+    state.columns = [makeColumn("col-0", "deck-1")];
+    state.cardsByColumn = new Map([["col-0", []]]);
+
+    data = new DeckData();
+    await data.init();
+    // Simulate a failed switch to deck-2: selected, but nothing committed.
+    data.currentDeck = data.decks[1];
+    data.loadedDeckId = null;
+    data.columns = [];
+    data.cardsByColumn = {};
+    data.deckLoadError = "Failed to load deck: Error: db gone";
+
+    focus = new FocusManager(data);
+    focus.focusMode = "column";
+    dispatcher = new ActionDispatcher(data, focus);
+  });
+
+  it.each(["Enter", "r"])("%s on the failure view retries the load", async (key) => {
+    const reload = vi.spyOn(data, "reloadDeck").mockResolvedValue(true);
+    const event = makeKeyEvent({ key });
+
+    dispatcher.handleKeydown(event);
+
+    expect(event.defaultPrevented).toBe(true);
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+  });
+
+  it("Ctrl+r is not a retry (it stays redo, which is blocked)", async () => {
+    const reload = vi.spyOn(data, "reloadDeck");
+    const redo = vi.spyOn(data.history, "redo");
+
+    dispatcher.handleKeydown(makeKeyEvent({ key: "r", ctrl: true }));
+    await flushPromises();
+
+    expect(reload).not.toHaveBeenCalled();
+    expect(redo).not.toHaveBeenCalled();
+  });
+
+  it("does not retry with Enter while a switch is merely in progress", async () => {
+    data.deckLoadError = null;
+    const reload = vi.spyOn(data, "reloadDeck");
+
+    dispatcher.handleKeydown(makeKeyEvent({ key: "Enter" }));
+    await flushPromises();
+
+    expect(reload).not.toHaveBeenCalled();
+  });
+
+  it("ignores board mutations such as creating a column or undo", async () => {
+    const undo = vi.spyOn(data.history, "undo");
+
+    dispatcher.handleKeydown(makeKeyEvent({ key: "c" }));
+    dispatcher.handleKeydown(makeKeyEvent({ key: "u" }));
+    await dispatcher.executeAction("createColumn");
+    dispatcher.executeCommand("newColumn");
+    await flushPromises();
+
+    expect(state.createColumnCalls).toHaveLength(0);
+    expect(undo).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke column rename/delete callbacks from the palette", () => {
+    const rename = vi.fn();
+    const remove = vi.fn();
+    dispatcher.onRenameColumn = rename;
+    dispatcher.onDeleteColumn = remove;
+
+    dispatcher.executeCommand("renameColumn");
+    dispatcher.executeCommand("deleteColumn");
+
+    expect(rename).not.toHaveBeenCalled();
+    expect(remove).not.toHaveBeenCalled();
+  });
+
+  it("still opens the deck palette", () => {
+    dispatcher.handleKeydown(makeKeyEvent({ key: "p", ctrl: true }));
+    expect(focus.activePalette).toBe("deck");
+  });
+
+  it("re-selecting the current deck from the palette retries it", () => {
+    const select = vi.spyOn(data, "selectDeck").mockResolvedValue(true);
+
+    dispatcher.selectDeckFromPalette("deck-2");
+
+    expect(select).toHaveBeenCalledWith(data.decks[1]);
+  });
+
+  it("the Reload Deck command reloads and clamps focus on success", async () => {
+    vi.spyOn(data, "reloadDeck").mockResolvedValue(true);
+    const clamp = vi.spyOn(focus, "clampToLoadedDeck");
+
+    dispatcher.executeCommand("reloadDeck");
+
+    await vi.waitFor(() => expect(clamp).toHaveBeenCalled());
+  });
+});
