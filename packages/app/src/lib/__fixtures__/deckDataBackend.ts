@@ -78,120 +78,119 @@ function findCard(id: string): Card {
 }
 
 export const mockBackend: Partial<DatabaseBackend> = {
-  getAllDecks: async () => deckState.decks,
-  getColumnsByDeck: async () => deckState.columns,
-  getCardsByColumn: async (columnId: string) =>
-    deckState.cardsByColumn.get(columnId) ?? [],
-  getTagsByDeck: async () => {
+  getAllDecks: () => Promise.resolve(deckState.decks),
+  getColumnsByDeck: () => Promise.resolve(deckState.columns),
+  getCardsByColumn: (columnId: string) =>
+    Promise.resolve(deckState.cardsByColumn.get(columnId) ?? []),
+  getTagsByDeck: () => {
     deckState.getTagsByDeckCalls++;
-    return deckState.tagsByDeck;
+    return Promise.resolve(deckState.tagsByDeck);
   },
-  getDeletedColumns: async () => deckState.deletedColumns,
-  getDeletedCards: async () => deckState.deletedCards,
-  restoreCard: async (id: string) => {
+  getDeletedColumns: () => Promise.resolve(deckState.deletedColumns),
+  getDeletedCards: () => Promise.resolve(deckState.deletedCards),
+  restoreCard: (id: string) => {
     deckState.restoreCardCalls.push(id);
     const idx = deckState.deletedCards.findIndex((c) => c.id === id);
     if (idx !== -1) deckState.deletedCards.splice(idx, 1);
-    return {} as Card;
+    return Promise.resolve({} as Card);
   },
-  restoreColumn: async (id: string) => {
+  restoreColumn: (id: string) => {
     deckState.restoreColumnCalls.push(id);
     const idx = deckState.deletedColumns.findIndex((c) => c.id === id);
     if (idx !== -1) deckState.deletedColumns.splice(idx, 1);
-    return {} as Column;
+    return Promise.resolve({} as Column);
   },
-  deleteDeck: async (id) => {
+  deleteDeck: (id) => {
     deckState.deleteDeckCalls.push(id);
+    return Promise.resolve();
   },
-  createDeck: async (params) =>
-    makeDeck(uniqueId("new-deck"), params.name ?? "New Deck"),
-  updateDeck: async (id, name) => makeDeck(id, name),
-  createColumn: async (params) =>
-    makeColumn(uniqueId("new-col"), params.deck_id, {
-      position: params.position,
+  createDeck: (params) =>
+    Promise.resolve(makeDeck(uniqueId("new-deck"), params.name ?? "New Deck")),
+  updateDeck: (id, name) => Promise.resolve(makeDeck(id, name)),
+  createColumn: (params) =>
+    Promise.resolve(
+      makeColumn(uniqueId("new-col"), params.deck_id, {
+        position: params.position,
+      }),
+    ),
+  updateColumn: (id, name, description, isPrivate) =>
+    Promise.resolve({
+      ...makeColumn(id, "deck-1", {
+        description: description ?? null,
+        private: isPrivate ?? false,
+      }),
+      name: name ?? `${id}-name`,
     }),
-  updateColumn: async (id, name, description, isPrivate) => ({
-    ...makeColumn(id, "deck-1", {
-      description: description ?? null,
-      private: isPrivate ?? false,
-    }),
-    name: name ?? `${id}-name`,
-  }),
-  createCard: async (params) =>
-    makeCard(uniqueId("new-card"), params.column_id, {
-      content: params.content,
-      position: params.position,
-    }),
-  updateCardContent: async (id, content) => makeCard(id, "col-active", { content }),
-  acquireCardLock: async (id) => ({ ...findCard(id), locked_by: "user" }),
-  updateCardContentCas: async (id, content) => ({
-    ...findCard(id),
-    content,
-    locked_by: "user",
-  }),
-  updateCardContentCasOwned: async (id, holder, content) => ({
-    ...findCard(id),
-    content,
-    locked_by: holder,
-  }),
-  updateCardContentCasAndRelease: async (id, _holder, content) => ({
-    ...findCard(id),
-    content,
-    locked_by: null,
-    locked_at: null,
-  }),
-  releaseCardLock: async (id) => ({
-    ...findCard(id),
-    locked_by: null,
-    locked_at: null,
-  }),
-  deleteColumn: async (id) => {
+  createCard: (params) =>
+    Promise.resolve(
+      makeCard(uniqueId("new-card"), params.column_id, {
+        content: params.content,
+        position: params.position,
+      }),
+    ),
+  updateCardContent: (id, content) =>
+    Promise.resolve(makeCard(id, "col-active", { content })),
+  acquireCardLock: (id) => Promise.resolve({ ...findCard(id), locked_by: "user" }),
+  updateCardContentCas: (id, content) =>
+    Promise.resolve({ ...findCard(id), content, locked_by: "user" }),
+  updateCardContentCasOwned: (id, holder, content) =>
+    Promise.resolve({ ...findCard(id), content, locked_by: holder }),
+  updateCardContentCasAndRelease: (id, _holder, content) =>
+    Promise.resolve({ ...findCard(id), content, locked_by: null, locked_at: null }),
+  releaseCardLock: (id) =>
+    Promise.resolve({ ...findCard(id), locked_by: null, locked_at: null }),
+  deleteColumn: (id) => {
     deckState.deleteColumnCalls.push(id);
+    return Promise.resolve();
   },
-  deleteCard: async (id) => {
+  deleteCard: (id) => {
     deckState.deleteCardCalls.push(id);
+    return Promise.resolve();
   },
-  moveColumn: async (id, position) => {
+  moveColumn: (id, position) => {
     deckState.moveColumnCalls.push({ id, position });
-    return makeColumn(id, "deck-1", { position });
+    return Promise.resolve(makeColumn(id, "deck-1", { position }));
   },
-  moveCard: async (id, position) => {
+  moveCard: (id, position) => {
     deckState.moveCardCalls.push({ id, position });
-    return makeCard(id, "col-active", { position });
+    return Promise.resolve(makeCard(id, "col-active", { position }));
   },
-  moveCardToColumn: async (id, columnId) => {
+  moveCardToColumn: (id, columnId) => {
     deckState.moveCardToColumnCalls.push({ id, columnId });
-    return makeCard(id, columnId);
+    return Promise.resolve(makeCard(id, columnId));
   },
-  updateCardScore: async (id, delta) => {
+  updateCardScore: (id, delta) => {
     deckState.updateCardScoreCalls.push({ id, delta });
-    return makeCard(id, "col-active");
+    return Promise.resolve(makeCard(id, "col-active"));
   },
-  getTagSuggestions: async (_deckId: string, prefix: string) =>
-    [{ id: `tag-${prefix}`, name: `${prefix}-suggestion` }],
-  listReporters: async (deckId: string) => {
+  getTagSuggestions: (_deckId: string, prefix: string) =>
+    Promise.resolve([{ id: `tag-${prefix}`, name: `${prefix}-suggestion` }]),
+  listReporters: (deckId: string) => {
     deckState.reporterCalls.push(["listReporters", deckId]);
-    return deckState.reporters;
+    return Promise.resolve(deckState.reporters);
   },
-  addReporter: async (deckId: string, config: ReporterConfig) => {
+  addReporter: (deckId: string, config: ReporterConfig) => {
     deckState.reporterCalls.push(["addReporter", deckId, config.name]);
-    return { ...config, reporter_id: "assigned-id" };
+    return Promise.resolve({ ...config, reporter_id: "assigned-id" });
   },
-  updateReporter: async (deckId: string, config: ReporterConfig) => {
+  updateReporter: (deckId: string, config: ReporterConfig) => {
     deckState.reporterCalls.push(["updateReporter", deckId, config.reporter_id]);
-    return config;
+    return Promise.resolve(config);
   },
-  removeReporter: async (deckId: string, reporterId: string) => {
+  removeReporter: (deckId: string, reporterId: string) => {
     deckState.reporterCalls.push(["removeReporter", deckId, reporterId]);
+    return Promise.resolve();
   },
-  startReporter: async (deckId: string, reporterId: string) => {
+  startReporter: (deckId: string, reporterId: string) => {
     deckState.reporterCalls.push(["startReporter", deckId, reporterId]);
+    return Promise.resolve();
   },
-  stopReporter: async (reporterId: string) => {
+  stopReporter: (reporterId: string) => {
     deckState.reporterCalls.push(["stopReporter", reporterId]);
+    return Promise.resolve();
   },
-  listRunningReporters: async () => {
+  listRunningReporters: () => {
     deckState.reporterCalls.push(["listRunningReporters"]);
-    return deckState.runningReporters;
+    return Promise.resolve(deckState.runningReporters);
   },
 };

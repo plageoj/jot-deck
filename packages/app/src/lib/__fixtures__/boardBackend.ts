@@ -56,14 +56,14 @@ export function resetBoardState(): void {
 }
 
 export const mockBackend: Partial<DatabaseBackend> = {
-  getAllDecks: async () => boardState.decks,
-  getColumnsByDeck: async () => boardState.columns,
-  getCardsByColumn: async (columnId: string) =>
-    boardState.cardsByColumn.get(columnId) ?? [],
-  getTagsByDeck: async () => boardState.tagsByDeck,
-  getDeletedColumns: async () => boardState.deletedColumns,
-  getDeletedCards: async () => boardState.deletedCards,
-  createColumn: async (params) => {
+  getAllDecks: () => Promise.resolve(boardState.decks),
+  getColumnsByDeck: () => Promise.resolve(boardState.columns),
+  getCardsByColumn: (columnId: string) =>
+    Promise.resolve(boardState.cardsByColumn.get(columnId) ?? []),
+  getTagsByDeck: () => Promise.resolve(boardState.tagsByDeck),
+  getDeletedColumns: () => Promise.resolve(boardState.deletedColumns),
+  getDeletedCards: () => Promise.resolve(boardState.deletedCards),
+  createColumn: (params) => {
     boardState.createColumnCalls.push(params);
     const col = makeColumn(
       `created-${boardState.createColumnCalls.length}`,
@@ -82,21 +82,21 @@ export const mockBackend: Partial<DatabaseBackend> = {
             col,
           ].sort((a, b) => a.position - b.position);
     boardState.cardsByColumn.set(col.id, []);
-    return col;
+    return Promise.resolve(col);
   },
-  restoreCard: async (id) => {
+  restoreCard: (id) => {
     boardState.restoreCardCalls.push(id);
     const idx = boardState.deletedCards.findIndex((c) => c.id === id);
     if (idx !== -1) boardState.deletedCards.splice(idx, 1);
-    return makeCard(id, "");
+    return Promise.resolve(makeCard(id, ""));
   },
-  restoreColumn: async (id) => {
+  restoreColumn: (id) => {
     boardState.restoreColumnCalls.push(id);
     const idx = boardState.deletedColumns.findIndex((c) => c.id === id);
     if (idx !== -1) boardState.deletedColumns.splice(idx, 1);
-    return makeColumn(id, "");
+    return Promise.resolve(makeColumn(id, ""));
   },
-  createCard: async (params) => {
+  createCard: (params) => {
     boardState.createCardCalls.push({
       column_id: params.column_id,
       content: params.content ?? "",
@@ -109,13 +109,14 @@ export const mockBackend: Partial<DatabaseBackend> = {
     );
     const existing = boardState.cardsByColumn.get(params.column_id) ?? [];
     boardState.cardsByColumn.set(params.column_id, [...existing, card]);
-    return card;
+    return Promise.resolve(card);
   },
-  deleteColumn: async (id) => {
+  deleteColumn: (id) => {
     boardState.deleteColumnCalls.push(id);
     boardState.columns = boardState.columns.filter((c) => c.id !== id);
+    return Promise.resolve();
   },
-  deleteCard: async (id) => {
+  deleteCard: (id) => {
     boardState.deleteCardCalls.push(id);
     for (const [colId, cards] of boardState.cardsByColumn) {
       boardState.cardsByColumn.set(
@@ -123,25 +124,28 @@ export const mockBackend: Partial<DatabaseBackend> = {
         cards.filter((c) => c.id !== id),
       );
     }
+    return Promise.resolve();
   },
-  moveCard: async (id, position) => {
+  moveCard: (id, position) => {
     boardState.moveCardCalls.push({ id, position });
-    return makeCard(id, "", { position });
+    return Promise.resolve(makeCard(id, "", { position }));
   },
-  moveCardToColumn: async (id, columnId) => {
+  moveCardToColumn: (id, columnId) => {
     boardState.moveCardToColumnCalls.push({ id, column_id: columnId });
-    return makeCard(id, columnId);
+    return Promise.resolve(makeCard(id, columnId));
   },
-  updateCardScore: async (id, delta) => {
+  updateCardScore: (id, delta) => {
     boardState.updateCardScoreCalls.push({ id, delta });
-    return makeCard(id, "");
+    return Promise.resolve(makeCard(id, ""));
   },
-  moveColumn: async (id, position) => {
+  moveColumn: (id, position) => {
     boardState.moveColumnCalls.push({ id, position });
-    return makeColumn(id, "", { position });
+    return Promise.resolve(makeColumn(id, "", { position }));
   },
-  createDeck: async (params) => {
+  createDeck: (params) => {
     boardState.createDeckCalls++;
-    return makeDeck(`deck-new-${boardState.createDeckCalls}`, params.name ?? "Untitled");
+    return Promise.resolve(
+      makeDeck(`deck-new-${boardState.createDeckCalls}`, params.name ?? "Untitled"),
+    );
   },
 };
