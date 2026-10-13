@@ -33,15 +33,38 @@
   const focus = new FocusManager(data);
   const actions = new ActionDispatcher(data, focus);
 
+  // The title suffix is the productName, which tauri.conf.preview.json
+  // overrides to "Jot Deck Preview". Under Tauri it stays null until
+  // getName() resolves so setTitle never clobbers the config title with the
+  // Production name.
+  const isTauri = "__TAURI_INTERNALS__" in window;
+  let appName = $state<string | null>(isTauri ? null : "Jot Deck");
+
+  if (isTauri) {
+    import("@tauri-apps/api/app")
+      .then(({ getName }) => getName())
+      .then((name) => (appName = name))
+      .catch((e) => {
+        console.error("Failed to get app name:", e);
+        appName = "Jot Deck";
+      });
+  }
+
   let windowTitle = $derived(
-    data.currentDeck ? `${data.currentDeck.name} - Jot Deck` : "Jot Deck",
+    appName === null
+      ? null
+      : data.currentDeck
+        ? `${data.currentDeck.name} - ${appName}`
+        : appName,
   );
 
   $effect(() => {
-    document.title = windowTitle;
-    if ("__TAURI_INTERNALS__" in window) {
+    const title = windowTitle;
+    if (title === null) return;
+    document.title = title;
+    if (isTauri) {
       import("@tauri-apps/api/window")
-        .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(windowTitle))
+        .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
         .catch((e) => console.error("Failed to set window title:", e));
     }
   });
