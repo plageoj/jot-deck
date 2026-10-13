@@ -179,6 +179,16 @@ Undo スタックとは独立に、論理削除された Column/Card は DB 上�
 | `?` または `Ctrl+/` | キーバインドチートシート表示 |
 | `Ctrl+,` | 設定画面を開く |
 
+### 4.7 Deck の読み込み失敗時
+
+Deck の読み込みに失敗して失敗画面が表示されている間は、Column / Card フォーカスのキーバインドは無効になる。有効なのは以下のキーと、パレット・ダイアログの呼び出し（`Ctrl+p`、`Ctrl+Shift+p`、`Ctrl+,` など）のみ。
+
+| キー | 動作 |
+|:---|:---|
+| `Enter` / `r` | Deck を再読み込み |
+
+> **Note:** この 2 キーは失敗画面専用の固定キーで、カスタマイズの対象外。
+
 ---
 
 ## 5. Edit フォーカス
@@ -239,6 +249,7 @@ CodeMirror の Vim モードがそのまま適用される。
 | `Switch Deck` | Deck 一覧を表示して切り替え |
 | `New Deck` | 新規 Deck 作成 |
 | `Restore Getting Started Deck` | オンボーディング Deck を再生成（既存 Deck は残したまま先頭に追加して選択） |
+| `Reload Deck` | 表示中の Deck を DB から再読み込み（読み込み失敗時の再試行にも使う） |
 | `New Column` | 新規 Column 作成 |
 | `Delete Column` | Column 論理削除 |
 | `Trash` | ゴミ箱一覧を表示（任意の Column/Card を選択して復元） |

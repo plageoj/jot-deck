@@ -416,7 +416,7 @@ describe("DeckData trash", () => {
     ];
 
     // Sync DeckData's cardsByColumn with the new mock content above.
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
     data.filterByTag("todo");
     expect(data.filteredCardIds?.has("card-active")).toBe(true);
 
@@ -521,18 +521,20 @@ describe("DeckData CRUD", () => {
     expect(col).not.toBeNull();
   });
 
-  it("createColumnAtPosition keeps the created column when reloading columns fails", async () => {
+  it("createColumnAtPosition still records the created column when the refresh fails", async () => {
     vi.spyOn(mockBackend, "getColumnsByDeck").mockRejectedValueOnce(
       new Error("reload failed"),
     );
+    const columnsBefore = data.columns;
 
     const col = await data.createColumnAtPosition(0);
 
+    // The board is kept as loaded; the next successful load shows the column.
     expect(col).not.toBeNull();
-    expect(data.columns.map((column) => column.id)).toContain(col!.id);
+    expect(data.columns).toBe(columnsBefore);
+    expect(data.error).toContain("Failed to reload deck");
     await data.history.undo();
     expect(state.deleteColumnCalls).toContain(col!.id);
-    expect(data.error).toContain("Failed to reload columns");
   });
 
   it("createColumnAtPosition does not update a deck selected during reload", async () => {
@@ -567,7 +569,7 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
-  it("reloadColumns ignores a successful result for a deck that is no longer active", async () => {
+  it("refreshDeck ignores a successful result for a deck that is no longer active", async () => {
     const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
     const otherDeck = makeDeck("deck-2");
     const otherColumn = makeColumn("col-deck-2", "deck-2");
@@ -582,7 +584,7 @@ describe("DeckData CRUD", () => {
       );
     });
 
-    const reloading = data.reloadColumns();
+    const reloading = data.refreshDeck();
     await reloadStarted;
     data.currentDeck = otherDeck;
     data.columns = [otherColumn];
@@ -594,7 +596,7 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
-  it("reloadColumns ignores a deck switch while loading cards", async () => {
+  it("refreshDeck ignores a deck switch while loading cards", async () => {
     const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
     const otherDeck = makeDeck("deck-2");
     const otherColumn = makeColumn("col-deck-2", "deck-2");
@@ -610,7 +612,7 @@ describe("DeckData CRUD", () => {
     });
     vi.spyOn(mockBackend, "getColumnsByDeck").mockResolvedValueOnce([staleColumn]);
 
-    const reloading = data.reloadColumns();
+    const reloading = data.refreshDeck();
     await cardsStarted;
     data.currentDeck = otherDeck;
     data.columns = [otherColumn];
@@ -622,15 +624,15 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
-  it("reloadColumns keeps current cards when a card fetch fails", async () => {
+  it("refreshDeck keeps the loaded board when a card fetch fails", async () => {
     const before = { ...data.cardsByColumn };
     const columnsBefore = data.columns;
     vi.spyOn(mockBackend, "getCardsByColumn").mockRejectedValueOnce(new Error("db gone"));
 
-    await expect(data.reloadColumns()).resolves.toBe(false);
+    await expect(data.refreshDeck()).resolves.toBe(false);
     expect(data.columns).toBe(columnsBefore);
     expect(data.cardsByColumn).toEqual(before);
-    expect(data.error).toContain("Failed to reload columns");
+    expect(data.error).toContain("Failed to reload deck");
   });
 
   it("createCard without position appends and returns the new card", async () => {
@@ -648,7 +650,7 @@ describe("DeckData CRUD", () => {
     state.cardsByColumn = new Map([
       ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
     ]);
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
 
     await data.saveCard("card-1", "new content");
 
@@ -662,7 +664,7 @@ describe("DeckData CRUD", () => {
     state.cardsByColumn = new Map([
       ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
     ]);
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
 
     const session = await data.startCardEdit("card-1");
     expect(session).not.toBeNull();
@@ -676,7 +678,7 @@ describe("DeckData CRUD", () => {
     state.cardsByColumn = new Map([
       ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
     ]);
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
 
     const session = await data.startCardEdit("card-1");
     expect(session).not.toBeNull();
@@ -882,7 +884,7 @@ describe("DeckData CRUD", () => {
     state.cardsByColumn = new Map([
       ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
     ]);
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
 
     await data.saveCard("card-1", "new content");
     expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
@@ -901,7 +903,7 @@ describe("DeckData CRUD", () => {
         [makeCard("card-a", "col-active"), makeCard("card-b", "col-active")],
       ],
     ]);
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
 
     await data.moveCard("card-a", 1);
     expect(state.moveCardCalls).toEqual([{ id: "card-a", position: 1 }]);
@@ -918,7 +920,7 @@ describe("DeckData CRUD", () => {
       makeColumn("col-active", "deck-1"),
       makeColumn("col-b", "deck-1"),
     ];
-    await data.reloadColumns();
+    await data.refreshDeck();
 
     await data.moveColumn("col-b", 0);
     expect(state.moveColumnCalls).toEqual([{ id: "col-b", position: 0 }]);
@@ -939,7 +941,7 @@ describe("DeckData CRUD", () => {
       ["col-active", [makeCard("card-x", "col-active")]],
       ["col-b", []],
     ]);
-    await data.reloadColumns();
+    await data.refreshDeck();
 
     await data.moveCardToColumn("card-x", "col-b");
     expect(state.moveCardToColumnCalls).toEqual([
@@ -1029,7 +1031,7 @@ describe("DeckData CRUD", () => {
         ],
       ],
     ]);
-    await data.loadCardsForColumns();
+    await data.refreshDeck();
 
     data.filterByTag("alpha");
 
@@ -1056,27 +1058,14 @@ describe("DeckData CRUD", () => {
     expect(await data.getTagSuggestions("any")).toEqual([]);
   });
 
-  it("loadDeckTags hits the backend when a deck is selected", async () => {
-    const before = state.getTagsByDeckCalls;
-    await data.loadDeckTags();
-    expect(state.getTagsByDeckCalls).toBeGreaterThan(before);
-  });
-
-  it("loadDeckTags is a no-op when no current deck", async () => {
-    data.currentDeck = null;
-    const before = state.getTagsByDeckCalls;
-    await data.loadDeckTags();
-    expect(state.getTagsByDeckCalls).toBe(before);
-  });
-
   it("getTrashItems returns empty when no current deck", async () => {
     data.currentDeck = null;
     expect(await data.getTrashItems()).toEqual([]);
   });
 
-  it("reloadColumns is a no-op when no current deck", async () => {
+  it("refreshDeck is a no-op when no current deck", async () => {
     data.currentDeck = null;
-    await expect(data.reloadColumns()).resolves.toBe(false);
+    await expect(data.refreshDeck()).resolves.toBe(false);
   });
 });
 
@@ -1095,23 +1084,25 @@ describe("DeckData external changes", () => {
     await data.init();
   });
 
-  it("reloadFromExternalChange reloads columns, cards, and tags for the current deck", async () => {
+  it("refreshDeck reloads columns, cards, and tags for the current deck", async () => {
     state.columns = [makeColumn("col-x", "deck-1")];
     state.cardsByColumn = new Map([
       ["col-x", [makeCard("card-x", "col-x", { content: "hi" })]],
     ]);
     state.tagsByDeck = [{ id: "t1", name: "todo" }];
 
-    await data.reloadFromExternalChange();
+    await data.refreshDeck();
 
     expect(data.columns.map((c) => c.id)).toEqual(["col-x"]);
     expect(data.cardsByColumn["col-x"].map((c) => c.id)).toEqual(["card-x"]);
     expect(data.deckTags).toEqual([{ id: "t1", name: "todo" }]);
   });
 
-  it("reloadFromExternalChange is a no-op when no current deck", async () => {
+  it("refreshDeck makes no backend calls when no current deck", async () => {
     data.currentDeck = null;
-    await expect(data.reloadFromExternalChange()).resolves.toBeUndefined();
+    const before = state.getTagsByDeckCalls;
+    await expect(data.refreshDeck()).resolves.toBe(false);
+    expect(state.getTagsByDeckCalls).toBe(before);
   });
 
   it("re-applies an active tag filter after an external reload", async () => {
@@ -1121,7 +1112,7 @@ describe("DeckData external changes", () => {
     ]);
     data.filterByTag("todo");
 
-    await data.reloadFromExternalChange();
+    await data.refreshDeck();
 
     expect(data.activeTagFilter).toBe("todo");
     expect(data.filteredCardIds?.has("c1")).toBe(true);
@@ -1140,7 +1131,7 @@ describe("DeckData external changes", () => {
       return [];
     };
 
-    await data.reloadFromExternalChange();
+    await data.refreshDeck();
     mockBackend.getTagsByDeck = originalGetTags;
 
     // Columns were not overwritten with the stale (deck-1) fetch.
@@ -1360,7 +1351,6 @@ describe("DeckData reporter streams", () => {
   });
 
   it("drops the overlay even when the post-stream reload fails", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const original = mockBackend.getCardsByColumn!;
     mockBackend.getCardsByColumn = async () => {
       throw new Error("db gone");
@@ -1373,8 +1363,7 @@ describe("DeckData reporter streams", () => {
 
     // A failed reload must not leave the card stuck read-only.
     expect(data.isStreaming("card-1")).toBe(false);
-    expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
+    expect(data.error).toContain("Failed to reload deck");
   });
 
   it("evicts a stalled stream so a dead Reporter cannot pin a card read-only", () => {

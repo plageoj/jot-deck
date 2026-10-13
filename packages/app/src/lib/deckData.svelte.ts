@@ -23,6 +23,14 @@ export interface EditSession {
   expectedUpdatedAt: string;
 }
 
+/** Everything the board shows for one deck, loaded off-state and committed at once. */
+interface DeckSnapshot {
+  deckId: string;
+  columns: Column[];
+  cardsByColumn: Record<string, Card[]>;
+  tags: Tag[];
+}
+
 export class DeckData {
   private db!: DatabaseBackend;
 
@@ -31,7 +39,11 @@ export class DeckData {
   columns = $state<Column[]>([]);
   cardsByColumn = $state<Record<string, Card[]>>({});
   loading = $state(true);
+  /** Operation error shown as a dismissible banner over the board. */
   error = $state<string | null>(null);
+  /** Set when the decks or the selected deck could not be loaded at all; the
+   * board is replaced by a failure view with a retry until a load succeeds. */
+  deckLoadError = $state<string | null>(null);
   deckTags = $state<Tag[]>([]);
   activeTagFilter = $state<string | null>(null);
   filteredCardIds = $state<Set<string> | null>(null);
@@ -41,9 +53,12 @@ export class DeckData {
   // SQLite. A card with an entry here renders the streamed text read-only and
   // shows an "AI generating" affordance until `card.stream.end` commits.
   streamingText = $state<Record<string, string>>({});
-  // Set after columns finish loading for currentDeck. Use this — not
+  // Set when a snapshot of currentDeck is committed. Use this — not
   // currentDeck — to drive logic that depends on the column list being ready.
   loadedDeckId = $state<string | null>(null);
+  // Bumped by every deck load; only the latest load may commit its snapshot.
+  // Session-only control state — never persisted.
+  private deckLoadGeneration = 0;
   // Generic Undo/Redo (001-keybindings.md §4.4). Session-scoped — cleared on
   // deck switch in `selectDeck`, never persisted.
   readonly history = new UndoStack();
@@ -64,7 +79,7 @@ export class DeckData {
   async loadDecks() {
     try {
       this.loading = true;
-      this.error = null;
+      this.deckLoadError = null;
       this.decks = await this.db.getAllDecks();
       if (this.decks.length === 0) {
         this.decks = [await this.createOnboardingDeck()];
@@ -77,7 +92,7 @@ export class DeckData {
         await this.selectDeck(lastDeck ?? this.decks[0]);
       }
     } catch (e) {
-      this.error = `Failed to load decks: ${e}`;
+      this.deckLoadError = `Failed to load decks: ${e}`;
     } finally {
       this.loading = false;
     }
@@ -191,67 +206,116 @@ export class DeckData {
     }
   }
 
-  async selectDeck(deck: Deck) {
+  /** Switch to `deck`. The previous deck's board is cleared immediately so it
+   * can never be shown or mutated under the new deck's name. */
+  async selectDeck(deck: Deck): Promise<boolean> {
     this.currentDeck = deck;
     this.loadedDeckId = null;
+    this.deckLoadError = null;
+    this.columns = [];
+    this.cardsByColumn = {};
+    this.deckTags = [];
     this.history.clear();
     this.saveLastDeckId(deck.id);
     this.clearTagFilter();
-    try {
-      this.columns = await this.db.getColumnsByDeck(deck.id);
-      await this.loadCardsForColumns();
-      await this.loadDeckTags();
-      this.loadedDeckId = deck.id;
-    } catch (e) {
-      this.error = `Failed to load columns: ${e}`;
-    }
+    return this.refreshDeck();
+  }
+
+  /** Whether the board shows a committed snapshot of the selected deck. Data
+   * mutations are only meaningful in this state. */
+  get isDeckLoaded(): boolean {
+    return (
+      this.currentDeck !== null && this.loadedDeckId === this.currentDeck.id
+    );
   }
 
   /**
-   * Fetch cards for each column. By default a failed column degrades to an empty
-   * list; with `strict`, the first failure rejects so callers can keep their
-   * current card state instead of replacing it with empty columns.
+   * The single load/commit path for the selected deck (deck switch, external
+   * change, and every post-mutation refresh). Loads a complete snapshot without
+   * touching reactive state, then commits it only if no newer load started and
+   * the deck is still selected. Any failed fetch fails the whole snapshot, so
+   * a partial result never replaces cards with empty columns: a loaded board is
+   * kept as-is (error banner), and an unloaded deck shows the failure view.
    */
-  private async getCardsForColumns(
-    columns: Column[],
-    strict = false,
-  ): Promise<Record<string, Card[]>> {
-    const entries = await Promise.all(
-      columns.map(async (col) => {
-        try {
-          return [col.id, await this.db.getCardsByColumn(col.id)] as const;
-        } catch (e) {
-          if (strict) throw e;
-          console.error(`Failed to load cards for column ${col.id}:`, e);
-          return [col.id, []] as const;
-        }
-      }),
-    );
-    return Object.fromEntries(entries);
-  }
-
-  async loadCardsForColumns() {
-    this.cardsByColumn = await this.getCardsForColumns(this.columns);
-  }
-
-  async reloadColumns(): Promise<boolean> {
-    if (!this.currentDeck) return false;
-    const deckId = this.currentDeck.id;
+  async refreshDeck(): Promise<boolean> {
+    const deckId = this.currentDeck?.id;
+    if (!deckId) return false;
+    const generation = ++this.deckLoadGeneration;
+    const isCurrent = () =>
+      generation === this.deckLoadGeneration &&
+      this.currentDeck?.id === deckId;
     try {
-      const columns = await this.db.getColumnsByDeck(deckId);
-      if (this.currentDeck?.id !== deckId) return false;
-
-      const cardsByColumn = await this.getCardsForColumns(columns, true);
-      if (this.currentDeck?.id !== deckId) return false;
-
-      this.columns = columns;
-      this.cardsByColumn = cardsByColumn;
+      const snapshot = await this.loadSnapshot(deckId);
+      if (!isCurrent()) return false;
+      this.commitSnapshot(snapshot);
       return true;
     } catch (e) {
-      if (this.currentDeck?.id === deckId) {
-        this.error = `Failed to reload columns: ${e}`;
+      if (!isCurrent()) {
+        console.error(`Discarded failed load for deck ${deckId}:`, e);
+      } else if (this.loadedDeckId === deckId) {
+        this.error = `Failed to reload deck: ${e}`;
+      } else {
+        this.deckLoadError = `Failed to load deck: ${e}`;
       }
       return false;
+    }
+  }
+
+  /** User-initiated reload (Reload Deck command / failure-view retry). Falls
+   * back to reloading the deck list when not even that could be loaded. */
+  async reloadDeck(): Promise<boolean> {
+    if (!this.currentDeck) {
+      await this.loadDecks();
+      return this.isDeckLoaded;
+    }
+    return this.refreshDeck();
+  }
+
+  private async loadSnapshot(deckId: string): Promise<DeckSnapshot> {
+    const columns = await this.db.getColumnsByDeck(deckId);
+    const [cardEntries, tags] = await Promise.all([
+      Promise.all(
+        columns.map(
+          async (col) => [col.id, await this.db.getCardsByColumn(col.id)] as const,
+        ),
+      ),
+      this.db.getTagsByDeck(deckId),
+    ]);
+    return { deckId, columns, cardsByColumn: Object.fromEntries(cardEntries), tags };
+  }
+
+  private commitSnapshot(snapshot: DeckSnapshot) {
+    // The first commit for a deck (switch or retry) starts a fresh board, so
+    // stale banners from the previous one go away with it.
+    if (this.loadedDeckId !== snapshot.deckId) this.error = null;
+    this.columns = snapshot.columns;
+    this.cardsByColumn = snapshot.cardsByColumn;
+    this.deckTags = snapshot.tags;
+    this.loadedDeckId = snapshot.deckId;
+    this.deckLoadError = null;
+    if (this.activeTagFilter) this.filterByTag(this.activeTagFilter);
+  }
+
+  /**
+   * Refresh only the deck's tags after an in-place card content patch. Saves
+   * happen mid-edit, where a full board reload is deliberately deferred (see
+   * the external-change effect in +page.svelte). Commits only if no deck load
+   * started meanwhile — such a load carries fresher tags itself.
+   */
+  private async refreshDeckTags(): Promise<void> {
+    const deckId = this.currentDeck?.id;
+    if (!deckId) return;
+    const generation = this.deckLoadGeneration;
+    try {
+      const tags = await this.db.getTagsByDeck(deckId);
+      if (
+        generation === this.deckLoadGeneration &&
+        this.currentDeck?.id === deckId
+      ) {
+        this.deckTags = tags;
+      }
+    } catch (e) {
+      console.error("Failed to load deck tags:", e);
     }
   }
 
@@ -260,7 +324,7 @@ export class DeckData {
   // when another process (CLI / MCP bridge) commits to the shared DB. Each
   // debounced observation bumps `externalChangeTick`; a single $effect in the
   // page reacts to that tick (and to the edit-focus state) and calls
-  // `reloadFromExternalChange` when it's safe — one reactive source of truth, so
+  // `refreshDeck` when it's safe — one reactive source of truth, so
   // deferring during an edit and resuming after it need no separate flush path.
 
   /** Bumped (debounced) each time an external DB change is observed. Read from a
@@ -278,13 +342,13 @@ export class DeckData {
       this.streamingText = value;
     },
     reloadColumn: async (columnId) => {
+      // A column outside the loaded board (another deck, or one created after
+      // the last load) is picked up by the debounced full reconcile instead.
       if (!this.cardsByColumn[columnId]) {
         this.externalEvents.requestExternalChange();
         return;
       }
-      const cards = await this.db.getCardsByColumn(columnId);
-      if (this.cardsByColumn[columnId]) this.cardsByColumn[columnId] = cards;
-      await this.loadDeckTags();
+      await this.refreshDeck();
     },
     scheduleReload: () => this.externalEvents.requestExternalChange(),
   });
@@ -298,38 +362,6 @@ export class DeckData {
   /** Whether a card is currently receiving a Reporter stream (read-only). */
   isStreaming(cardId: string): boolean {
     return this.streamingText[cardId] !== undefined;
-  }
-
-  /** Re-read the current deck after an external change.
-   *
-   * Fetches everything into locals first and commits only if the selected deck
-   * hasn't changed meanwhile — a slow reload for deck A must never overwrite
-   * deck B after the user switches. */
-  async reloadFromExternalChange() {
-    const deckId = this.currentDeck?.id;
-    if (!deckId) return;
-    try {
-      const columns = await this.db.getColumnsByDeck(deckId);
-      const cardEntries = await Promise.all(
-        columns.map(async (col) => {
-          try {
-            return [col.id, await this.db.getCardsByColumn(col.id)] as const;
-          } catch (e) {
-            console.error(`Failed to load cards for column ${col.id}:`, e);
-            return [col.id, []] as const;
-          }
-        }),
-      );
-      const tags = await this.db.getTagsByDeck(deckId);
-      // The user may have switched decks while we were loading — discard if so.
-      if (this.currentDeck?.id !== deckId) return;
-      this.columns = columns;
-      this.cardsByColumn = Object.fromEntries(cardEntries);
-      this.deckTags = tags;
-      if (this.activeTagFilter) this.filterByTag(this.activeTagFilter);
-    } catch (e) {
-      this.error = `Failed to reload after external change: ${e}`;
-    }
   }
 
   stopWatchingExternalChanges() {
@@ -376,6 +408,8 @@ export class DeckData {
           await this.selectDeck(this.decks[0]);
         } else {
           this.currentDeck = null;
+          this.loadedDeckId = null;
+          this.deckLoadError = null;
           this.columns = [];
           this.cardsByColumn = {};
           this.deckTags = [];
@@ -489,31 +523,15 @@ export class DeckData {
     record = true,
   ): Promise<Column | null> {
     if (!this.currentDeck) return null;
-    const deckId = this.currentDeck.id;
     const generation = this.history.currentGeneration;
     try {
       const col = await this.db.createColumn({
-        deck_id: deckId,
+        deck_id: this.currentDeck.id,
         position,
       });
-      if (this.currentDeck?.id === deckId) {
-        const reloaded = await this.reloadColumns();
-        if (!reloaded && this.currentDeck?.id === deckId) {
-          // The column was created before the reload failed. Keep local state and
-          // history consistent with the database so retrying cannot create a duplicate.
-          if (!this.columns.some((column) => column.id === col.id)) {
-            this.columns = [
-              ...this.columns.map((column) =>
-                column.position >= position
-                  ? { ...column, position: column.position + 1 }
-                  : column,
-              ),
-              col,
-            ].sort((a, b) => a.position - b.position);
-          }
-          this.cardsByColumn[col.id] ??= [];
-        }
-      }
+      // The column exists even if this refresh fails or is superseded, so it is
+      // still recorded; the board catches up on the next successful load.
+      await this.refreshDeck();
       if (record) this.recordColumnCreate(col.id, generation);
       return col;
     } catch (e) {
@@ -541,7 +559,7 @@ export class DeckData {
           card,
         ];
       } else {
-        await this.loadCardsForColumns();
+        await this.refreshDeck();
       }
       if (record) this.recordCardCreate(card.id, generation);
       return card;
@@ -569,7 +587,7 @@ export class DeckData {
         break;
       }
     }
-    await this.loadDeckTags();
+    await this.refreshDeckTags();
   }
 
   /** Acquire the repository lock before mounting the GUI editor. */
@@ -615,7 +633,7 @@ export class DeckData {
       this.replaceCard(updated);
       session.expectedUpdatedAt = updated.updated_at;
       if (release) this.completeCardEdit(session);
-      await this.loadDeckTags();
+      await this.refreshDeckTags();
       if (record && previousContent !== null && previousContent !== content) {
         this.history.push(
           {
@@ -821,7 +839,7 @@ export class DeckData {
 
   private async deleteColumnImpl(columnId: string): Promise<void> {
     await this.db.deleteColumn(columnId);
-    await this.reloadColumns();
+    await this.refreshDeck();
   }
 
   async deleteColumn(columnId: string, record = true): Promise<boolean> {
@@ -838,7 +856,7 @@ export class DeckData {
 
   private async deleteCardImpl(cardId: string): Promise<void> {
     await this.db.deleteCard(cardId);
-    await this.loadCardsForColumns();
+    await this.refreshDeck();
   }
 
   async deleteCard(cardId: string, record = true): Promise<boolean> {
@@ -855,7 +873,7 @@ export class DeckData {
 
   private async moveColumnImpl(id: string, position: number): Promise<void> {
     await this.db.moveColumn(id, position);
-    await this.reloadColumns();
+    await this.refreshDeck();
   }
 
   async moveColumn(id: string, position: number, record = true): Promise<boolean> {
@@ -881,7 +899,7 @@ export class DeckData {
 
   private async moveCardImpl(id: string, position: number): Promise<void> {
     await this.db.moveCard(id, position);
-    await this.loadCardsForColumns();
+    await this.refreshDeck();
   }
 
   async moveCard(id: string, position: number, record = true): Promise<boolean> {
@@ -913,7 +931,7 @@ export class DeckData {
     columnId: string,
   ): Promise<void> {
     await this.db.moveCardToColumn(cardId, columnId);
-    await this.loadCardsForColumns();
+    await this.refreshDeck();
   }
 
   async moveCardToColumn(
@@ -954,18 +972,9 @@ export class DeckData {
   async updateCardScore(cardId: string, delta: number) {
     try {
       await this.db.updateCardScore(cardId, delta);
-      await this.loadCardsForColumns();
+      await this.refreshDeck();
     } catch (e) {
       this.error = `Failed to update score: ${e}`;
-    }
-  }
-
-  async loadDeckTags() {
-    if (!this.currentDeck) return;
-    try {
-      this.deckTags = await this.db.getTagsByDeck(this.currentDeck.id);
-    } catch (e) {
-      console.error("Failed to load deck tags:", e);
     }
   }
 
@@ -1074,9 +1083,7 @@ export class DeckData {
     } else {
       await this.db.restoreCard(id);
     }
-    await Promise.all([this.reloadColumns(), this.loadDeckTags()]);
-    if (this.activeTagFilter) {
-      this.filterByTag(this.activeTagFilter);
-    }
+    // The snapshot commit also refreshes tags and re-applies the tag filter.
+    await this.refreshDeck();
   }
 }
