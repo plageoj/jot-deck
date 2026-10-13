@@ -18,6 +18,8 @@ beforeAll(() => {
 afterEach(() => {
   // updaterStore is a shared singleton — reset it between cases.
   updaterStore.status = { kind: "idle" };
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("AboutDialog outside Tauri", () => {
@@ -89,6 +91,17 @@ describe("AboutDialog outside Tauri", () => {
     await fireEvent.keyDown(dialog, { key: "j" });
     document.body.removeEventListener("keydown", bubbled);
     expect(bubbled).not.toHaveBeenCalled();
+  });
+});
+
+describe("AboutDialog in Tauri", () => {
+  it("checks for updates when opened", () => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    const check = vi.spyOn(updaterStore, "check").mockResolvedValue();
+
+    render(AboutDialog, { props: { onClose: vi.fn() } });
+
+    expect(check).toHaveBeenCalledOnce();
   });
 });
 
