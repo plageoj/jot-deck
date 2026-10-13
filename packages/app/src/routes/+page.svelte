@@ -58,12 +58,18 @@
         : appName,
   );
 
+  // Chain setTitle calls so they apply in effect order. Separate dynamic
+  // imports can resolve out of order on a cold start, letting an earlier
+  // title (e.g. before the deck loads) overwrite the latest one.
+  let titleSync: Promise<void> = Promise.resolve();
+
   $effect(() => {
     const title = windowTitle;
     if (title === null) return;
     document.title = title;
     if (isTauri) {
-      import("@tauri-apps/api/window")
+      titleSync = titleSync
+        .then(() => import("@tauri-apps/api/window"))
         .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(title))
         .catch((e) => console.error("Failed to set window title:", e));
     }
