@@ -1,186 +1,30 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import type { Card, Column, Deck, ReporterConfig } from "#lib/types.ts";
-import type { DatabaseBackend } from "#lib/db/index.ts";
+import type { Card, Column, ReporterConfig } from "#lib/types.ts";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
+import {
+  deckState as state,
+  mockBackend,
+  resetDeckState as resetState,
+  seedSingleDeck,
+} from "./__fixtures__/deckDataBackend";
 
-let nextId = 0;
-const uniqueId = (prefix: string) => `${prefix}-${++nextId}`;
-
-const state = {
-  decks: [] as Deck[],
-  columns: [] as Column[],
-  deletedColumns: [] as Column[],
-  cardsByColumn: new Map<string, Card[]>(),
-  deletedCards: [] as Card[],
-  tagsByDeck: [] as { id: string; name: string }[],
-  restoreCardCalls: [] as string[],
-  restoreColumnCalls: [] as string[],
-  getTagsByDeckCalls: 0,
-  deleteDeckCalls: [] as string[],
-  deleteColumnCalls: [] as string[],
-  deleteCardCalls: [] as string[],
-  moveColumnCalls: [] as Array<{ id: string; position: number }>,
-  moveCardCalls: [] as Array<{ id: string; position: number }>,
-  moveCardToColumnCalls: [] as Array<{ id: string; columnId: string }>,
-  updateCardScoreCalls: [] as Array<{ id: string; delta: number }>,
-  reporters: [] as ReporterConfig[],
-  runningReporters: [] as string[],
-  reporterCalls: [] as string[][],
-};
-
-const mockBackend: Partial<DatabaseBackend> = {
-  getAllDecks: async () => state.decks,
-  getColumnsByDeck: async () => state.columns,
-  getCardsByColumn: async (columnId: string) =>
-    state.cardsByColumn.get(columnId) ?? [],
-  getTagsByDeck: async () => {
-    state.getTagsByDeckCalls++;
-    return state.tagsByDeck;
-  },
-  getDeletedColumns: async () => state.deletedColumns,
-  getDeletedCards: async () => state.deletedCards,
-  restoreCard: async (id: string) => {
-    state.restoreCardCalls.push(id);
-    const idx = state.deletedCards.findIndex((c) => c.id === id);
-    if (idx !== -1) state.deletedCards.splice(idx, 1);
-    return {} as Card;
-  },
-  restoreColumn: async (id: string) => {
-    state.restoreColumnCalls.push(id);
-    const idx = state.deletedColumns.findIndex((c) => c.id === id);
-    if (idx !== -1) state.deletedColumns.splice(idx, 1);
-    return {} as Column;
-  },
-  deleteDeck: async (id) => {
-    state.deleteDeckCalls.push(id);
-  },
-  createDeck: async (params) =>
-    makeDeck(uniqueId("new-deck"), params.name ?? "New Deck"),
-  updateDeck: async (id, name) => makeDeck(id, name),
-  createColumn: async (params) =>
-    makeColumn(uniqueId("new-col"), params.deck_id, {
-      position: params.position,
-    }),
-  updateColumn: async (id, name, description, isPrivate) => ({
-    ...makeColumn(id, "deck-1", {
-      description: description ?? null,
-      private: isPrivate ?? false,
-    }),
-    name: name ?? `${id}-name`,
-  }),
-  createCard: async (params) =>
-    makeCard(uniqueId("new-card"), params.column_id, {
-      content: params.content,
-      position: params.position,
-    }),
-  updateCardContent: async (id, content) => makeCard(id, "col-active", { content }),
-  acquireCardLock: async (id) => {
-    const card = [...state.cardsByColumn.values()]
-      .flat()
-      .find((candidate) => candidate.id === id);
-    return { ...(card ?? makeCard(id, "col-active")), locked_by: "user" };
-  },
-  updateCardContentCas: async (id, content) => {
-    const card = [...state.cardsByColumn.values()]
-      .flat()
-      .find((candidate) => candidate.id === id);
-    return {
-      ...(card ?? makeCard(id, "col-active")),
-      content,
-      locked_by: "user",
-    };
-  },
-  updateCardContentCasOwned: async (id, holder, content) => {
-    const card = [...state.cardsByColumn.values()]
-      .flat()
-      .find((candidate) => candidate.id === id);
-    return {
-      ...(card ?? makeCard(id, "col-active")),
-      content,
-      locked_by: holder,
-    };
-  },
-  updateCardContentCasAndRelease: async (id, _holder, content) => {
-    const card = [...state.cardsByColumn.values()]
-      .flat()
-      .find((candidate) => candidate.id === id);
-    return {
-      ...(card ?? makeCard(id, "col-active")),
-      content,
-      locked_by: null,
-      locked_at: null,
-    };
-  },
-  releaseCardLock: async (id) => {
-    const card = [...state.cardsByColumn.values()]
-      .flat()
-      .find((candidate) => candidate.id === id);
-    return {
-      ...(card ?? makeCard(id, "col-active")),
-      locked_by: null,
-      locked_at: null,
-    };
-  },
-  deleteColumn: async (id) => {
-    state.deleteColumnCalls.push(id);
-  },
-  deleteCard: async (id) => {
-    state.deleteCardCalls.push(id);
-  },
-  moveColumn: async (id, position) => {
-    state.moveColumnCalls.push({ id, position });
-    return makeColumn(id, "deck-1", { position });
-  },
-  moveCard: async (id, position) => {
-    state.moveCardCalls.push({ id, position });
-    return makeCard(id, "col-active", { position });
-  },
-  moveCardToColumn: async (id, columnId) => {
-    state.moveCardToColumnCalls.push({ id, columnId });
-    return makeCard(id, columnId);
-  },
-  updateCardScore: async (id, delta) => {
-    state.updateCardScoreCalls.push({ id, delta });
-    return makeCard(id, "col-active");
-  },
-  getTagSuggestions: async (_deckId: string, prefix: string) =>
-    [{ id: `tag-${prefix}`, name: `${prefix}-suggestion` }],
-  listReporters: async (deckId: string) => {
-    state.reporterCalls.push(["listReporters", deckId]);
-    return state.reporters;
-  },
-  addReporter: async (deckId: string, config: ReporterConfig) => {
-    state.reporterCalls.push(["addReporter", deckId, config.name]);
-    return { ...config, reporter_id: "assigned-id" };
-  },
-  updateReporter: async (deckId: string, config: ReporterConfig) => {
-    state.reporterCalls.push(["updateReporter", deckId, config.reporter_id]);
-    return config;
-  },
-  removeReporter: async (deckId: string, reporterId: string) => {
-    state.reporterCalls.push(["removeReporter", deckId, reporterId]);
-  },
-  startReporter: async (deckId: string, reporterId: string) => {
-    state.reporterCalls.push(["startReporter", deckId, reporterId]);
-  },
-  stopReporter: async (reporterId: string) => {
-    state.reporterCalls.push(["stopReporter", reporterId]);
-  },
-  listRunningReporters: async () => {
-    state.reporterCalls.push(["listRunningReporters"]);
-    return state.runningReporters;
-  },
-};
+// DeckData owns the DB-backed deck state: deck lifecycle, CRUD with undo
+// history, edit sessions, refresh, tags, and Reporter registry forwarding.
+// Focused suites cover the rest:
+// - deckLoad.test.ts: guarded snapshot load/commit ordering
+// - deckData.trash.test.ts: trash listing and restore
+// - externalChangeEvents.test.ts / reporterStream.test.ts: event subscription
+//   and stream overlay lifecycles (only their DeckData wiring is tested here)
 
 // Toggle the simulated Tauri environment per test (name prefixed `mock` so the
 // hoisted vi.mock factory may reference it).
 const mockEnv = { tauri: false };
 const mockListen = vi.fn(async (_event: string, _handler: () => void) => () => {});
 
-vi.mock("#lib/db/index.ts", () => ({
-  getDatabase: async () => mockBackend,
-  isTauri: () => mockEnv.tauri,
-}));
+vi.mock("#lib/db/index.ts", async () => {
+  const { mockBackend } = await import("./__fixtures__/deckDataBackend");
+  return { getDatabase: async () => mockBackend, isTauri: () => mockEnv.tauri };
+});
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: mockListen }));
 
@@ -188,165 +32,9 @@ const { DeckData } = await import("./deckData.svelte");
 const { FOCUS_STATE_PREFIX } = await import("./focusManager.svelte");
 const focusKey = (deckId: string) => FOCUS_STATE_PREFIX + deckId;
 
-function resetState() {
-  state.decks = [];
-  state.columns = [];
-  state.deletedColumns = [];
-  state.cardsByColumn = new Map();
-  state.deletedCards = [];
-  state.tagsByDeck = [];
-  state.restoreCardCalls = [];
-  state.restoreColumnCalls = [];
-  state.getTagsByDeckCalls = 0;
-  state.deleteDeckCalls = [];
-  state.deleteColumnCalls = [];
-  state.deleteCardCalls = [];
-  state.moveColumnCalls = [];
-  state.moveCardCalls = [];
-  state.moveCardToColumnCalls = [];
-  state.updateCardScoreCalls = [];
-  state.reporters = [];
-  state.runningReporters = [];
-  state.reporterCalls = [];
-  localStorage.clear();
-}
-
-describe("DeckData trash", () => {
-  let data: InstanceType<typeof DeckData>;
-
-  beforeEach(async () => {
+describe("DeckData deck lifecycle", () => {
+  beforeEach(() => {
     resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-active", "deck-1")];
-    state.cardsByColumn = new Map([["col-active", []]]);
-
-    data = new DeckData();
-    await data.init();
-  });
-
-  it("returns empty trash when nothing is deleted", async () => {
-    const items = await data.getTrashItems();
-    expect(items).toEqual([]);
-  });
-
-  it("merges deleted columns and cards in deleted_at descending order", async () => {
-    state.deletedColumns = [
-      makeColumn("col-old", "deck-1", { deletedAt: "2026-05-01T10:00:00Z" }),
-      makeColumn("col-new", "deck-1", { deletedAt: "2026-05-03T10:00:00Z" }),
-    ];
-    state.deletedCards = [
-      makeCard("card-mid", "col-active", { deletedAt: "2026-05-02T10:00:00Z" }),
-    ];
-
-    const items = await data.getTrashItems();
-
-    expect(items.map((i) => i.id)).toEqual(["col-new", "card-mid", "col-old"]);
-    expect(items[0].type).toBe("column");
-    expect(items[1].type).toBe("card");
-  });
-
-  it("excludes cards deleted via cascade (deleted_with_column)", async () => {
-    state.deletedColumns = [
-      makeColumn("col-deleted", "deck-1", { deletedAt: "2026-05-01T10:00:00Z" }),
-    ];
-    state.deletedCards = [
-      makeCard("card-cascade", "col-deleted", {
-        deletedAt: "2026-05-01T10:00:00Z",
-        deletedWithColumn: true,
-      }),
-      makeCard("card-standalone", "col-active", {
-        deletedAt: "2026-05-02T10:00:00Z",
-      }),
-    ];
-
-    const items = await data.getTrashItems();
-
-    expect(items.map((i) => i.id)).toEqual(["card-standalone", "col-deleted"]);
-    expect(items.find((i) => i.id === "card-cascade")).toBeUndefined();
-  });
-
-  it("attaches column name to card trash items, including for already-deleted columns", async () => {
-    state.deletedColumns = [
-      makeColumn("col-gone", "deck-1", { deletedAt: "2026-05-01T10:00:00Z" }),
-    ];
-    state.deletedCards = [
-      // standalone card whose parent column is itself in trash
-      makeCard("card-orphan", "col-gone", {
-        deletedAt: "2026-05-02T10:00:00Z",
-      }),
-    ];
-
-    const items = await data.getTrashItems();
-    const card = items.find((i) => i.id === "card-orphan");
-
-    expect(card).toBeDefined();
-    if (card?.type === "card") {
-      expect(card.columnName).toBe("col-gone-name");
-    } else {
-      throw new Error("expected card-orphan to be a card-type trash item");
-    }
-  });
-
-  it("restoreTrashItem dispatches to restoreCard for cards", async () => {
-    state.deletedCards = [
-      makeCard("card-1", "col-active", { deletedAt: "2026-05-02T10:00:00Z" }),
-    ];
-
-    const [item] = await data.getTrashItems();
-    const ok = await data.restoreTrashItem(item);
-
-    expect(ok).toBe(true);
-    expect(state.restoreCardCalls).toEqual(["card-1"]);
-    expect(state.restoreColumnCalls).toEqual([]);
-  });
-
-  it("restoreTrashItem dispatches to restoreColumn for columns", async () => {
-    state.deletedColumns = [
-      makeColumn("col-x", "deck-1", { deletedAt: "2026-05-02T10:00:00Z" }),
-    ];
-
-    const [item] = await data.getTrashItems();
-    const ok = await data.restoreTrashItem(item);
-
-    expect(ok).toBe(true);
-    expect(state.restoreColumnCalls).toEqual(["col-x"]);
-    expect(state.restoreCardCalls).toEqual([]);
-  });
-
-  it("breaks deleted_at ties deterministically by id (descending)", async () => {
-    // Same deletedAt — order must be stable and id-descending so undo picks
-    // the same item every time, regardless of source-table merge order.
-    const sameTs = "2026-05-02T10:00:00Z";
-    state.deletedColumns = [makeColumn("id-c", "deck-1", { deletedAt: sameTs })];
-    state.deletedCards = [
-      makeCard("id-a", "col-active", { deletedAt: sameTs }),
-      makeCard("id-b", "col-active", { deletedAt: sameTs }),
-    ];
-
-    // Mutate input order (insert column second, swap card order) — sort
-    // should still produce the same id-desc order.
-    const items = await data.getTrashItems();
-    expect(items.map((i) => i.id)).toEqual(["id-c", "id-b", "id-a"]);
-
-    state.deletedColumns = [makeColumn("id-c", "deck-1", { deletedAt: sameTs })];
-    state.deletedCards = [
-      makeCard("id-b", "col-active", { deletedAt: sameTs }),
-      makeCard("id-a", "col-active", { deletedAt: sameTs }),
-    ];
-    const items2 = await data.getTrashItems();
-    expect(items2.map((i) => i.id)).toEqual(["id-c", "id-b", "id-a"]);
-  });
-
-  it("refreshes deck tags after restoring an item", async () => {
-    state.deletedCards = [
-      makeCard("card-1", "col-active", { deletedAt: "2026-05-02T10:00:00Z" }),
-    ];
-
-    const callsBefore = state.getTagsByDeckCalls;
-    const [item] = await data.getTrashItems();
-    await data.restoreTrashItem(item);
-
-    expect(state.getTagsByDeckCalls).toBeGreaterThan(callsBefore);
   });
 
   it("selectDeck sets loadedDeckId only after columns finish loading", async () => {
@@ -400,43 +88,54 @@ describe("DeckData trash", () => {
     expect(localStorage.getItem(focusKey("deck-doomed"))).toBeNull();
   });
 
-  it("re-applies an active tag filter after restoring", async () => {
-    // Active card with #todo so the filter resolves to a non-empty set.
-    state.cardsByColumn = new Map([
-      [
-        "col-active",
-        [makeCard("card-active", "col-active", { content: "#todo task" })],
-      ],
-    ]);
-    state.deletedCards = [
-      makeCard("card-deleted", "col-active", {
-        deletedAt: "2026-05-02T10:00:00Z",
-        content: "#todo old",
-      }),
-    ];
+  it("creates a Getting Started deck with seed columns and cards when no decks exist", async () => {
+    const fresh = new DeckData();
+    await fresh.init();
 
-    // Sync DeckData's cardsByColumn with the new mock content above.
-    await data.refreshDeck();
-    data.filterByTag("todo");
-    expect(data.filteredCardIds?.has("card-active")).toBe(true);
+    expect(fresh.decks).toHaveLength(1);
+    expect(fresh.decks[0].name).toBe("Getting Started");
+  });
 
-    // Simulate the deleted card returning to col-active after restore.
-    state.cardsByColumn = new Map([
-      [
-        "col-active",
-        [
-          makeCard("card-active", "col-active", { content: "#todo task" }),
-          makeCard("card-deleted", "col-active", { content: "#todo old" }),
-        ],
-      ],
-    ]);
+  it("restoreOnboardingDeck prepends and selects a fresh deck without removing existing decks", async () => {
+    state.decks = [makeDeck("existing-deck", "My Notes")];
 
-    const [item] = await data.getTrashItems();
-    await data.restoreTrashItem(item);
+    const fresh = new DeckData();
+    await fresh.init();
+    expect(fresh.decks).toHaveLength(1);
 
-    expect(data.activeTagFilter).toBe("todo");
-    expect(data.filteredCardIds?.has("card-active")).toBe(true);
-    expect(data.filteredCardIds?.has("card-deleted")).toBe(true);
+    const restored = await fresh.restoreOnboardingDeck();
+
+    expect(restored).not.toBeNull();
+    expect(restored?.name).toBe("Getting Started");
+    // Prepended, existing deck preserved.
+    expect(fresh.decks).toHaveLength(2);
+    expect(fresh.decks[0].id).toBe(restored?.id);
+    expect(fresh.decks.some((d) => d.id === "existing-deck")).toBe(true);
+    // Newly restored deck becomes the current one.
+    expect(fresh.currentDeck?.id).toBe(restored?.id);
+  });
+
+  it("falls back to first deck when stored last-deck-id no longer exists", async () => {
+    state.decks = [makeDeck("known-deck")];
+    state.columns = [makeColumn("col-active", "known-deck")];
+    state.cardsByColumn = new Map([["col-active", []]]);
+    localStorage.setItem("jot-deck:last-deck-id", "missing-deck");
+
+    const fresh = new DeckData();
+    await fresh.init();
+
+    expect(fresh.currentDeck?.id).toBe("known-deck");
+  });
+
+  it("restores last-deck-id when present", async () => {
+    state.decks = [makeDeck("first"), makeDeck("second")];
+
+    localStorage.setItem("jot-deck:last-deck-id", "second");
+
+    const fresh = new DeckData();
+    await fresh.init();
+
+    expect(fresh.currentDeck?.id).toBe("second");
   });
 });
 
@@ -567,72 +266,6 @@ describe("DeckData CRUD", () => {
     await expect(creating).resolves.toEqual(createdColumn);
     expect(data.columns).toEqual([otherColumn]);
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
-  });
-
-  it("refreshDeck ignores a successful result for a deck that is no longer active", async () => {
-    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
-    const otherDeck = makeDeck("deck-2");
-    const otherColumn = makeColumn("col-deck-2", "deck-2");
-    let resolveReload!: (columns: Column[]) => void;
-    const reloadStarted = new Promise<void>((resolve) => {
-      vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
-        () =>
-          new Promise((reloadResolve) => {
-            resolveReload = reloadResolve;
-            resolve();
-          }),
-      );
-    });
-
-    const reloading = data.refreshDeck();
-    await reloadStarted;
-    data.currentDeck = otherDeck;
-    data.columns = [otherColumn];
-    data.cardsByColumn = { [otherColumn.id]: [] };
-    resolveReload([staleColumn]);
-
-    await expect(reloading).resolves.toBe(false);
-    expect(data.columns).toEqual([otherColumn]);
-    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
-  });
-
-  it("refreshDeck ignores a deck switch while loading cards", async () => {
-    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
-    const otherDeck = makeDeck("deck-2");
-    const otherColumn = makeColumn("col-deck-2", "deck-2");
-    let resolveCards!: (cards: Card[]) => void;
-    const cardsStarted = new Promise<void>((resolve) => {
-      vi.spyOn(mockBackend, "getCardsByColumn").mockImplementationOnce(
-        () =>
-          new Promise((cardsResolve) => {
-            resolveCards = cardsResolve;
-            resolve();
-          }),
-      );
-    });
-    vi.spyOn(mockBackend, "getColumnsByDeck").mockResolvedValueOnce([staleColumn]);
-
-    const reloading = data.refreshDeck();
-    await cardsStarted;
-    data.currentDeck = otherDeck;
-    data.columns = [otherColumn];
-    data.cardsByColumn = { [otherColumn.id]: [] };
-    resolveCards([]);
-
-    await expect(reloading).resolves.toBe(false);
-    expect(data.columns).toEqual([otherColumn]);
-    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
-  });
-
-  it("refreshDeck keeps the loaded board when a card fetch fails", async () => {
-    const before = { ...data.cardsByColumn };
-    const columnsBefore = data.columns;
-    vi.spyOn(mockBackend, "getCardsByColumn").mockRejectedValueOnce(new Error("db gone"));
-
-    await expect(data.refreshDeck()).resolves.toBe(false);
-    expect(data.columns).toBe(columnsBefore);
-    expect(data.cardsByColumn).toEqual(before);
-    expect(data.error).toContain("Failed to reload deck");
   });
 
   it("createCard without position appends and returns the new card", async () => {
@@ -966,67 +599,13 @@ describe("DeckData CRUD", () => {
     await data.history.undo();
     expect(state.restoreCardCalls).toEqual(["card-1"]);
   });
-
-  it("filterByTag captures matching cards by tag", async () => {
-    state.cardsByColumn = new Map([
-      [
-        "col-active",
-        [
-          makeCard("card-1", "col-active", { content: "#alpha note" }),
-          makeCard("card-2", "col-active", { content: "no tag" }),
-          makeCard("card-3", "col-active", { content: "#alpha and #beta" }),
-        ],
-      ],
-    ]);
-    await data.refreshDeck();
-
-    data.filterByTag("alpha");
-
-    expect(data.activeTagFilter).toBe("alpha");
-    expect(data.filteredCardIds?.has("card-1")).toBe(true);
-    expect(data.filteredCardIds?.has("card-2")).toBe(false);
-    expect(data.filteredCardIds?.has("card-3")).toBe(true);
-  });
-
-  it("clearTagFilter resets active filter and matching ids", async () => {
-    data.filterByTag("alpha");
-    data.clearTagFilter();
-    expect(data.activeTagFilter).toBeNull();
-    expect(data.filteredCardIds).toBeNull();
-  });
-
-  it("getTagSuggestions returns suggestions from the backend", async () => {
-    const suggestions = await data.getTagSuggestions("al");
-    expect(suggestions[0].name).toBe("al-suggestion");
-  });
-
-  it("getTagSuggestions returns empty array when no current deck", async () => {
-    data.currentDeck = null;
-    expect(await data.getTagSuggestions("any")).toEqual([]);
-  });
-
-  it("getTrashItems returns empty when no current deck", async () => {
-    data.currentDeck = null;
-    expect(await data.getTrashItems()).toEqual([]);
-  });
-
-  it("refreshDeck is a no-op when no current deck", async () => {
-    data.currentDeck = null;
-    await expect(data.refreshDeck()).resolves.toBe(false);
-  });
 });
 
-describe("DeckData external changes", () => {
+describe("DeckData refreshDeck", () => {
   let data: InstanceType<typeof DeckData>;
 
   beforeEach(async () => {
-    resetState();
-    mockEnv.tauri = false;
-    mockListen.mockClear();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-active", "deck-1")];
-    state.cardsByColumn = new Map([["col-active", []]]);
-
+    seedSingleDeck();
     data = new DeckData();
     await data.init();
   });
@@ -1085,77 +664,122 @@ describe("DeckData external changes", () => {
     expect(data.columns).toBe(originalColumns);
   });
 
-  it("watchExternalChanges is a no-op outside Tauri (no reconcile tick)", async () => {
-    await expect(data.watchExternalChanges()).resolves.toBeUndefined();
-    expect(data.externalChangeTick).toBe(0);
-    expect(mockListen).not.toHaveBeenCalled();
+  it("refreshDeck ignores a successful result for a deck that is no longer active", async () => {
+    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let resolveReload!: (columns: Column[]) => void;
+    const reloadStarted = new Promise<void>((resolve) => {
+      vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
+        () =>
+          new Promise((reloadResolve) => {
+            resolveReload = reloadResolve;
+            resolve();
+          }),
+      );
+    });
+
+    const reloading = data.refreshDeck();
+    await reloadStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    resolveReload([staleColumn]);
+
+    await expect(reloading).resolves.toBe(false);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
-  it("watchExternalChanges subscribes and reconciles once under Tauri", async () => {
-    mockEnv.tauri = true;
-    await data.watchExternalChanges();
+  it("refreshDeck ignores a deck switch while loading cards", async () => {
+    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
+    const otherDeck = makeDeck("deck-2");
+    const otherColumn = makeColumn("col-deck-2", "deck-2");
+    let resolveCards!: (cards: Card[]) => void;
+    const cardsStarted = new Promise<void>((resolve) => {
+      vi.spyOn(mockBackend, "getCardsByColumn").mockImplementationOnce(
+        () =>
+          new Promise((cardsResolve) => {
+            resolveCards = cardsResolve;
+            resolve();
+          }),
+      );
+    });
+    vi.spyOn(mockBackend, "getColumnsByDeck").mockResolvedValueOnce([staleColumn]);
 
-    expect(mockListen).toHaveBeenCalledWith(
-      "external-db-change",
-      expect.any(Function),
-    );
-    // A reconcile tick fires right after subscribing.
-    expect(data.externalChangeTick).toBe(1);
+    const reloading = data.refreshDeck();
+    await cardsStarted;
+    data.currentDeck = otherDeck;
+    data.columns = [otherColumn];
+    data.cardsByColumn = { [otherColumn.id]: [] };
+    resolveCards([]);
+
+    await expect(reloading).resolves.toBe(false);
+    expect(data.columns).toEqual([otherColumn]);
+    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
   });
 
-  it("coalesces a burst of external events into a single debounced tick", async () => {
-    vi.useFakeTimers();
-    try {
-      mockEnv.tauri = true;
-      let handler: (() => void) | undefined;
-      mockListen.mockImplementationOnce(async (_event, h) => {
-        handler = h;
-        return () => {};
-      });
-      await data.watchExternalChanges();
+  it("refreshDeck keeps the loaded board when a card fetch fails", async () => {
+    const before = { ...data.cardsByColumn };
+    const columnsBefore = data.columns;
+    vi.spyOn(mockBackend, "getCardsByColumn").mockRejectedValueOnce(new Error("db gone"));
 
-      const afterSubscribe = data.externalChangeTick; // 1 (reconcile)
-      handler?.();
-      handler?.();
-      handler?.(); // burst within the debounce window
-      vi.advanceTimersByTime(250);
-
-      expect(data.externalChangeTick).toBe(afterSubscribe + 1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("stopWatchingExternalChanges clears a pending debounce and unsubscribes", async () => {
-    vi.useFakeTimers();
-    try {
-      mockEnv.tauri = true;
-      let handler: (() => void) | undefined;
-      const unlisten = vi.fn();
-      mockListen.mockImplementationOnce(async (_event, h) => {
-        handler = h;
-        return unlisten;
-      });
-      await data.watchExternalChanges();
-      const tick = data.externalChangeTick;
-
-      handler?.(); // schedule a debounced tick…
-      data.stopWatchingExternalChanges(); // …then cancel it before it fires
-      vi.advanceTimersByTime(500);
-
-      expect(data.externalChangeTick).toBe(tick); // no further tick
-      expect(unlisten).toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("stopWatchingExternalChanges is safe when nothing is subscribed", () => {
-    expect(() => data.stopWatchingExternalChanges()).not.toThrow();
+    await expect(data.refreshDeck()).resolves.toBe(false);
+    expect(data.columns).toBe(columnsBefore);
+    expect(data.cardsByColumn).toEqual(before);
+    expect(data.error).toContain("Failed to reload deck");
   });
 });
 
-describe("DeckData reporter streams", () => {
+describe("DeckData tags", () => {
+  let data: InstanceType<typeof DeckData>;
+
+  beforeEach(async () => {
+    seedSingleDeck();
+    data = new DeckData();
+    await data.init();
+  });
+
+  it("filterByTag captures matching cards by tag", async () => {
+    state.cardsByColumn = new Map([
+      [
+        "col-active",
+        [
+          makeCard("card-1", "col-active", { content: "#alpha note" }),
+          makeCard("card-2", "col-active", { content: "no tag" }),
+          makeCard("card-3", "col-active", { content: "#alpha and #beta" }),
+        ],
+      ],
+    ]);
+    await data.refreshDeck();
+
+    data.filterByTag("alpha");
+
+    expect(data.activeTagFilter).toBe("alpha");
+    expect(data.filteredCardIds?.has("card-1")).toBe(true);
+    expect(data.filteredCardIds?.has("card-2")).toBe(false);
+    expect(data.filteredCardIds?.has("card-3")).toBe(true);
+  });
+
+  it("clearTagFilter resets active filter and matching ids", async () => {
+    data.filterByTag("alpha");
+    data.clearTagFilter();
+    expect(data.activeTagFilter).toBeNull();
+    expect(data.filteredCardIds).toBeNull();
+  });
+
+  it("getTagSuggestions returns suggestions from the backend", async () => {
+    const suggestions = await data.getTagSuggestions("al");
+    expect(suggestions[0].name).toBe("al-suggestion");
+  });
+
+  it("getTagSuggestions returns empty array when no current deck", async () => {
+    data.currentDeck = null;
+    expect(await data.getTagSuggestions("any")).toEqual([]);
+  });
+});
+
+describe("DeckData external change wiring", () => {
   type StreamEvent = {
     kind: "begin" | "delta" | "end";
     card_id: string;
@@ -1166,6 +790,7 @@ describe("DeckData reporter streams", () => {
   let data: InstanceType<typeof DeckData>;
   /** Handlers registered by watchExternalChanges, keyed by event name. */
   let handlers: Record<string, (() => void) | undefined>;
+  let unlisten: ReturnType<typeof vi.fn<() => void>>;
 
   /** Deliver one `reporter-stream` payload the way the Tauri event bus would. */
   function emit(e: StreamEvent): void {
@@ -1175,100 +800,72 @@ describe("DeckData reporter streams", () => {
     handler?.({ payload: e });
   }
 
-  /** Run the pending animation-frame delta flush (fake timers fake rAF too). */
-  function flushFrame(): void {
-    vi.advanceTimersByTime(20);
-  }
-
   beforeEach(async () => {
-    resetState();
+    seedSingleDeck();
     mockEnv.tauri = true;
     handlers = {};
+    unlisten = vi.fn();
     mockListen.mockImplementation(async (event: string, h: () => void) => {
       handlers[event] = h;
-      return () => {};
+      return unlisten;
     });
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-active", "deck-1")];
-    state.cardsByColumn = new Map([["col-active", []]]);
 
     data = new DeckData();
     await data.init();
     vi.useFakeTimers();
-    await data.watchExternalChanges();
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    mockEnv.tauri = false;
     mockListen.mockReset();
     mockListen.mockImplementation(async () => () => {});
   });
 
-  it("subscribes to the reporter change and stream channels", () => {
-    expect(mockListen).toHaveBeenCalledWith(
-      "reporter-change",
-      expect.any(Function),
-    );
-    expect(mockListen).toHaveBeenCalledWith(
-      "reporter-stream",
-      expect.any(Function),
-    );
+  it("watchExternalChanges is a no-op outside Tauri (no reconcile tick)", async () => {
+    mockEnv.tauri = false;
+    await expect(data.watchExternalChanges()).resolves.toBeUndefined();
+    expect(data.externalChangeTick).toBe(0);
+    expect(mockListen).not.toHaveBeenCalled();
   });
 
-  it("funnels a reporter commit into the same debounced reload as external changes", () => {
+  it("watchExternalChanges subscribes to every channel and reconciles once under Tauri", async () => {
+    await data.watchExternalChanges();
+
+    expect(Object.keys(handlers)).toEqual([
+      "external-db-change",
+      "reporter-change",
+      "reporter-stream",
+    ]);
+    // A reconcile tick fires right after subscribing.
+    expect(data.externalChangeTick).toBe(1);
+  });
+
+  it("funnels DB and reporter commits into one debounced externalChangeTick", async () => {
+    await data.watchExternalChanges();
     const tick = data.externalChangeTick;
 
-    handlers["reporter-change"]?.();
+    handlers["external-db-change"]?.();
     handlers["reporter-change"]?.();
     vi.advanceTimersByTime(250);
 
     expect(data.externalChangeTick).toBe(tick + 1);
   });
 
-  it("begin opens the overlay before any delta arrives", () => {
+  it("exposes stream overlay state through isStreaming and streamingText", async () => {
+    await data.watchExternalChanges();
     expect(data.isStreaming("card-1")).toBe(false);
 
     emit({ kind: "begin", card_id: "card-1" });
-
     expect(data.isStreaming("card-1")).toBe(true);
-    expect(data.streamingText["card-1"]).toBe("");
-  });
 
-  it("coalesces a burst of deltas into one flush of concatenated text", () => {
-    emit({ kind: "begin", card_id: "card-1" });
-    emit({ kind: "delta", card_id: "card-1", chunk: "Hel" });
-    emit({ kind: "delta", card_id: "card-1", chunk: "lo " });
-    emit({ kind: "delta", card_id: "card-1", chunk: "world" });
-
-    // Nothing is painted until the frame runs — deltas are buffered, not applied.
-    expect(data.streamingText["card-1"]).toBe("");
-    flushFrame();
-    expect(data.streamingText["card-1"]).toBe("Hello world");
-  });
-
-  it("treats a missing chunk as empty and keeps the overlay open", () => {
-    emit({ kind: "begin", card_id: "card-1" });
-    emit({ kind: "delta", card_id: "card-1" });
-    flushFrame();
-
-    expect(data.streamingText["card-1"]).toBe("");
-    expect(data.isStreaming("card-1")).toBe(true);
-  });
-
-  it("drops a delta that lands after the stream already ended", async () => {
-    emit({ kind: "begin", card_id: "card-1" });
-    emit({ kind: "end", card_id: "card-1", column_id: "col-active" });
-    await vi.runAllTimersAsync();
-
-    // A straggler delta must not resurrect the overlay on the committed card.
-    emit({ kind: "delta", card_id: "card-1", chunk: "late" });
-    flushFrame();
-
-    expect(data.isStreaming("card-1")).toBe(false);
-    expect(data.streamingText["card-1"]).toBeUndefined();
+    emit({ kind: "delta", card_id: "card-1", chunk: "Hello" });
+    vi.advanceTimersByTime(20); // run the animation-frame flush
+    expect(data.streamingText["card-1"]).toBe("Hello");
   });
 
   it("end reloads the streamed card's column and tags, then drops the overlay", async () => {
+    await data.watchExternalChanges();
     state.cardsByColumn = new Map([
       ["col-active", [makeCard("card-1", "col-active", { content: "final #done" })]],
     ]);
@@ -1286,7 +883,22 @@ describe("DeckData reporter streams", () => {
     expect(data.isStreaming("card-1")).toBe(false);
   });
 
-  it("end without a loaded column falls back to a full reconcile", async () => {
+  it("end for a column outside the loaded board requests a full reconcile", async () => {
+    await data.watchExternalChanges();
+    emit({ kind: "begin", card_id: "card-1" });
+    const tick = data.externalChangeTick;
+    const tagCalls = state.getTagsByDeckCalls;
+
+    emit({ kind: "end", card_id: "card-1", column_id: "col-elsewhere" });
+    await vi.runAllTimersAsync();
+
+    expect(data.externalChangeTick).toBe(tick + 1);
+    expect(state.getTagsByDeckCalls).toBe(tagCalls);
+    expect(data.isStreaming("card-1")).toBe(false);
+  });
+
+  it("end without a column id falls back to a full reconcile", async () => {
+    await data.watchExternalChanges();
     emit({ kind: "begin", card_id: "card-1" });
     const tick = data.externalChangeTick;
 
@@ -1297,7 +909,8 @@ describe("DeckData reporter streams", () => {
     expect(data.isStreaming("card-1")).toBe(false);
   });
 
-  it("drops the overlay even when the post-stream reload fails", async () => {
+  it("drops the overlay and reports an error when the post-stream reload fails", async () => {
+    await data.watchExternalChanges();
     const original = mockBackend.getCardsByColumn!;
     mockBackend.getCardsByColumn = async () => {
       throw new Error("db gone");
@@ -1313,30 +926,24 @@ describe("DeckData reporter streams", () => {
     expect(data.error).toContain("Failed to reload deck");
   });
 
-  it("evicts a stalled stream so a dead Reporter cannot pin a card read-only", () => {
-    emit({ kind: "begin", card_id: "card-1" });
-    emit({ kind: "delta", card_id: "card-1", chunk: "half a sen" });
-    flushFrame();
-
-    // Deltas keep re-arming the timer; silence past the window evicts.
-    vi.advanceTimersByTime(29_000);
-    expect(data.isStreaming("card-1")).toBe(true);
-    vi.advanceTimersByTime(30_000);
-
-    expect(data.isStreaming("card-1")).toBe(false);
-    expect(data.streamingText["card-1"]).toBeUndefined();
-  });
-
-  it("stopWatchingExternalChanges clears every overlay, timer, and pending frame", () => {
+  it("stopWatchingExternalChanges unsubscribes, cancels a pending tick, and clears overlays", async () => {
+    await data.watchExternalChanges();
+    const tick = data.externalChangeTick;
     emit({ kind: "begin", card_id: "card-1" });
     emit({ kind: "delta", card_id: "card-1", chunk: "unflushed" });
+    handlers["external-db-change"]?.(); // schedule a debounced tick…
 
-    data.stopWatchingExternalChanges();
-    // Neither the pending frame nor the inactivity timer may fire afterwards.
+    data.stopWatchingExternalChanges(); // …then cancel it before it fires
     vi.advanceTimersByTime(60_000);
 
+    expect(unlisten).toHaveBeenCalledTimes(3);
+    expect(data.externalChangeTick).toBe(tick);
     expect(data.streamingText).toEqual({});
     expect(data.isStreaming("card-1")).toBe(false);
+  });
+
+  it("stopWatchingExternalChanges is safe when nothing is subscribed", () => {
+    expect(() => data.stopWatchingExternalChanges()).not.toThrow();
   });
 });
 
@@ -1401,61 +1008,5 @@ describe("DeckData reporter registry", () => {
     expect(data.error).toBeNull();
 
     mockBackend.startReporter = original;
-  });
-});
-
-describe("DeckData onboarding", () => {
-  beforeEach(() => {
-    resetState();
-  });
-
-  it("creates a Getting Started deck with seed columns and cards when no decks exist", async () => {
-    const fresh = new DeckData();
-    await fresh.init();
-
-    expect(fresh.decks).toHaveLength(1);
-    expect(fresh.decks[0].name).toBe("Getting Started");
-  });
-
-  it("restoreOnboardingDeck prepends and selects a fresh deck without removing existing decks", async () => {
-    state.decks = [makeDeck("existing-deck", "My Notes")];
-
-    const fresh = new DeckData();
-    await fresh.init();
-    expect(fresh.decks).toHaveLength(1);
-
-    const restored = await fresh.restoreOnboardingDeck();
-
-    expect(restored).not.toBeNull();
-    expect(restored?.name).toBe("Getting Started");
-    // Prepended, existing deck preserved.
-    expect(fresh.decks).toHaveLength(2);
-    expect(fresh.decks[0].id).toBe(restored?.id);
-    expect(fresh.decks.some((d) => d.id === "existing-deck")).toBe(true);
-    // Newly restored deck becomes the current one.
-    expect(fresh.currentDeck?.id).toBe(restored?.id);
-  });
-
-  it("falls back to first deck when stored last-deck-id no longer exists", async () => {
-    state.decks = [makeDeck("known-deck")];
-    state.columns = [makeColumn("col-active", "known-deck")];
-    state.cardsByColumn = new Map([["col-active", []]]);
-    localStorage.setItem("jot-deck:last-deck-id", "missing-deck");
-
-    const fresh = new DeckData();
-    await fresh.init();
-
-    expect(fresh.currentDeck?.id).toBe("known-deck");
-  });
-
-  it("restores last-deck-id when present", async () => {
-    state.decks = [makeDeck("first"), makeDeck("second")];
-
-    localStorage.setItem("jot-deck:last-deck-id", "second");
-
-    const fresh = new DeckData();
-    await fresh.init();
-
-    expect(fresh.currentDeck?.id).toBe("second");
   });
 });
