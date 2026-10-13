@@ -40,9 +40,9 @@
   $effect(() => {
     document.title = windowTitle;
     if ("__TAURI_INTERNALS__" in window) {
-      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
-        getCurrentWindow().setTitle(windowTitle);
-      });
+      import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) => getCurrentWindow().setTitle(windowTitle))
+        .catch((e) => console.error("Failed to set window title:", e));
     }
   });
 
