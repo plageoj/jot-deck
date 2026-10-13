@@ -13,6 +13,7 @@ import {
 // Focused suites cover the rest:
 // - deckLoad.test.ts: guarded snapshot load/commit ordering
 // - deckData.trash.test.ts: trash listing and restore
+// - cardEditSessions.test.ts: edit lock acquisition, saves, and lease renewal
 // - externalChangeEvents.test.ts / reporterStream.test.ts: event subscription
 //   and stream overlay lifecycles (only their DeckData wiring is tested here)
 
@@ -293,95 +294,6 @@ describe("DeckData CRUD", () => {
     expect(stored?.content).toBe("new content");
   });
 
-  it("GUI :w retains its unique session lock and :wq atomically releases it", async () => {
-    state.cardsByColumn = new Map([
-      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
-    ]);
-    await data.refreshDeck();
-
-    const session = await data.startCardEdit("card-1");
-    expect(session).not.toBeNull();
-    expect(await data.saveCardEdit(session!, "new content")).toBe(true);
-    expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
-    expect(await data.saveCardEdit(session!, "final content", true)).toBe(true);
-    expect(data.cardsByColumn["col-active"][0].content).toBe("final content");
-  });
-
-  it("GUI edit cancellation releases the lock without changing content", async () => {
-    state.cardsByColumn = new Map([
-      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
-    ]);
-    await data.refreshDeck();
-
-    const session = await data.startCardEdit("card-1");
-    expect(session).not.toBeNull();
-    await data.cancelCardEdit(session!);
-    expect(data.cardsByColumn["col-active"][0].content).toBe("old");
-  });
-
-  it("releases the lock on both cancellation and normal edit completion", async () => {
-    const original = mockBackend.releaseCardLock!;
-    const releaseCardLock = vi.fn(original);
-    mockBackend.releaseCardLock = releaseCardLock;
-
-    const first = await data.startCardEdit("card-1");
-    await data.cancelCardEdit(first!);
-    expect(releaseCardLock).toHaveBeenCalledWith("card-1", first!.owner);
-
-    const second = await data.startCardEdit("card-1");
-    expect(second!.owner).not.toBe(first!.owner);
-    await data.finishCardEdit(second!);
-    expect(releaseCardLock).toHaveBeenCalledTimes(2);
-    mockBackend.releaseCardLock = original;
-  });
-
-  it("reports a lock acquisition conflict without entering edit state", async () => {
-    const original = mockBackend.acquireCardLock;
-    mockBackend.acquireCardLock = async () => {
-      throw new Error("Card is locked by another editor");
-    };
-
-    expect(await data.startCardEdit("card-1")).toBeNull();
-    expect(data.error).toContain("Card is locked by another editor");
-    mockBackend.acquireCardLock = original;
-  });
-
-  it("rejects GUI save requests that did not acquire an edit lock", async () => {
-    expect(
-      await data.saveCardEdit(
-        { cardId: "card-1", owner: "missing", expectedUpdatedAt: "never" },
-        "new content",
-      ),
-    ).toBe(false);
-    expect(data.error).toBe("Cannot save card: edit lock is not held");
-  });
-
-  it("retains the session lock when saving fails so it can be retried", async () => {
-    const original = mockBackend.updateCardContentCasOwned;
-    mockBackend.updateCardContentCasOwned = async () => {
-      throw new Error("Card was modified since it was read");
-    };
-
-    const session = await data.startCardEdit("card-1");
-    expect(await data.saveCardEdit(session!, "new content")).toBe(false);
-    expect(data.error).toContain("Card was modified since it was read");
-    mockBackend.updateCardContentCasOwned = original;
-    expect(await data.saveCardEdit(session!, "new content")).toBe(true);
-    await data.finishCardEdit(session!);
-  });
-
-  it("keeps a session after a failed release so it can be retried", async () => {
-    const original = mockBackend.releaseCardLock;
-    mockBackend.releaseCardLock = async () => {
-      throw new Error("temporary failure");
-    };
-    const session = await data.startCardEdit("card-1");
-
-    expect(await data.finishCardEdit(session!)).toBe(false);
-    mockBackend.releaseCardLock = original;
-    expect(await data.finishCardEdit(session!)).toBe(true);
-  });
-
   it("deleteColumn forwards the id to the backend", async () => {
     const ok = await data.deleteColumn("col-active");
     expect(ok).toBe(true);
@@ -598,6 +510,107 @@ describe("DeckData CRUD", () => {
     mockBackend.restoreCard = original;
     await data.history.undo();
     expect(state.restoreCardCalls).toEqual(["card-1"]);
+  });
+});
+
+describe("DeckData card edit sessions", () => {
+  // Lock/lease mechanics are unit-tested in cardEditSessions.test.ts; these
+  // cover DeckData's board updates and error reporting around them.
+  let data: InstanceType<typeof DeckData>;
+
+  beforeEach(async () => {
+    seedSingleDeck();
+    data = new DeckData();
+    await data.init();
+  });
+
+  it("GUI :w retains its unique session lock and :wq atomically releases it", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
+    ]);
+    await data.refreshDeck();
+
+    const session = await data.startCardEdit("card-1");
+    expect(session).not.toBeNull();
+    expect(await data.saveCardEdit(session!, "new content")).toBe(true);
+    expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
+    expect(await data.saveCardEdit(session!, "final content", true)).toBe(true);
+    expect(data.cardsByColumn["col-active"][0].content).toBe("final content");
+  });
+
+  it("GUI edit cancellation releases the lock without changing content", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
+    ]);
+    await data.refreshDeck();
+
+    const session = await data.startCardEdit("card-1");
+    expect(session).not.toBeNull();
+    await data.cancelCardEdit(session!);
+    expect(data.cardsByColumn["col-active"][0].content).toBe("old");
+  });
+
+  it("releases the lock on both cancellation and normal edit completion", async () => {
+    const original = mockBackend.releaseCardLock!;
+    const releaseCardLock = vi.fn(original);
+    mockBackend.releaseCardLock = releaseCardLock;
+
+    const first = await data.startCardEdit("card-1");
+    await data.cancelCardEdit(first!);
+    expect(releaseCardLock).toHaveBeenCalledWith("card-1", first!.owner);
+
+    const second = await data.startCardEdit("card-1");
+    expect(second!.owner).not.toBe(first!.owner);
+    await data.finishCardEdit(second!);
+    expect(releaseCardLock).toHaveBeenCalledTimes(2);
+    mockBackend.releaseCardLock = original;
+  });
+
+  it("reports a lock acquisition conflict without entering edit state", async () => {
+    const original = mockBackend.acquireCardLock;
+    mockBackend.acquireCardLock = async () => {
+      throw new Error("Card is locked by another editor");
+    };
+
+    expect(await data.startCardEdit("card-1")).toBeNull();
+    expect(data.error).toContain("Card is locked by another editor");
+    mockBackend.acquireCardLock = original;
+  });
+
+  it("rejects GUI save requests that did not acquire an edit lock", async () => {
+    expect(
+      await data.saveCardEdit(
+        { cardId: "card-1", owner: "missing", expectedUpdatedAt: "never" },
+        "new content",
+      ),
+    ).toBe(false);
+    expect(data.error).toBe("Cannot save card: edit lock is not held");
+  });
+
+  it("retains the session lock when saving fails so it can be retried", async () => {
+    const original = mockBackend.updateCardContentCasOwned;
+    mockBackend.updateCardContentCasOwned = async () => {
+      throw new Error("Card was modified since it was read");
+    };
+
+    const session = await data.startCardEdit("card-1");
+    expect(await data.saveCardEdit(session!, "new content")).toBe(false);
+    expect(data.error).toContain("Card was modified since it was read");
+    mockBackend.updateCardContentCasOwned = original;
+    expect(await data.saveCardEdit(session!, "new content")).toBe(true);
+    await data.finishCardEdit(session!);
+  });
+
+  it("keeps a session after a failed release so it can be retried", async () => {
+    const original = mockBackend.releaseCardLock;
+    mockBackend.releaseCardLock = async () => {
+      throw new Error("temporary failure");
+    };
+    const session = await data.startCardEdit("card-1");
+
+    expect(await data.finishCardEdit(session!)).toBe(false);
+    mockBackend.releaseCardLock = original;
+    expect(await data.finishCardEdit(session!)).toBe(true);
   });
 });
 
