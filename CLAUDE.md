@@ -46,7 +46,7 @@ cargo run -p jot-deck-mcp     # env: JOT_DECK_DECK_ID (optional — pins the con
 ```
 Speaks JSON-RPC 2.0 over stdio. Spawned by an MCP host (Claude Desktop / Claude Code)
 via its `mcpServers` config. The bridge derives the DB path from the fixed app data
-dir (same as the GUI), so only the deck id is required. In production the bridge ships
+dir (same as the GUI), so no environment variables are required. In production the bridge ships
 as a Tauri sidecar (`externalBin`); the GUI Deck switcher generates a paste-ready config
 snippet ("Copy MCP server config") and can also copy just the deck id ("Deck id").
 

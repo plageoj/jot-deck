@@ -109,7 +109,7 @@ flowchart LR
 | resource | `deck://{deck_id}` | ― | 読み（モード2） | Deck/カラム/カードの読み取り面（KB 用途） |
 | resource | `deck://schema` | ― | オンボーディング | `describe_deck` と同内容の読み取り面（自動ロード対応ホスト向けの補助。1 Deck 固定接続のみ）。→ §4.6 |
 
-引数の `deck_id` / `column_id` / `card_id` はいずれも本体が採番した **ULID**。エージェントはまず `list_decks` で Deck を、次に `list_columns` / `search_cards` でカラム/カード ID を発見してから書き込む（ID をエージェントに推測・生成させない）。この「まず一覧して ID を得てから操作する」流儀は、Figma MCP など**呼び出しごとにリソース(ファイル/プロジェクト)を明示引数で解決する** MCP サーバと同型である。**Deck はブリッジ起動時に固定するのではなく、対象 Deck を呼び出しごとの明示引数にする**のが既定（→ §4.5）。1 Deck に固定して運用したい接続は `JOT_DECK_DECK_ID` を設定すればよく、その場合は各 tool で `deck_id` を省略できる。
+引数の `deck_id` / `column_id` / `card_id` はいずれも本体が採番した **ULID**。エージェントはまず `list_decks` で Deck を、次に `list_columns` / `search_cards` でカラム/カード ID を発見してから書き込む（ID をエージェントに推測・生成させない）。この「まず一覧して ID を得てから操作する」流儀は、Figma MCP など**呼び出しごとにリソース(ファイル/プロジェクト)を明示引数で解決する** MCP サーバと同型である。**対象 Deck は呼び出しごとの明示引数で指定する**のが既定（→ §4.5）。1 Deck に固定して運用したい接続は `JOT_DECK_DECK_ID` を設定すればよく、その場合は各 tool で `deck_id` を省略できる。
 
 ### 4.1 書き込み tool（モード1）
 
@@ -191,7 +191,7 @@ flowchart LR
 
 ### 4.5 可視性スコープ（read / write の絞り込み）
 
-**対象 Deck は呼び出しごとの明示引数 `deck_id` で決まる。**（Figma MCP など、リソース(ファイル/プロジェクト)を接続時ではなく呼び出しごとに解決する一般的な MCP サーバに倣う方式。詳細は §4 冒頭。）ブリッジを 1 つの Deck に固定して起動する運用（プロセス再起動でしか Deck を切り替えられない）ではなく、エージェントが `list_decks` で対象を発見し、以後の呼び出しで `deck_id` を明示する。これにより Deck 切り替えにブリッジの再起動を要しない。
+**対象 Deck は呼び出しごとの明示引数 `deck_id` で決まる。**（Figma MCP など、リソース(ファイル/プロジェクト)を接続時ではなく呼び出しごとに解決する一般的な MCP サーバに倣う方式。詳細は §4 冒頭。）エージェントは `list_decks` で対象を発見し、以後の呼び出しで `deck_id` を明示する。1 つのブリッジのまま複数 Deck を扱え、Deck 切り替えにブリッジの再起動を要しない。
 
 - **`deck_id` の解決順**（各 tool が `deck_id` 引数を取る場合の決定ロジック）:
     1. **`JOT_DECK_DECK_ID` が設定されていれば最優先**。接続はその 1 Deck に**厳格に固定**される ―― 引数を省略すればそれが使われ、明示的に別の `deck_id` を渡してもその接続では authorization error になる（越境させたくない接続向け）。
@@ -200,10 +200,10 @@ flowchart LR
     - **暗黙の既定 Deck は持たない**。GUI の状態など呼び出しの外側にある値で対象を決めると、ユーザが GUI で Deck を切り替えた瞬間に同じ呼び出しが黙って別 Deck を読み書きし、エージェントはそれに気づけない。対象は常に呼び出しから一意に決まり（再現可能）、付け忘れは即座の自己修正可能なエラーになる。
 - **GUI の直近アクティブ Deck は `list_decks` の `active` ヒントとして公開する**（前提節の共有 `settings` テーブル）。GUI（`packages/app` の Deck 切り替え UI）がアクティブ Deck を切り替えるたびにこのテーブルへ書き込み、ブリッジは追加の IPC なしにそれを読む。エージェントは「今開いている Deck」といった依頼をこのヒントで解釈し、以後の呼び出しで `deck_id` を明示する。
     - **これは「最後にフォーカスしていた Deck」であり「今この瞬間ユーザーが見ている Deck」を保証しない**（GUI を閉じていても値は残り、複数ウィンドウがあれば最後の書き込みが勝つ単純な仕様）。GUI が一度も起動していなければどの Deck にも立たない。
-- **`private` が唯一の hard 除外（変更なし）**。ユーザが本体 UI で `private` を立てたカラムは、どの `deck_id` を指定していても全接続から読めず・書けない。read allowlist を手で書かせない ―― これが「ゼロ実装 KB」（§6）の約束。
+- **`private` が唯一の hard 除外**。ユーザが本体 UI で `private` を立てたカラムは、どの `deck_id` を指定していても全接続から読めず・書けない。read allowlist を手で書かせない ―― これが「ゼロ実装 KB」（§6）の約束。
 - **カラム単位 allowlist・capability は接続単位で、対象になり得る全 Deck に共通適用**。`JOT_DECK_WRITE_COLUMNS`（write allowlist）・`JOT_DECK_DENY`（capability opt-out）は、その接続が呼び出しで指定するどの Deck に対しても同じ制約として働く（column ULID は Deck を跨いで一意なので、allowlist は複数 Deck のカラムを混在させても指定できる）。**write allowlist を明示した接続では `ensure_column` の新規作成が無効**（固定集合の意図と排他。既存カラムの取得は可）＝ allowlist と新規作成は両立しない。
 - **構造変更は既定 ON・opt-out**。既定接続は指定 Deck 内をフル再編できる（§4.4）。structure capability を deny すれば構造変更（`ensure_column` / `update_column` / `move_column`）を封じられる。
-- **Deck の作成・削除・Deck 間のカード/カラム移動は引き続き不可**（§4.1 / §4.4）。「越境しない」は接続の固定に由来する制約ではなく、**データモデル上カード・カラムが Deck を跨いで移動できないという不変条件**として残る。
+- **Deck の作成・削除・Deck 間のカード/カラム移動は不可**（§4.1 / §4.4）。これは接続設定によらない、**データモデル上カード・カラムが Deck を跨いで移動できないという不変条件**である。
 - **Deck 単位の可視性除外は無い**。`private` はカラム単位のみで、「この Deck 自体を隠す」機構は今は無い（`JOT_DECK_DECK_ID` で 1 Deck に固定すれば結果的に他 Deck は見えなくなるが、複数 Deck を扱いつつ特定 Deck だけ隠す手段は無い → §7 未決事項）。
 
 実効範囲 = `deck_id で指定した Deck 内の private でないカラム` ∩ `allowlist（指定があれば。無指定なら全部）`。`JOT_DECK_DECK_ID` を設定しない接続では、**この実効範囲がブリッジからアクセス可能な全 Deck に及ぶ**（blast radius は Deck 単体ではなく、この接続が生涯で指定し得る全 Deck の合計になる）。安全は Deck 境界ではなく、**`private` ＋ capability ＋ allowlist ＋ カード長 backstop ＋ レート制限 ＋ 論理削除アンドゥ ＋ 監査(帰属)**の組み合わせで担保する（§5）。厳格な 1 Deck 隔離が要る接続は `JOT_DECK_DECK_ID` を設定して運用する。
@@ -260,7 +260,7 @@ flowchart LR
 
 | 防具 | 内容 |
 |:---|:---|
-| **Deck スコープの明示引数** | 対象 Deck は呼び出しごとの `deck_id` 引数で決まり、Deck 作成・Deck 間移動は不可（不変条件）。`JOT_DECK_DECK_ID` を設定した接続だけは 1 Deck へ**厳格に固定**され、他 Deck を指す `deck_id` は authorization error になる ―― この接続では blast radius がその Deck に閉じる（旧来の壁と同等）。未設定の接続では対象 Deck を固定できず、**blast radius はこの接続がアクセスし得る全 Deck に及ぶ**。→ §4.4 / §4.5 |
+| **Deck スコープの明示引数** | 対象 Deck は呼び出しごとの `deck_id` 引数で決まり、Deck 作成・Deck 間移動は不可（不変条件）。`JOT_DECK_DECK_ID` を設定した接続だけは 1 Deck へ**厳格に固定**され、他 Deck を指す `deck_id` は authorization error になる ―― この接続では blast radius がその Deck に閉じる。未設定の接続では対象 Deck を固定できず、**blast radius はこの接続がアクセスし得る全 Deck に及ぶ**。→ §4.4 / §4.5 |
 | **`private` 除外** | ユーザが立てた `private` カラムは、どの `deck_id` を指定していても全接続から読めず・書けない。フィルタは本体側。→ §4.5 |
 | **capability（opt-out）** | 接続の権限 read / append / edit / delete / structure は**既定すべて有効**（設定ゼロで指定 Deck を読み書き・再編＝§4.5 と一致）。機微な用途では個別に **deny して絞る**（例: KB 読取専用なら append 以降を deny、re-org させたくない接続は structure を deny）。allowlist を明示した接続では `ensure_column` の新規作成が無効（§4.5）。 |
 | **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。`JOT_DECK_DECK_ID` 未設定の接続では、この誘発が及ぶ範囲は 1 Deck ではなく**アクセス可能な全 Deck**になる点に注意（複数 Deck へ横展開されるリスクは `deck_id` を都度検証する本体側フィルタだけが頼り）。この代償を **①削除・カスケード削除は論理削除＋アンドゥで復元でき、上書き・改名・移動は誤操作の拡散をレート制限で抑える** と **②機微な接続は capability を deny する、または `JOT_DECK_DECK_ID` で 1 Deck に固定して封じられる** ことで受ける。外部由来カードには provenance ラベルを付す。 |
