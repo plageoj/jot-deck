@@ -43,6 +43,15 @@ export const DEFAULT_SETTINGS: SettingsState = {
 };
 
 /**
+ * Default bindings whose signature changed (e.g. moved to a new action). A
+ * saved override under the old signature is carried over to the new one so
+ * the user's customization keeps applying.
+ */
+const RENAMED_BINDING_SIGNATURES: Record<string, string> = {
+  "startEdit card a": "startEditAtEnd card a",
+};
+
+/**
  * Defensively coerce a raw value into a KeybindingOverrides map: an object
  * whose values are strings or null. Anything else is dropped.
  */
@@ -53,6 +62,11 @@ function coerceKeybindingOverrides(value: unknown): KeybindingOverrides {
     if (raw === null || typeof raw === "string") {
       result[key] = raw;
     }
+  }
+  for (const [from, to] of Object.entries(RENAMED_BINDING_SIGNATURES)) {
+    if (!(from in result)) continue;
+    if (!(to in result)) result[to] = result[from];
+    delete result[from];
   }
   return result;
 }
