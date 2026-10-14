@@ -46,14 +46,23 @@ impl Default for Capabilities {
 }
 
 impl Capabilities {
+    /// Turn off one capability by (normalized) name; `false` if unknown.
+    fn deny(&mut self, name: &str) -> bool {
+        match name {
+            "append" => self.append = false,
+            "edit" => self.edit = false,
+            "delete" => self.delete = false,
+            "structure" => self.structure = false,
+            _ => return false,
+        }
+        true
+    }
+
     /// Parse a deny list like `"append, delete"` into capabilities (default all
     /// on). An unknown token is logged to the host's stderr (audited via the
     /// spawned child's inherited stderr) and otherwise ignored — the mistyped
-    /// verb keeps its default-on state. The registration is authored by the
-    /// power-user who owns the host (007 §2.2), so a typo is a diagnosable
-    /// operator mistake, not an untrusted input; fail-closed rejection (returning
-    /// the unknown tokens so a caller can refuse the registration) is a possible
-    /// future hardening once deny lists are surfaced in the registration UI.
+    /// verb keeps its default-on state. Persisted registrations go through the
+    /// fail-closed [`Capabilities::try_from_deny`] instead.
     pub fn from_deny_list(deny: &str) -> Self {
         let mut c = Self::default();
         for tok in deny
@@ -61,18 +70,31 @@ impl Capabilities {
             .map(|s| s.trim().to_ascii_lowercase())
             .filter(|s| !s.is_empty())
         {
-            match tok.as_str() {
-                "append" => c.append = false,
-                "edit" => c.edit = false,
-                "delete" => c.delete = false,
-                "structure" => c.structure = false,
-                other => eprintln!(
+            if !c.deny(&tok) {
+                eprintln!(
                     "[jot-deck-reporter-host] deny: ignoring unknown capability '{}' (expected append/edit/delete/structure)",
-                    other
-                ),
+                    tok
+                );
             }
         }
         c
+    }
+
+    /// Fail-closed parse of a registration's deny list (007 §10): any unknown
+    /// token rejects the whole list — returned as the error — instead of
+    /// silently leaving the mistyped verb enabled.
+    pub fn try_from_deny(deny: &[String]) -> Result<Self, Vec<String>> {
+        let mut c = Self::default();
+        let unknown: Vec<String> = deny
+            .iter()
+            .filter(|tok| !c.deny(&tok.trim().to_ascii_lowercase()))
+            .cloned()
+            .collect();
+        if unknown.is_empty() {
+            Ok(c)
+        } else {
+            Err(unknown)
+        }
     }
 }
 

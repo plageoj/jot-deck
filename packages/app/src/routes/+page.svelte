@@ -534,6 +534,7 @@
 {#if focus.showReporters && data.currentDeck}
   <ReportersDialog
     deckId={data.currentDeck.id}
+    columns={data.columns}
     listReporters={(deckId) => data.listReporters(deckId)}
     listRunning={() => data.listRunningReporters()}
     onAdd={(deckId, config) => data.addReporter(deckId, config)}

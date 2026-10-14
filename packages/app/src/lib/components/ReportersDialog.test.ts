@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import ReportersDialog from "./ReportersDialog.svelte";
-import type { ReporterConfig } from "#lib/types.ts";
+import type { Column, ReporterConfig } from "#lib/types.ts";
 
 // jsdom's <dialog> support varies; stub the modal methods so onMount's
 // showModal() and the close button never throw regardless of jsdom version.
@@ -40,10 +40,31 @@ function makeReporter(
   };
 }
 
+function makeColumn(id: string, name: string, isPrivate = false): Column {
+  return {
+    id,
+    deck_id: "deck-1",
+    name,
+    position: 0,
+    description: null,
+    private: isPrivate,
+    created_at: "",
+    updated_at: "",
+    deleted_at: null,
+  };
+}
+
+const COLUMNS: Column[] = [
+  makeColumn("col-1", "Inbox"),
+  makeColumn("col-2", "Notes"),
+  makeColumn("col-3", "Secrets", true),
+];
+
 /** Props with every callback stubbed; each test overrides what it exercises. */
 function makeProps(overrides: Record<string, unknown> = {}) {
   return {
     deckId: "deck-1",
+    columns: COLUMNS,
     listReporters: vi.fn(async () => [] as ReporterConfig[]),
     listRunning: vi.fn(async () => [] as string[]),
     onAdd: vi.fn(async (_d: string, c: ReporterConfig) => c),
@@ -451,12 +472,145 @@ describe("ReportersDialog add/edit form", () => {
       command: "/opt/whisper",
       args: [],
       env: {},
-      // Not editable in this UI yet — carried through untouched (007 §10).
+      // Untouched scope round-trips unchanged (007 §10).
       deny: ["delete"],
       max_writes_per_min: 30,
       allowed_columns: ["col-1"],
     });
     expect(props.onAdd).not.toHaveBeenCalled();
+  });
+
+  it("adds a reporter with an edited auth scope", async () => {
+    const props = await renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add reporter" }));
+    await fillForm("Minutes", "/opt/whisper");
+    // Unchecked in reverse order: the deny list is still canonical.
+    await fireEvent.click(
+      screen.getByLabelText("Create, rename, and reorder columns"),
+    );
+    await fireEvent.click(screen.getByLabelText("Delete cards"));
+    await fireEvent.input(screen.getByLabelText("Max writes per minute"), {
+      target: { value: " 30 " },
+    });
+    await fireEvent.click(screen.getByLabelText("Only selected columns"));
+    await fireEvent.click(screen.getByLabelText("Notes"));
+    await fireEvent.click(screen.getByLabelText("Inbox"));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(props.onAdd).toHaveBeenCalledWith(
+      "deck-1",
+      expect.objectContaining({
+        deny: ["delete", "structure"],
+        max_writes_per_min: 30,
+        // Deck column order, not click order.
+        allowed_columns: ["col-1", "col-2"],
+      }),
+    );
+  });
+
+  it("private columns cannot be picked for the allowlist", async () => {
+    await renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add reporter" }));
+    await fireEvent.click(screen.getByLabelText("Only selected columns"));
+
+    const secret = screen.getByLabelText("Secrets (private)") as HTMLInputElement;
+    expect(secret.disabled).toBe(true);
+    expect(secret.checked).toBe(false);
+  });
+
+  it.each(["0", "-5", "1.5", "abc"])(
+    "rejects max writes per minute %j",
+    async (value) => {
+      const props = await renderDialog();
+
+      await fireEvent.click(screen.getByRole("button", { name: "+ Add reporter" }));
+      await fillForm("Minutes", "/opt/whisper");
+      await fireEvent.input(screen.getByLabelText("Max writes per minute"), {
+        target: { value },
+      });
+      await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+      expect(screen.getByText(/Max writes per minute must be/)).toBeTruthy();
+      expect(props.onAdd).not.toHaveBeenCalled();
+    },
+  );
+
+  it("rejects a column allowlist with nothing selected", async () => {
+    const props = await renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add reporter" }));
+    await fillForm("Minutes", "/opt/whisper");
+    await fireEvent.click(screen.getByLabelText("Only selected columns"));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(screen.getByText(/Select at least one column/)).toBeTruthy();
+    expect(props.onAdd).not.toHaveBeenCalled();
+  });
+
+  it("edit prefills the scope and drops allowlisted columns that no longer exist", async () => {
+    const props = await renderDialog({
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", {
+          deny: ["edit"],
+          max_writes_per_min: 10,
+          allowed_columns: ["col-2", "gone"],
+        }),
+      ]),
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(
+      (screen.getByLabelText("Edit, move, and stream cards") as HTMLInputElement)
+        .checked,
+    ).toBe(false);
+    expect((screen.getByLabelText("Append cards") as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect(
+      (screen.getByLabelText("Max writes per minute") as HTMLInputElement).value,
+    ).toBe("10");
+    expect(
+      (screen.getByLabelText("Only selected columns") as HTMLInputElement).checked,
+    ).toBe(true);
+    expect((screen.getByLabelText("Notes") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("Inbox") as HTMLInputElement).checked).toBe(false);
+
+    // Widening back to all columns clears the allowlist.
+    await fireEvent.click(screen.getByLabelText("All columns"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onUpdate).toHaveBeenCalledWith(
+      "deck-1",
+      expect.objectContaining({
+        deny: ["edit"],
+        max_writes_per_min: 10,
+        allowed_columns: null,
+      }),
+    );
+  });
+
+  it("summarizes each reporter's auth scope in its row", async () => {
+    await renderDialog({
+      listReporters: vi.fn(async () => [
+        makeReporter("open"),
+        makeReporter("narrow", {
+          deny: ["delete", "structure"],
+          max_writes_per_min: 30,
+          allowed_columns: ["col-1", "gone"],
+        }),
+      ]),
+    });
+
+    expect(
+      screen.getByText("All capabilities · 120 writes/min · All columns"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Denied: delete, structure · 30 writes/min · Columns: Inbox, (removed column)",
+      ),
+    ).toBeTruthy();
   });
 
   it("cancel closes the form without saving", async () => {

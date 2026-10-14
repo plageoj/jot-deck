@@ -50,9 +50,9 @@ export interface Card {
 /** A registered Reporter (007-reporter-protocol.md §2.2): an external input
  * adapter the host spawns as a child process and pipes over stdio. Field names
  * are snake_case because this object is serialized straight into the Rust
- * `ReporterConfig` struct via Tauri. The auth-scope fields (`deny`,
- * `max_writes_per_min`, `allowed_columns`, 007 §10) are carried but not yet
- * editable in the UI — they are sent as defaults. */
+ * `ReporterConfig` struct via Tauri. `deny` / `max_writes_per_min` /
+ * `allowed_columns` are the per-Reporter auth scope (007 §10), edited in the
+ * Reporters dialog and validated fail-closed by the host. */
 export interface ReporterConfig {
   /** Stable ULID assigned by the host on add; empty when creating a new one. */
   reporter_id: string;
