@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { EditorView, keymap, placeholder } from "@codemirror/view";
-  import { EditorState } from "@codemirror/state";
+  import { EditorSelection, EditorState } from "@codemirror/state";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-  import { vim, Vim } from "@replit/codemirror-vim";
+  import { getCM, vim, Vim } from "@replit/codemirror-vim";
   import {
     autocompletion,
     acceptCompletion,
@@ -12,11 +12,12 @@
     type CompletionContext,
     type CompletionResult,
   } from "@codemirror/autocomplete";
-  import { TAG_PATTERN } from "#lib/types.ts";
+  import { TAG_PATTERN, type EditEntry } from "#lib/types.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
 
   interface Props {
     content: string;
+    entry?: EditEntry;
     onSave: (content: string, release: boolean) => Promise<boolean>;
     onCancel: () => Promise<boolean>;
     onExitEdit?: () => void;
@@ -24,7 +25,7 @@
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
 
-  let { content, onSave, onCancel, onExitEdit, onRegisterExit, onTagSuggestions }: Props =
+  let { content, entry = "start", onSave, onCancel, onExitEdit, onRegisterExit, onTagSuggestions }: Props =
     $props();
 
   let editorContainer: HTMLDivElement;
@@ -231,6 +232,7 @@
 
     const state = EditorState.create({
       doc: content,
+      selection: EditorSelection.cursor(entry === "end" ? content.length : 0),
       extensions: [
         ...(vimEnabled ? [vim()] : []),
         customKeymap,
@@ -267,8 +269,15 @@
       parent: editorContainer,
     });
 
-    // Focus and enter insert mode
     view.focus();
+
+    // Land in Insert mode like Vim's `i` / `a`. The initial selection already
+    // sits at the start or end; `a` steps past Normal mode's last-character
+    // clamp so the cursor ends up after the final character.
+    if (vimEnabled) {
+      const cm = getCM(view);
+      if (cm) Vim.handleKey(cm, entry === "end" ? "a" : "i", "api");
+    }
   });
 
   onDestroy(() => {

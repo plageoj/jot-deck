@@ -94,8 +94,22 @@ describe("card operations", () => {
       await actions.executeCardAction("startEdit");
       await Promise.all(tasks);
 
-      expect(startEdit).toHaveBeenCalledWith("c-0-b");
+      expect(startEdit).toHaveBeenCalledWith("c-0-b", "start");
       expect(focus.focusMode).toBe("card");
+    });
+
+    it("startEditAtEnd asks the startEdit callback to place the cursor at the end", async () => {
+      const startEdit = vi.fn();
+      const tasks: Promise<unknown>[] = [];
+      actions = createBoardActions(data, focus, {
+        startEdit,
+        runTask: (task) => tasks.push(task),
+      });
+
+      await actions.executeCardAction("startEditAtEnd");
+      await Promise.all(tasks);
+
+      expect(startEdit).toHaveBeenCalledWith("c-0-b", "end");
     });
 
     it("startEdit is ignored while the focused card is receiving a Reporter stream", async () => {

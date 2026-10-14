@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Card } from "#lib/types.ts";
+  import type { Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
   import CardEditor from "./CardEditor.svelte";
@@ -11,6 +11,7 @@
     focused?: boolean;
     editing?: boolean;
     editSession?: EditSession | null;
+    editEntry?: EditEntry;
     dimmed?: boolean;
     activeTag?: string | null;
     /** In-progress streamed text from a Reporter (007 §6.2). When non-null the
@@ -35,6 +36,7 @@
     focused = false,
     editing = false,
     editSession = null,
+    editEntry = "start",
     dimmed = false,
     activeTag = null,
     streamingText = null,
@@ -98,6 +100,7 @@
     {@const session = editSession}
     <CardEditor
       content={card.content}
+      entry={editEntry}
       onSave={(content, release) => handleSave(session, content, release)}
       onCancel={() => handleCancel(session)}
       onExitEdit={() => handleExit(session)}

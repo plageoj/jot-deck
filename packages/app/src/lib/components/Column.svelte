@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Column, Card } from "#lib/types.ts";
+  import type { Column, Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import CardComponent from "./Card.svelte";
 
@@ -10,6 +10,7 @@
     focusedCardIndex?: number;
     editingCardId?: string | null;
     editSession?: EditSession | null;
+    editEntry?: EditEntry;
     filteredCardIds?: Set<string> | null;
     activeTag?: string | null;
     /** card_id → in-progress streamed text for cards receiving a Reporter
@@ -37,6 +38,7 @@
     focusedCardIndex = -1,
     editingCardId = null,
     editSession = null,
+    editEntry = "start",
     filteredCardIds = null,
     activeTag = null,
     streamingText = {},
@@ -94,6 +96,7 @@
           focused={index === focusedCardIndex}
           editing={editingCardId === card.id}
           editSession={editSession?.cardId === card.id ? editSession : null}
+          {editEntry}
           dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
           streamingText={streamingText[card.id] ?? null}
           {activeTag}
