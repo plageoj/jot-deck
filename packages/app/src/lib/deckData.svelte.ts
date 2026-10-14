@@ -675,7 +675,7 @@ export class DeckData {
     }
   }
 
-  private findCardContent(cardId: string): string | null {
+  findCardContent(cardId: string): string | null {
     for (const cards of Object.values(this.cardsByColumn)) {
       const card = cards.find((c) => c.id === cardId);
       if (card) return card.content;

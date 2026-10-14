@@ -18,7 +18,12 @@
      * card is read-only and shows an "AI generating" affordance; the streamed
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
-    onSave?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onSave?: (
+      session: EditSession,
+      content: string,
+      release: boolean,
+      cursor: number,
+    ) => Promise<boolean>;
     onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: () => void;
     onExitEdit?: (session: EditSession) => void;
@@ -59,8 +64,9 @@
     session: EditSession,
     content: string,
     release: boolean,
+    cursor: number,
   ): Promise<boolean> {
-    return (await onSave?.(session, content, release)) ?? false;
+    return (await onSave?.(session, content, release, cursor)) ?? false;
   }
 
   async function handleCancel(session: EditSession): Promise<boolean> {
@@ -101,7 +107,7 @@
     <CardEditor
       content={card.content}
       entry={editEntry}
-      onSave={(content, release) => handleSave(session, content, release)}
+      onSave={(content, release, cursor) => handleSave(session, content, release, cursor)}
       onCancel={() => handleCancel(session)}
       onExitEdit={() => handleExit(session)}
       onRegisterExit={(exit) => onRegisterExit?.(session, exit)}

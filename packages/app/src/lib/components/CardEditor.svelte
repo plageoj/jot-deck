@@ -18,7 +18,7 @@
   interface Props {
     content: string;
     entry?: EditEntry;
-    onSave: (content: string, release: boolean) => Promise<boolean>;
+    onSave: (content: string, release: boolean, cursor: number) => Promise<boolean>;
     onCancel: () => Promise<boolean>;
     onExitEdit?: () => void;
     onRegisterExit?: (exit: (() => Promise<boolean>) | null) => void;
@@ -38,13 +38,17 @@
     return view?.state.doc.toString() ?? content;
   }
 
+  function getCursor(): number {
+    return view?.state.selection.main.head ?? 0;
+  }
+
   function save() {
-    void onSave(getContent(), false);
+    void onSave(getContent(), false, getCursor());
   }
 
   function saveAndExit(): Promise<boolean> {
     if (terminalAction) return terminalAction;
-    const action = onSave(getContent(), true).then((saved) => {
+    const action = onSave(getContent(), true, getCursor()).then((saved) => {
       if (saved) {
         exited = true;
         onExitEdit?.();
@@ -91,6 +95,12 @@
         type: "keyword",
       })),
     }));
+  }
+
+  function initialCursor(): number {
+    if (entry === "start") return 0;
+    if (entry === "end") return content.length;
+    return Math.min(Math.max(entry, 0), content.length);
   }
 
   onMount(() => {
@@ -232,7 +242,7 @@
 
     const state = EditorState.create({
       doc: content,
-      selection: EditorSelection.cursor(entry === "end" ? content.length : 0),
+      selection: EditorSelection.cursor(initialCursor()),
       extensions: [
         ...(vimEnabled ? [vim()] : []),
         customKeymap,
@@ -271,12 +281,15 @@
 
     view.focus();
 
-    // Land in Insert mode like Vim's `i` / `a`. The initial selection already
-    // sits at the start or end; `a` steps past Normal mode's last-character
-    // clamp so the cursor ends up after the final character.
+    // Land in Insert mode like Vim's `i` / `a`. Normal mode clamps the cursor
+    // onto the last character of a line, so re-place it once Insert mode
+    // allows the end-of-line position.
     if (vimEnabled) {
       const cm = getCM(view);
-      if (cm) Vim.handleKey(cm, entry === "end" ? "a" : "i", "api");
+      if (cm) {
+        Vim.handleKey(cm, "i", "api");
+        view.dispatch({ selection: EditorSelection.cursor(initialCursor()) });
+      }
     }
   });
 

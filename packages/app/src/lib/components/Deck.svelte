@@ -16,7 +16,12 @@
     /** card_id → in-progress streamed text (007 §6.2). */
     streamingText?: Record<string, string>;
     onAddCard?: (columnId: string) => void;
-    onSaveCard?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onSaveCard?: (
+      session: EditSession,
+      content: string,
+      release: boolean,
+      cursor: number,
+    ) => Promise<boolean>;
     onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: (cardId: string) => void;
     onExitEdit?: (session: EditSession) => void;

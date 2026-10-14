@@ -1,4 +1,4 @@
-import { render } from "@testing-library/svelte";
+import { fireEvent, render } from "@testing-library/svelte";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 import { getCM } from "@replit/codemirror-vim";
@@ -7,13 +7,18 @@ import { settingsStore } from "#lib/settings.svelte.ts";
 import type { EditEntry } from "#lib/types.ts";
 
 const CONTENT = "first line\nsecond line";
+/** End of the first line — Normal mode would clamp this onto the "e". */
+const FIRST_LINE_END = "first line".length;
 
-function mountEditor(entry: EditEntry): EditorView {
+function mountEditor(
+  entry: EditEntry,
+  onSave = vi.fn(async (_content: string, _release: boolean, _cursor: number) => true),
+): EditorView {
   const { container } = render(CardEditor, {
     props: {
       content: CONTENT,
       entry,
-      onSave: vi.fn(async () => true),
+      onSave,
       onCancel: vi.fn(async () => true),
     },
   });
@@ -44,6 +49,14 @@ describe("CardEditor entry position", () => {
       expect(view.state.selection.main.head).toBe(CONTENT.length);
       expect(getCM(view)?.state.vim?.insertMode).toBe(true);
     });
+
+    it("a remembered offset at a line end survives Normal mode's clamp", () => {
+      settingsStore.state.vimEnabled = true;
+      const view = mountEditor(FIRST_LINE_END);
+
+      expect(view.state.selection.main.head).toBe(FIRST_LINE_END);
+      expect(getCM(view)?.state.vim?.insertMode).toBe(true);
+    });
   });
 
   describe("with Vim disabled", () => {
@@ -54,5 +67,18 @@ describe("CardEditor entry position", () => {
     it("`end` places the caret after the last character", () => {
       expect(mountEditor("end").state.selection.main.head).toBe(CONTENT.length);
     });
+
+    it("a remembered offset is clamped to the content", () => {
+      expect(mountEditor(999).state.selection.main.head).toBe(CONTENT.length);
+    });
+  });
+
+  it("reports the cursor offset when saving", async () => {
+    const onSave = vi.fn(async (_content: string, _release: boolean, _cursor: number) => true);
+    const view = mountEditor(FIRST_LINE_END, onSave);
+
+    await fireEvent.keyDown(view.contentDOM, { key: "Enter", ctrlKey: true });
+
+    expect(onSave).toHaveBeenCalledWith(CONTENT, true, FIRST_LINE_END);
   });
 });

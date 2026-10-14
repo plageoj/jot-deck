@@ -19,6 +19,7 @@
     UpdateBanner,
   } from "#lib/components/index.ts";
   import { DeckData, type EditSession } from "#lib/deckData.svelte.ts";
+  import { CursorMemory } from "#lib/cursorMemory.ts";
   import { FocusManager } from "#lib/focusManager.svelte.ts";
   import { ActionDispatcher } from "#lib/actionDispatcher.svelte.ts";
   import {
@@ -125,6 +126,7 @@
   // receive the exact object it returned — not a deep $state proxy of it.
   let editSession = $state.raw<EditSession | null>(null);
   let editEntry = $state<EditEntry>("start");
+  const cursorMemory = new CursorMemory();
   let activeEditorExit: (() => Promise<boolean>) | null = null;
   let editTransition = Promise.resolve();
 
@@ -228,7 +230,7 @@
     const session = await data.startCardEdit(cardId);
     if (!session) return;
     if (isCardFocused(cardId)) {
-      editEntry = entry;
+      editEntry = cursorMemory.resolve(cardId, entry, data.findCardContent(cardId));
       editSession = session;
       focus.startEdit(cardId);
     } else {
@@ -349,8 +351,11 @@
           await startCardEdit(card.id);
         }
       }}
-      onSaveCard={async (session, content, release) =>
-        data.saveCardEdit(session, content, release)}
+      onSaveCard={async (session, content, release, cursor) => {
+        const saved = await data.saveCardEdit(session, content, release);
+        if (saved && release) cursorMemory.remember(session.cardId, cursor, content);
+        return saved;
+      }}
       onCancelEdit={(session) => data.cancelCardEdit(session)}
       onStartEdit={(cardId) => {
         // A card being streamed by a Reporter is read-only (007 §7).

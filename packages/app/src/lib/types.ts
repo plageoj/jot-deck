@@ -25,8 +25,11 @@ export interface Column {
 /** Tag regex pattern source (without flags). Keep in sync with crates/core/repository/tag.rs */
 export const TAG_PATTERN = String.raw`#([\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]+)`;
 
-/** Where the cursor lands when a card enters edit mode (Vim `i` vs `a`). */
-export type EditEntry = "start" | "end";
+/**
+ * Where the cursor lands when a card enters edit mode: Vim `i` (start), `a`
+ * (end), or a document offset restored from the card's last saved edit.
+ */
+export type EditEntry = "start" | "end" | number;
 
 export interface Tag {
   id: string;
