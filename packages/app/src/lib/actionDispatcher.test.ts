@@ -1,151 +1,27 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Card, Column, Deck } from "#lib/types.ts";
-import type { DatabaseBackend } from "#lib/db/index.ts";
+import type { DeckData } from "#lib/deckData.svelte.ts";
+import type { FocusManager } from "#lib/focusManager.svelte.ts";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
+import { boardState } from "./__fixtures__/boardBackend";
+import { setupBoard } from "./__fixtures__/boardHarness";
 import { updaterStore } from "./updater.svelte";
 
-const state = {
-  decks: [] as Deck[],
-  columns: [] as Column[],
-  cardsByColumn: new Map<string, Card[]>(),
-  tagsByDeck: [] as { id: string; name: string }[],
-  createColumnCalls: [] as Array<{ deck_id: string; position?: number }>,
-  deletedCards: [] as Card[],
-  deletedColumns: [] as Column[],
-  restoreCardCalls: [] as string[],
-  restoreColumnCalls: [] as string[],
-  createCardCalls: [] as Array<{ column_id: string; content: string; position?: number }>,
-  deleteColumnCalls: [] as string[],
-  deleteCardCalls: [] as string[],
-  moveCardCalls: [] as Array<{ id: string; position: number }>,
-  moveCardToColumnCalls: [] as Array<{ id: string; column_id: string }>,
-  updateCardScoreCalls: [] as Array<{ id: string; delta: number }>,
-  moveColumnCalls: [] as Array<{ id: string; position: number }>,
-  createDeckCalls: 0,
-};
+// ActionDispatcher owns key interpretation, mode-dependent routing, palette
+// command dispatch, and the public dispatch entry points. The semantic
+// operations it routes to are covered by:
+// - boardActionExecutors.{navigation,cards,columns}.test.ts
+// - actionDispatchHelpers.test.ts (global actions)
+// The integration tests here verify the wiring through the public entry points.
 
-const mockBackend: Partial<DatabaseBackend> = {
-  getAllDecks: async () => state.decks,
-  getColumnsByDeck: async () => state.columns,
-  getCardsByColumn: async (columnId: string) =>
-    state.cardsByColumn.get(columnId) ?? [],
-  getTagsByDeck: async () => state.tagsByDeck,
-  getDeletedColumns: async () => state.deletedColumns,
-  getDeletedCards: async () => state.deletedCards,
-  createColumn: async (params) => {
-    state.createColumnCalls.push(params);
-    const col = makeColumn(
-      `created-${state.createColumnCalls.length}`,
-      params.deck_id,
-      { position: params.position },
-    );
-    state.columns =
-      params.position === undefined
-        ? [...state.columns, col]
-        : [
-            ...state.columns.map((column) =>
-              column.position >= params.position!
-                ? { ...column, position: column.position + 1 }
-                : column,
-            ),
-            col,
-          ].sort((a, b) => a.position - b.position);
-    state.cardsByColumn.set(col.id, []);
-    return col;
-  },
-  restoreCard: async (id) => {
-    state.restoreCardCalls.push(id);
-    const idx = state.deletedCards.findIndex((c) => c.id === id);
-    if (idx !== -1) state.deletedCards.splice(idx, 1);
-    return makeCard(id, "");
-  },
-  restoreColumn: async (id) => {
-    state.restoreColumnCalls.push(id);
-    const idx = state.deletedColumns.findIndex((c) => c.id === id);
-    if (idx !== -1) state.deletedColumns.splice(idx, 1);
-    return makeColumn(id, "");
-  },
-  createCard: async (params) => {
-    state.createCardCalls.push({
-      column_id: params.column_id,
-      content: params.content ?? "",
-      position: params.position,
-    });
-    const card = makeCard(
-      `created-card-${state.createCardCalls.length}`,
-      params.column_id,
-      { content: params.content, position: params.position },
-    );
-    const existing = state.cardsByColumn.get(params.column_id) ?? [];
-    state.cardsByColumn.set(params.column_id, [...existing, card]);
-    return card;
-  },
-  deleteColumn: async (id) => {
-    state.deleteColumnCalls.push(id);
-    state.columns = state.columns.filter((c) => c.id !== id);
-  },
-  deleteCard: async (id) => {
-    state.deleteCardCalls.push(id);
-    for (const [colId, cards] of state.cardsByColumn) {
-      state.cardsByColumn.set(
-        colId,
-        cards.filter((c) => c.id !== id),
-      );
-    }
-  },
-  moveCard: async (id, position) => {
-    state.moveCardCalls.push({ id, position });
-    return makeCard(id, "", { position });
-  },
-  moveCardToColumn: async (id, columnId) => {
-    state.moveCardToColumnCalls.push({ id, column_id: columnId });
-    return makeCard(id, columnId);
-  },
-  updateCardScore: async (id, delta) => {
-    state.updateCardScoreCalls.push({ id, delta });
-    return makeCard(id, "");
-  },
-  moveColumn: async (id, position) => {
-    state.moveColumnCalls.push({ id, position });
-    return makeColumn(id, "", { position });
-  },
-  createDeck: async (params) => {
-    state.createDeckCalls++;
-    return makeDeck(`deck-new-${state.createDeckCalls}`, params.name ?? "Untitled");
-  },
-};
+vi.mock("#lib/db/index.ts", async () => {
+  const { mockBackend } = await import("./__fixtures__/boardBackend");
+  return { getDatabase: async () => mockBackend };
+});
 
-vi.mock("#lib/db/index.ts", () => ({
-  getDatabase: async () => mockBackend,
-}));
-
-const { DeckData } = await import("./deckData.svelte");
-const { FocusManager } = await import("./focusManager.svelte");
 const { ActionDispatcher } = await import("./actionDispatcher.svelte");
 
 async function flushPromises() {
   for (let i = 0; i < 4; i++) await Promise.resolve();
-}
-
-function resetState() {
-  state.decks = [];
-  state.columns = [];
-  state.cardsByColumn = new Map();
-  state.tagsByDeck = [];
-  state.createColumnCalls = [];
-  state.deletedCards = [];
-  state.deletedColumns = [];
-  state.restoreCardCalls = [];
-  state.restoreColumnCalls = [];
-  state.createCardCalls = [];
-  state.deleteColumnCalls = [];
-  state.deleteCardCalls = [];
-  state.moveCardCalls = [];
-  state.moveCardToColumnCalls = [];
-  state.updateCardScoreCalls = [];
-  state.moveColumnCalls = [];
-  state.createDeckCalls = 0;
-  localStorage.clear();
 }
 
 function makeKeyEvent(opts: {
@@ -166,24 +42,29 @@ function makeKeyEvent(opts: {
   return event;
 }
 
+/** Three columns (col-2 empty), as used by most routing tests. */
+function threeColumnBoard() {
+  return setupBoard({
+    columns: [
+      makeColumn("col-0", "deck-1", { position: 0 }),
+      makeColumn("col-1", "deck-1", { position: 1 }),
+      makeColumn("col-2", "deck-1", { position: 2 }),
+    ],
+    cards: {
+      "col-0": [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")],
+      "col-1": [makeCard("c-1-a", "col-1")],
+      "col-2": [],
+    },
+  });
+}
+
 describe("ActionDispatcher with no columns loaded", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-
-    data = new DeckData();
-    await data.init();
-    // After init the onboarding deck would normally have columns; force the
-    // test scenario by clearing any loaded columns.
-    data.columns = [];
-    data.cardsByColumn = {};
-    data.currentDeck = makeDeck("deck-1");
-
-    focus = new FocusManager(data);
+    ({ data, focus } = await setupBoard());
     dispatcher = new ActionDispatcher(data, focus);
   });
 
@@ -217,8 +98,8 @@ describe("ActionDispatcher with no columns loaded", () => {
 
     await flushPromises();
 
-    expect(state.createColumnCalls).toHaveLength(1);
-    expect(state.createColumnCalls[0]).toEqual({ deck_id: "deck-1", position: 0 });
+    expect(boardState.createColumnCalls).toHaveLength(1);
+    expect(boardState.createColumnCalls[0]).toEqual({ deck_id: "deck-1", position: 0 });
     expect(event.defaultPrevented).toBe(true);
   });
 
@@ -255,7 +136,7 @@ describe("ActionDispatcher with no columns loaded", () => {
     dispatcher.handleKeydown(event);
 
     expect(focus.activePalette).toBeNull();
-    expect(state.createColumnCalls).toEqual([]);
+    expect(boardState.createColumnCalls).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
   });
 
@@ -274,7 +155,7 @@ describe("ActionDispatcher with no columns loaded", () => {
 
     dispatcher.handleKeydown(event);
 
-    expect(state.createColumnCalls).toEqual([]);
+    expect(boardState.createColumnCalls).toEqual([]);
     expect(event.defaultPrevented).toBe(false);
     input.remove();
   });
@@ -291,22 +172,14 @@ describe("ActionDispatcher with no columns loaded", () => {
 });
 
 describe("ActionDispatcher.selectDeckFromPalette", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-A"), makeDeck("deck-B")];
-
-    data = new DeckData();
-    await data.init();
-    data.decks = [makeDeck("deck-A"), makeDeck("deck-B")];
-    data.currentDeck = makeDeck("deck-A");
-    data.columns = [];
-    data.cardsByColumn = {};
-
-    focus = new FocusManager(data);
+    ({ data, focus } = await setupBoard({
+      decks: [makeDeck("deck-A"), makeDeck("deck-B")],
+    }));
     focus.openPalette("deck");
     dispatcher = new ActionDispatcher(data, focus);
   });
@@ -348,68 +221,20 @@ describe("ActionDispatcher.selectDeckFromPalette", () => {
   });
 });
 
-describe("ActionDispatcher.executeAction palette routing", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+describe("ActionDispatcher.executeAction global routing", () => {
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [];
-    data.cardsByColumn = {};
-    focus = new FocusManager(data);
+    ({ data, focus } = await setupBoard());
     dispatcher = new ActionDispatcher(data, focus);
   });
 
-  it("routes showCommandPalette to focus.openPalette('command')", async () => {
-    await dispatcher.executeAction("showCommandPalette");
-    expect(focus.activePalette).toBe("command");
-  });
-
-  it("routes showDeckPalette to focus.openPalette('deck')", async () => {
-    await dispatcher.executeAction("showDeckPalette");
-    expect(focus.activePalette).toBe("deck");
-  });
-
-  it("routes showColumnPalette to focus.openPalette('column')", async () => {
-    await dispatcher.executeAction("showColumnPalette");
-    expect(focus.activePalette).toBe("column");
-  });
-
-  it("routes openTagFilter to focus.openPalette('tag')", async () => {
-    await dispatcher.executeAction("openTagFilter");
-    expect(focus.activePalette).toBe("tag");
-  });
-
-  it("routes showTrashPalette to focus.openPalette('trash')", async () => {
+  it("routes global actions before focus-mode routing", async () => {
+    focus.focusMode = "card";
     await dispatcher.executeAction("showTrashPalette");
     expect(focus.activePalette).toBe("trash");
-  });
-
-  it("routes showSettings to focus.showSettings = true (no palette)", async () => {
-    await dispatcher.executeAction("showSettings");
-    expect(focus.showSettings).toBe(true);
-    expect(focus.activePalette).toBeNull();
-    expect(focus.focusMode).not.toBe("command");
-  });
-
-  it("routes showAbout to focus.showAbout = true (no palette)", async () => {
-    await dispatcher.executeAction("showAbout");
-    expect(focus.showAbout).toBe(true);
-    expect(focus.activePalette).toBeNull();
-    expect(focus.focusMode).not.toBe("command");
-  });
-
-  it("routes showReporters to focus.showReporters = true (no palette)", async () => {
-    await dispatcher.executeAction("showReporters");
-    expect(focus.showReporters).toBe(true);
-    expect(focus.activePalette).toBeNull();
-    expect(focus.focusMode).not.toBe("command");
   });
 
   it("routes checkForUpdates to open the About dialog and trigger a check", async () => {
@@ -438,123 +263,67 @@ describe("ActionDispatcher.executeAction palette routing", () => {
     const event = makeKeyEvent({ key: "c" });
     dispatcher.handleKeydown(event);
 
-    expect(state.createColumnCalls).toEqual([]);
+    expect(boardState.createColumnCalls).toEqual([]);
     expect(focus.activePalette).toBeNull();
     expect(event.defaultPrevented).toBe(false);
   });
-
-  it("clearTagFilter clears the active filter on data", async () => {
-    data.activeTagFilter = "todo";
-    await dispatcher.executeAction("clearTagFilter");
-    expect(data.activeTagFilter).toBeNull();
-  });
 });
 
-describe("ActionDispatcher column-mode actions", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+describe("ActionDispatcher board operation routing", () => {
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-      makeColumn("col-2", "deck-1", { position: 2 }),
-    ];
-    state.cardsByColumn = new Map([
-      ["col-0", [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")]],
-      ["col-1", [makeCard("c-1-a", "col-1")]],
-      ["col-2", []],
-    ]);
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [...state.columns];
-    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
-
-    focus = new FocusManager(data);
+    ({ data, focus } = await threeColumnBoard());
     focus.focusMode = "column";
     focus.focusedColumnIndex = 1;
-
     dispatcher = new ActionDispatcher(data, focus);
   });
 
-  it("moveLeft decrements focusedColumnIndex", async () => {
-    await dispatcher.executeColumnAction("moveLeft");
-    expect(focus.focusedColumnIndex).toBe(0);
+  it("routes actions to column operations in column focus", async () => {
+    await dispatcher.executeAction("deleteCard");
+    await dispatcher.executeAction("deleteColumn");
+
+    expect(boardState.deleteCardCalls).toEqual([]);
+    expect(boardState.deleteColumnCalls).toEqual(["col-1"]);
   });
 
-  it("moveLeft is a no-op at the first column", async () => {
-    focus.focusedColumnIndex = 0;
-    await dispatcher.executeColumnAction("moveLeft");
-    expect(focus.focusedColumnIndex).toBe(0);
+  it("routes actions to card operations in card focus", async () => {
+    focus.focusMode = "card";
+    focus.focusedCardIndex = 0;
+
+    await dispatcher.executeAction("deleteColumn");
+    await dispatcher.executeAction("deleteCard");
+
+    expect(boardState.deleteColumnCalls).toEqual([]);
+    expect(boardState.deleteCardCalls).toEqual(["c-1-a"]);
   });
 
-  it("moveRight increments focusedColumnIndex", async () => {
-    await dispatcher.executeColumnAction("moveRight");
-    expect(focus.focusedColumnIndex).toBe(2);
+  it("uses UI callbacks assigned after construction", async () => {
+    const startEdit = vi.fn();
+    const renameColumn = vi.fn();
+    dispatcher.onStartEdit = startEdit;
+    dispatcher.onRenameColumn = renameColumn;
+
+    await dispatcher.executeAction("createCard");
+    focus.focusMode = "column";
+    await dispatcher.executeAction("renameColumn");
+
+    expect(startEdit).toHaveBeenCalledWith("created-card-1");
+    expect(renameColumn).toHaveBeenCalledOnce();
   });
 
-  it("moveRight is a no-op at the last column", async () => {
-    focus.focusedColumnIndex = 2;
-    await dispatcher.executeColumnAction("moveRight");
-    expect(focus.focusedColumnIndex).toBe(2);
-  });
+  it("reports a failed edit-start callback through the data error state", async () => {
+    focus.focusMode = "card";
+    focus.focusedCardIndex = 0;
+    dispatcher.onStartEdit = () => Promise.reject(new Error("lock held"));
 
-  it("enterCardFocusFirst moves to first card and switches to card mode", async () => {
-    await dispatcher.executeColumnAction("enterCardFocusFirst");
-    expect(focus.focusMode).toBe("card");
-    expect(focus.focusedCardIndex).toBe(0);
-  });
+    await dispatcher.executeAction("startEdit");
 
-  it("enterCardFocusFirst is a no-op for an empty column", async () => {
-    focus.focusedColumnIndex = 2; // col-2 has no cards
-    await dispatcher.executeColumnAction("enterCardFocusFirst");
-    expect(focus.focusMode).toBe("column");
-  });
-
-  it("enterCardFocusLast moves to last card and switches to card mode", async () => {
-    focus.focusedColumnIndex = 0; // col-0 has 2 cards
-    await dispatcher.executeColumnAction("enterCardFocusLast");
-    expect(focus.focusMode).toBe("card");
-    expect(focus.focusedCardIndex).toBe(1);
-  });
-
-  it("createCard delegates to data.createCard for the focused column", async () => {
-    await dispatcher.executeColumnAction("createCard");
-    expect(state.createCardCalls).toHaveLength(1);
-    expect(state.createCardCalls[0].column_id).toBe("col-1");
-    expect(focus.editingCardId).not.toBeNull();
-  });
-
-  it("deleteColumn calls db.deleteColumn for the focused column", async () => {
-    await dispatcher.executeColumnAction("deleteColumn");
-    expect(state.deleteColumnCalls).toContain("col-1");
-  });
-
-  it("reorderColumnLeft moves the column when not at the start", async () => {
-    await dispatcher.executeColumnAction("reorderColumnLeft");
-    expect(state.moveColumnCalls).toHaveLength(1);
-    expect(state.moveColumnCalls[0].id).toBe("col-1");
-  });
-
-  it("reorderColumnLeft is a no-op at the first column", async () => {
-    focus.focusedColumnIndex = 0;
-    await dispatcher.executeColumnAction("reorderColumnLeft");
-    expect(state.moveColumnCalls).toHaveLength(0);
-  });
-
-  it("reorderColumnRight moves the column when not at the end", async () => {
-    await dispatcher.executeColumnAction("reorderColumnRight");
-    expect(state.moveColumnCalls).toHaveLength(1);
-  });
-
-  it("createColumn delegates to data.createColumnAtPosition", async () => {
-    await dispatcher.executeColumnAction("createColumn");
-    expect(state.createColumnCalls).toHaveLength(1);
+    await vi.waitFor(() => {
+      expect(data.error).toBe("Failed to execute action: Error: lock held");
+    });
   });
 
   it("undo clamps a focus index left past the last column", async () => {
@@ -572,237 +341,17 @@ describe("ActionDispatcher column-mode actions", () => {
     expect(focus.focusedColumnIndex).toBe(1);
 
     await dispatcher.executeColumnAction("createColumn");
-    expect(state.createColumnCalls[0].position).toBe(2);
-  });
-});
-
-describe("ActionDispatcher card-mode actions", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
-  let dispatcher: InstanceType<typeof ActionDispatcher>;
-
-  beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-    ];
-    state.cardsByColumn = new Map([
-      [
-        "col-0",
-        [
-          makeCard("c-0-a", "col-0"),
-          makeCard("c-0-b", "col-0"),
-          makeCard("c-0-c", "col-0"),
-        ],
-      ],
-      ["col-1", [makeCard("c-1-a", "col-1")]],
-    ]);
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [...state.columns];
-    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
-
-    focus = new FocusManager(data);
-    focus.focusMode = "card";
-    focus.focusedColumnIndex = 0;
-    focus.focusedCardIndex = 1;
-
-    dispatcher = new ActionDispatcher(data, focus);
-  });
-
-  it.each([
-    {
-      name: "moveDown advances focusedCardIndex within the column",
-      action: "moveDown",
-      from: 1,
-      expected: 2,
-    },
-    {
-      name: "moveDown is a no-op at the last card",
-      action: "moveDown",
-      from: 2,
-      expected: 2,
-    },
-    {
-      name: "moveUp decrements focusedCardIndex",
-      action: "moveUp",
-      from: 1,
-      expected: 0,
-    },
-    {
-      name: "moveUp is a no-op at the first card",
-      action: "moveUp",
-      from: 0,
-      expected: 0,
-    },
-    {
-      name: "goFirst snaps focusedCardIndex to 0",
-      action: "goFirst",
-      from: 1,
-      expected: 0,
-    },
-    {
-      name: "goLast snaps focusedCardIndex to last card",
-      action: "goLast",
-      from: 1,
-      expected: 2,
-    },
-  ])("$name", async ({ action, from, expected }) => {
-    focus.focusedCardIndex = from;
-    await dispatcher.executeCardAction(action);
-    expect(focus.focusedCardIndex).toBe(expected);
-  });
-
-  it("moveLeft is a no-op at the first column in card mode", async () => {
-    await dispatcher.executeCardAction("moveLeft");
-    expect(focus.focusedColumnIndex).toBe(0);
-  });
-
-  it("moveRight switches columns and saves/restores card index", async () => {
-    await dispatcher.executeCardAction("moveRight");
-    expect(focus.focusedColumnIndex).toBe(1);
-    // col-1 has 1 card → restoreCardIndex falls back to length-1 = 0
-    expect(focus.focusedCardIndex).toBe(0);
-  });
-
-  it("scrollHalfPageUp clamps to 0", async () => {
-    await dispatcher.executeCardAction("scrollHalfPageUp");
-    expect(focus.focusedCardIndex).toBe(0);
-  });
-
-  it("scrollHalfPageDown clamps to last card", async () => {
-    await dispatcher.executeCardAction("scrollHalfPageDown");
-    expect(focus.focusedCardIndex).toBe(2);
-  });
-
-  it("exitToColumn switches to column mode", async () => {
-    await dispatcher.executeCardAction("exitToColumn");
-    expect(focus.focusMode).toBe("column");
-  });
-
-  it("startEdit transitions into edit mode for the focused card", async () => {
-    await dispatcher.executeCardAction("startEdit");
-    expect(focus.focusMode).toBe("edit");
-    expect(focus.editingCardId).toBe("c-0-b");
-  });
-
-  it("deleteCard calls db.deleteCard for the focused card", async () => {
-    await dispatcher.executeCardAction("deleteCard");
-    expect(state.deleteCardCalls).toContain("c-0-b");
-  });
-
-  it("scoreUp invokes db.updateCardScore with +1", async () => {
-    await dispatcher.executeCardAction("scoreUp");
-    expect(state.updateCardScoreCalls[0]).toEqual({ id: "c-0-b", delta: 1 });
-  });
-
-  it("scoreDown invokes db.updateCardScore with -1", async () => {
-    await dispatcher.executeCardAction("scoreDown");
-    expect(state.updateCardScoreCalls[0]).toEqual({ id: "c-0-b", delta: -1 });
-  });
-
-  it("copyCard puts a snapshot of the focused card on the clipboard", async () => {
-    await dispatcher.executeCardAction("copyCard");
-    expect(focus.clipboardCard?.id).toBe("c-0-b");
-  });
-
-  it("pasteBelow creates a card after the focused card from clipboard", async () => {
-    focus.clipboardCard = { ...makeCard("clip", "col-0"), content: "pasted" };
-    await dispatcher.executeCardAction("pasteBelow");
-    expect(state.createCardCalls[0]?.content).toBe("pasted");
-  });
-
-  it("reorderCardDown calls db.moveCard with index+1", async () => {
-    await dispatcher.executeCardAction("reorderCardDown");
-    expect(state.moveCardCalls[0]).toEqual({ id: "c-0-b", position: 2 });
-  });
-
-  it("reorderCardUp calls db.moveCard with index-1", async () => {
-    await dispatcher.executeCardAction("reorderCardUp");
-    expect(state.moveCardCalls[0]).toEqual({ id: "c-0-b", position: 0 });
-  });
-
-  it("createCardBelow inserts at focusedCardIndex+1 and starts editing it", async () => {
-    await dispatcher.executeCardAction("createCardBelow");
-    expect(state.createCardCalls[0]?.position).toBe(2);
-    expect(focus.focusMode).toBe("edit");
-  });
-
-  it("createCardAbove inserts at focusedCardIndex and starts editing it", async () => {
-    await dispatcher.executeCardAction("createCardAbove");
-    expect(state.createCardCalls[0]?.position).toBe(1);
-    expect(focus.focusMode).toBe("edit");
-  });
-
-  it("createColumn inserts a column after the focused column", async () => {
-    await dispatcher.executeCardAction("createColumn");
-    expect(state.createColumnCalls[0]?.position).toBe(1);
-    expect(focus.focusedColumnIndex).toBe(1);
-    expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
-    expect(focus.focusMode).toBe("column");
-  });
-
-  it("createColumn keeps card focus when the column cannot be created", async () => {
-    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(null);
-
-    await dispatcher.executeCardAction("createColumn");
-
-    expect(focus.focusMode).toBe("card");
-    expect(focus.focusedColumnIndex).toBe(0);
-    expect(focus.focusedCardIndex).toBe(1);
-  });
-
-  it("createColumn keeps card focus when the created column is not loaded", async () => {
-    vi.spyOn(data, "createColumnAtPosition").mockResolvedValue(
-      makeColumn("missing-column", "deck-1", { position: 1 }),
-    );
-
-    await dispatcher.executeCardAction("createColumn");
-
-    expect(focus.focusMode).toBe("card");
-    expect(focus.focusedColumnIndex).toBe(0);
-    expect(focus.focusedCardIndex).toBe(1);
-  });
-
-  it("createColumn preserves a later edit-mode transition", async () => {
-    let resolveColumn: (column: Column | null) => void;
-    const createdColumn = makeColumn("created-async", "deck-1", { position: 1 });
-    const createColumn = new Promise<Column | null>((resolve) => {
-      resolveColumn = resolve;
-    });
-    vi.spyOn(data, "createColumnAtPosition").mockReturnValue(createColumn);
-
-    const creating = dispatcher.executeCardAction("createColumn");
-    await dispatcher.executeCardAction("startEdit");
-    data.columns = [...data.columns, createdColumn];
-    resolveColumn!(createdColumn);
-    await creating;
-
-    expect(focus.focusMode).toBe("edit");
-    expect(focus.focusedColumnIndex).toBe(0);
-    expect(focus.editingCardId).toBe("c-0-b");
+    expect(boardState.createColumnCalls[0].position).toBe(2);
   });
 });
 
 describe("ActionDispatcher.executeCommand", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [];
-    data.cardsByColumn = {};
-    focus = new FocusManager(data);
+    ({ data, focus } = await setupBoard());
     focus.openPalette("command");
     dispatcher = new ActionDispatcher(data, focus);
   });
@@ -816,13 +365,13 @@ describe("ActionDispatcher.executeCommand", () => {
 
   it("newDeck delegates to data.createDeck", async () => {
     await dispatcher.executeCommand("newDeck");
-    expect(state.createDeckCalls).toBe(1);
+    expect(boardState.createDeckCalls).toBe(1);
   });
 
   it("restoreOnboarding rebuilds the Getting Started deck and closes the palette", async () => {
     await dispatcher.executeCommand("restoreOnboarding");
     await flushPromises();
-    expect(state.createDeckCalls).toBe(1);
+    expect(boardState.createDeckCalls).toBe(1);
     expect(focus.activePalette).toBeNull();
   });
 
@@ -852,14 +401,6 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(calls).toEqual([1]);
   });
 
-  it("renameColumn triggers its callback from column and card focus actions", async () => {
-    const calls: number[] = [];
-    dispatcher.onRenameColumn = () => calls.push(1);
-    await dispatcher.executeColumnAction("renameColumn");
-    await dispatcher.executeCardAction("renameColumn");
-    expect(calls).toEqual([1, 1]);
-  });
-
   it("deleteColumn triggers the onDeleteColumn callback", () => {
     const calls: number[] = [];
     dispatcher.onDeleteColumn = () => calls.push(1);
@@ -868,8 +409,8 @@ describe("ActionDispatcher.executeCommand", () => {
   });
 
   it("newColumn inserts to the right of the focused column and focuses it", async () => {
-    state.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
-    data.columns = [...state.columns];
+    boardState.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
+    data.columns = [...boardState.columns];
     focus.focusedColumnIndex = 0;
     focus.previousFocusMode = "card";
     const scrolledIndices: number[] = [];
@@ -878,30 +419,9 @@ describe("ActionDispatcher.executeCommand", () => {
     await vi.waitFor(() => {
       expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
     });
-    expect(state.createColumnCalls).toEqual([{ deck_id: "deck-1", position: 1 }]);
+    expect(boardState.createColumnCalls).toEqual([{ deck_id: "deck-1", position: 1 }]);
     expect(focus.focusMode).toBe("column");
     expect(scrolledIndices).toEqual([1]);
-  });
-
-  it("newColumn preserves card focus when the resulting column has cards", async () => {
-    const current = makeColumn("col-0", "deck-1", { position: 0 });
-    const created = makeColumn("col-1", "deck-1", { position: 1 });
-    state.columns = [current, created];
-    data.columns = [current, created];
-    data.cardsByColumn[created.id] = [makeCard("card-0", created.id)];
-    focus.focusedColumnIndex = 0;
-    focus.previousFocusMode = "card";
-    const createColumnAtPosition = vi
-      .spyOn(data, "createColumnAtPosition")
-      .mockResolvedValue(created);
-
-    await dispatcher.executeCommand("newColumn");
-    await vi.waitFor(() => {
-      expect(createColumnAtPosition).toHaveBeenCalledWith(1);
-      expect(focus.focusedColumnIndex).toBe(1);
-    });
-
-    expect(focus.focusMode).toBe("card");
   });
 
   it("default branch forwards unknown actions through executeAction", async () => {
@@ -911,31 +431,12 @@ describe("ActionDispatcher.executeCommand", () => {
 });
 
 describe("ActionDispatcher jumpToColumn (via executeAction)", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-      makeColumn("col-2", "deck-1", { position: 2 }),
-    ];
-    state.cardsByColumn = new Map([
-      ["col-0", [makeCard("c-0-a", "col-0")]],
-      ["col-1", [makeCard("c-1-a", "col-1")]],
-      ["col-2", []],
-    ]);
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [...state.columns];
-    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
-
-    focus = new FocusManager(data);
+    ({ data, focus } = await threeColumnBoard());
     focus.focusMode = "column";
     focus.focusedColumnIndex = 0;
     dispatcher = new ActionDispatcher(data, focus);
@@ -973,29 +474,21 @@ describe("ActionDispatcher jumpToColumn (via executeAction)", () => {
 });
 
 describe("ActionDispatcher.selectColumnFromPalette", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-    ];
-    state.cardsByColumn = new Map([
-      ["col-0", [makeCard("c-0-a", "col-0")]],
-      ["col-1", []],
-    ]);
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [...state.columns];
-    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
-
-    focus = new FocusManager(data);
+    ({ data, focus } = await setupBoard({
+      columns: [
+        makeColumn("col-0", "deck-1", { position: 0 }),
+        makeColumn("col-1", "deck-1", { position: 1 }),
+      ],
+      cards: {
+        "col-0": [makeCard("c-0-a", "col-0")],
+        "col-1": [],
+      },
+    }));
     focus.focusMode = "card";
     focus.focusedColumnIndex = 0;
     focus.focusedCardIndex = 0;
@@ -1017,15 +510,8 @@ describe("ActionDispatcher.selectColumnFromPalette", () => {
 });
 
 describe("ActionDispatcher destroy", () => {
-  beforeEach(() => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-  });
-
   it("destroy resets the key processor and does not throw", async () => {
-    const data = new DeckData();
-    await data.init();
-    const focus = new FocusManager(data);
+    const { data, focus } = await setupBoard();
     const dispatcher = new ActionDispatcher(data, focus);
 
     expect(() => dispatcher.destroy()).not.toThrow();
@@ -1033,29 +519,21 @@ describe("ActionDispatcher destroy", () => {
 });
 
 describe("ActionDispatcher.handleKeydown routing", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-    ];
-    state.cardsByColumn = new Map([
-      ["col-0", [makeCard("c-0-a", "col-0")]],
-      ["col-1", [makeCard("c-1-a", "col-1")]],
-    ]);
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [...state.columns];
-    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
-
-    focus = new FocusManager(data);
+    ({ data, focus } = await setupBoard({
+      columns: [
+        makeColumn("col-0", "deck-1", { position: 0 }),
+        makeColumn("col-1", "deck-1", { position: 1 }),
+      ],
+      cards: {
+        "col-0": [makeCard("c-0-a", "col-0")],
+        "col-1": [makeCard("c-1-a", "col-1")],
+      },
+    }));
     focus.focusMode = "column";
     focus.focusedColumnIndex = 0;
     dispatcher = new ActionDispatcher(data, focus);
@@ -1164,121 +642,17 @@ describe("ActionDispatcher.handleKeydown routing", () => {
   });
 });
 
-describe("ActionDispatcher card-mode cross-column and paste actions", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
-  let dispatcher: InstanceType<typeof ActionDispatcher>;
-
-  beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-    ];
-    state.cardsByColumn = new Map([
-      ["col-0", [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")]],
-      ["col-1", [makeCard("c-1-a", "col-1")]],
-    ]);
-
-    data = new DeckData();
-    await data.init();
-    data.currentDeck = makeDeck("deck-1");
-    data.columns = [...state.columns];
-    data.cardsByColumn = Object.fromEntries(state.cardsByColumn);
-
-    focus = new FocusManager(data);
-    focus.focusMode = "card";
-    focus.focusedColumnIndex = 0;
-    focus.focusedCardIndex = 0;
-    dispatcher = new ActionDispatcher(data, focus);
-  });
-
-  it("moveCardLeft moves the focused card to the previous column", async () => {
-    focus.focusedColumnIndex = 1;
-    focus.focusedCardIndex = 0;
-    await dispatcher.executeCardAction("moveCardLeft");
-    expect(state.moveCardToColumnCalls[0]).toEqual({
-      id: "c-1-a",
-      column_id: "col-0",
-    });
-    expect(focus.focusedColumnIndex).toBe(0);
-  });
-
-  it("moveCardLeft is a no-op at the first column", async () => {
-    focus.focusedColumnIndex = 0;
-    await dispatcher.executeCardAction("moveCardLeft");
-    expect(state.moveCardToColumnCalls).toHaveLength(0);
-  });
-
-  it("moveCardRight moves the focused card to the next column", async () => {
-    focus.focusedColumnIndex = 0;
-    focus.focusedCardIndex = 0;
-    await dispatcher.executeCardAction("moveCardRight");
-    expect(state.moveCardToColumnCalls[0].column_id).toBe("col-1");
-    expect(focus.focusedColumnIndex).toBe(1);
-  });
-
-  it("moveCardRight is a no-op at the last column", async () => {
-    focus.focusedColumnIndex = 1;
-    await dispatcher.executeCardAction("moveCardRight");
-    expect(state.moveCardToColumnCalls).toHaveLength(0);
-  });
-
-  it("moveLeft navigates to the previous column and stays in card mode", async () => {
-    focus.focusedColumnIndex = 1;
-    focus.focusedCardIndex = 0;
-    await dispatcher.executeCardAction("moveLeft");
-    expect(focus.focusedColumnIndex).toBe(0);
-    expect(focus.focusMode).toBe("card"); // col-0 has cards
-  });
-
-  it("moveRight to an empty column drops to column mode", async () => {
-    data.cardsByColumn = { ...data.cardsByColumn, "col-1": [] };
-    focus.focusedColumnIndex = 0;
-    focus.focusedCardIndex = 0;
-    await dispatcher.executeCardAction("moveRight");
-    expect(focus.focusedColumnIndex).toBe(1);
-    expect(focus.focusMode).toBe("column");
-  });
-
-  it("pasteAbove creates a card at the focused index from the clipboard", async () => {
-    focus.focusedCardIndex = 1;
-    focus.clipboardCard = { ...makeCard("clip", "col-0"), content: "above" };
-    await dispatcher.executeCardAction("pasteAbove");
-    expect(state.createCardCalls[0]?.content).toBe("above");
-    expect(state.createCardCalls[0]?.position).toBe(1);
-  });
-
-  it("pasteBelow/pasteAbove are no-ops with an empty clipboard", async () => {
-    focus.clipboardCard = null;
-    await dispatcher.executeCardAction("pasteAbove");
-    await dispatcher.executeCardAction("pasteBelow");
-    expect(state.createCardCalls).toHaveLength(0);
-  });
-
-  it("deleteCard exits to column mode when the column becomes empty", async () => {
-    focus.focusedColumnIndex = 1; // col-1 has a single card
-    focus.focusedCardIndex = 0;
-    await dispatcher.executeCardAction("deleteCard");
-    expect(state.deleteCardCalls).toContain("c-1-a");
-    expect(focus.focusMode).toBe("column");
-  });
-});
-
 describe("ActionDispatcher while the selected deck is not loaded", () => {
-  let data: InstanceType<typeof DeckData>;
-  let focus: InstanceType<typeof FocusManager>;
+  let data: DeckData;
+  let focus: FocusManager;
   let dispatcher: InstanceType<typeof ActionDispatcher>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1"), makeDeck("deck-2")];
-    state.columns = [makeColumn("col-0", "deck-1")];
-    state.cardsByColumn = new Map([["col-0", []]]);
-
-    data = new DeckData();
-    await data.init();
+    ({ data, focus } = await setupBoard({
+      decks: [makeDeck("deck-1"), makeDeck("deck-2")],
+      columns: [makeColumn("col-0", "deck-1")],
+      cards: { "col-0": [] },
+    }));
     // Simulate a failed switch to deck-2: selected, but nothing committed.
     data.currentDeck = data.decks[1];
     data.loadedDeckId = null;
@@ -1286,7 +660,6 @@ describe("ActionDispatcher while the selected deck is not loaded", () => {
     data.cardsByColumn = {};
     data.deckLoadError = "Failed to load deck: Error: db gone";
 
-    focus = new FocusManager(data);
     focus.focusMode = "column";
     dispatcher = new ActionDispatcher(data, focus);
   });
@@ -1331,7 +704,7 @@ describe("ActionDispatcher while the selected deck is not loaded", () => {
     dispatcher.executeCommand("newColumn");
     await flushPromises();
 
-    expect(state.createColumnCalls).toHaveLength(0);
+    expect(boardState.createColumnCalls).toHaveLength(0);
     expect(undo).not.toHaveBeenCalled();
   });
 
