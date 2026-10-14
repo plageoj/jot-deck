@@ -83,10 +83,7 @@ const downloads = [
 const mcpSnippet = `{
   "mcpServers": {
     "jot-deck": {
-      "command": "/path/to/jot-deck-mcp",
-      "env": {
-        "JOT_DECK_DECK_ID": "01J...your-deck-id"
-      }
+      "command": "/path/to/jot-deck-mcp"
     }
   }
 }`;
@@ -234,9 +231,11 @@ const mcpSnippet = `{
             <p class="snippet-label">The whole setup:</p>
             <pre><code>{mcpSnippet}</code></pre>
             <p class="snippet-note">
-              The app fills in the real path and deck id for you — <em
+              The app fills in the real path for you — <em
                 >Copy MCP server config</em
-              > in the Deck switcher.
+              > in the Deck switcher. Your agent can reach every deck; pin it
+              to one by adding its <em>Deck id</em> as
+              <code>JOT_DECK_DECK_ID</code>.
             </p>
           </div>
 

@@ -12,6 +12,7 @@ const state = {
 
 const mockBackend: Partial<DatabaseBackend> = {
   getAllDecks: async () => state.decks,
+  setSettings: async () => {},
   getColumnsByDeck: async () => state.columns,
   getCardsByColumn: async (columnId: string) =>
     state.cardsByColumn.get(columnId) ?? [],

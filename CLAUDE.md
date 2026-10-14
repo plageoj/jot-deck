@@ -42,13 +42,13 @@ cargo test            # Run Rust tests
 
 ### MCP bridge (read-only Deck access for external agents)
 ```bash
-cargo run -p jot-deck-mcp     # env: JOT_DECK_DECK_ID (required), JOT_DECK_DB_PATH (optional override)
+cargo run -p jot-deck-mcp     # env: JOT_DECK_DECK_ID (optional — pins the connection to one Deck; omit to address any local Deck via a `deck_id` argument per call), JOT_DECK_DB_PATH (optional override)
 ```
 Speaks JSON-RPC 2.0 over stdio. Spawned by an MCP host (Claude Desktop / Claude Code)
 via its `mcpServers` config. The bridge derives the DB path from the fixed app data
-dir (same as the GUI), so only the deck id is required. In production the bridge ships
+dir (same as the GUI), so no environment variables are required. In production the bridge ships
 as a Tauri sidecar (`externalBin`); the GUI Deck switcher generates a paste-ready config
-snippet ("Copy MCP server config") and can also copy just the deck id ("MCP id").
+snippet ("Copy MCP server config") and can also copy just the deck id ("Deck id").
 
 The sidecar is staged by `scripts/build-mcp-sidecar.mjs` (run via `pnpm --filter app
 build:mcp-sidecar`, and automatically from `beforeBuildCommand`). **Run it once before

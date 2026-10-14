@@ -97,10 +97,11 @@ export interface DatabaseBackend {
   setSettings(key: string, value: string): Promise<void>;
 
   // MCP operations
-  /** Generate a paste-ready `mcpServers` config snippet for the given deck.
+  /** Generate a paste-ready `mcpServers` config snippet. It reaches every
+   * local deck (no `JOT_DECK_DECK_ID` pin → 008-mcp-server.md §4.5).
    * Returns null when unavailable (e.g. the browser/WASM backend, which has no
    * bundled bridge binary or real filesystem paths). */
-  generateMcpConfig(deckId: string): Promise<string | null>;
+  generateMcpConfig(): Promise<string | null>;
 
   // Reporter host operations (007-reporter-protocol.md). Desktop-only: the
   // browser/WASM backend cannot spawn child processes, so reads return empty

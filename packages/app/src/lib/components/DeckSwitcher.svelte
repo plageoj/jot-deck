@@ -13,7 +13,7 @@
     onDelete: (deck: Deck) => void;
     /** Build a paste-ready mcpServers config snippet; null when unavailable
      * (e.g. browser backend). */
-    getMcpConfig?: (deck: Deck) => Promise<string | null>;
+    getMcpConfig?: () => Promise<string | null>;
     onClose: () => void;
   }
 
@@ -45,8 +45,8 @@
     }
   }
 
-  /** Copy the deck's ULID for pasting into JOT_DECK_DECK_ID
-   * (docs/008-mcp-server.md §4.5). */
+  /** Copy the deck's ULID, e.g. for JOT_DECK_DECK_ID, which pins an MCP
+   * connection to this deck (docs/008-mcp-server.md §4.5). */
   async function copyDeckId() {
     if (!currentDeck) return;
     if (await writeClipboard(currentDeck.id)) {
@@ -56,13 +56,14 @@
     }
   }
 
-  /** Copy a full, paste-ready mcpServers config snippet (bridge path + deck id).
-   * The desktop app fills in the bundled bridge path; the DB path is derived by
-   * the bridge itself (docs/008-mcp-server.md §4.6). Falls back to copying just
-   * the deck id when the full snippet is unavailable (browser backend). */
+  /** Copy a full, paste-ready mcpServers config snippet. The desktop app fills
+   * in the bundled bridge path; the DB path is derived by the bridge itself, and
+   * the snippet reaches every deck (no deck pin → docs/008-mcp-server.md §4.5).
+   * Falls back to copying just the deck id when the full snippet is unavailable
+   * (browser backend). */
   async function copyConfig() {
     if (!currentDeck) return;
-    const snippet = getMcpConfig ? await getMcpConfig(currentDeck) : null;
+    const snippet = getMcpConfig ? await getMcpConfig() : null;
     const ok = await writeClipboard(snippet ?? currentDeck.id);
     if (ok) {
       configCopied = true;
@@ -198,10 +199,10 @@
       <button
         type="button"
         class="deck-id-row"
-        title="Copy MCP deck id"
+        title="Copy deck id"
         onclick={copyDeckId}
       >
-        <span class="deck-id-label">MCP id</span>
+        <span class="deck-id-label">Deck id</span>
         <code class="deck-id-value">{currentDeck.id}</code>
         <span class="deck-id-hint">{idCopied ? "Copied!" : "Copy"}</span>
       </button>
