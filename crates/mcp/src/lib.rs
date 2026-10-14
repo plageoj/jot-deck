@@ -3,12 +3,14 @@
 //! A small stdio JSON-RPC server that links `jot_deck_core`, opens the deck's
 //! SQLite file directly (the CLI's sibling — no IPC with the GUI), and maps MCP
 //! `tools/call` onto the deck-scoped queries in `jot_deck_core::query` (reads)
-//! and `jot_deck_core::write` (writes). It is connected to a single Deck
-//! (`deck_id`); `private`/deleted filtering and deck-boundary enforcement live in
-//! those core modules, which are the trust boundary.
+//! and `jot_deck_core::write` (writes). The target Deck is a per-call `deck_id`
+//! argument unless the connection is pinned to one Deck (`JOT_DECK_DECK_ID`);
+//! `jot_deck_core::deck_scope` resolves it (008 §4.5). `private`/deleted
+//! filtering, deck-boundary enforcement and `deck_id` validation live in those
+//! core modules, which are the trust boundary.
 //!
-//! Read surface: `list_columns`, `read_card`, `search_cards`, `recent_cards`,
-//! `describe_deck`, plus the `deck://` resources.
+//! Read surface: `list_decks`, `list_columns`, `read_card`, `search_cards`,
+//! `recent_cards`, `describe_deck`, plus the `deck://` resources.
 //!
 //! Write surface (card writes): `append_card`, `patch_card`, `move_card`,
 //! `delete_card`. On top of the core trust boundary the bridge applies
@@ -21,6 +23,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use jot_deck_core::deck_scope::DeckScope;
 use jot_deck_core::write::WriteScope;
 use jot_deck_core::{query, write, Connection};
 use serde_json::{json, Value};
@@ -34,6 +37,8 @@ const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_NAME: &str = "jot-deck";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Resource carrying the default Deck's `describe_deck` payload (008 §4.6).
+const SCHEMA_URI: &str = "deck://schema";
 
 /// Tauri bundle identifier — keep in sync with packages/app/src-tauri/tauri.conf.json.
 /// The GUI stores its DB under the app data dir named by this identifier.
@@ -65,8 +70,10 @@ pub fn resolve_db_path() -> Option<String> {
 
 /// Primer loaded into the host's system context on `initialize` (008 §4.6).
 const INSTRUCTIONS: &str = "\
-Jot Deck exposes one Deck as a read/write knowledge base. Hierarchy: Deck > Column > Card. \
-A Card is a tweet-sized atomic note. Start with `describe_deck` or `list_columns` to learn \
+Jot Deck exposes local Decks as a read/write knowledge base. Hierarchy: Deck > Column > Card. \
+A Card is a tweet-sized atomic note. Start with `list_decks` to pick a Deck and pass its id as \
+`deck_id` to deck-level tools (omitting it targets the Deck last active in the Jot Deck app, or \
+the one Deck a pinned connection serves). Then `describe_deck` or `list_columns` to learn \
 the columns (each has a purpose) and what this connection may do, then `search_cards` \
 (full-text + tag/score/column filters), `recent_cards`, or `read_card` to read. To write: \
 `append_card` adds a card to a column's end — for long input, append several short cards \
@@ -76,7 +83,7 @@ each other; on a conflict, re-read and retry. `move_card` reorders or moves a ca
 an anchor card (before/after), not a raw position. `delete_card` soft-deletes (recoverable). \
 To organize columns, `ensure_column` gets-or-creates a column by name (idempotent — prefer it \
 over guessing an id), `update_column` renames or re-describes one, and `move_column` reorders \
-by an anchor column. `#tag` markers in content are auto-extracted; column and card ids are \
+by an anchor column. `#tag` markers in content are auto-extracted; deck, column and card ids are \
 ULIDs assigned by Jot Deck — discover them via the tools, never guess them. Private columns \
 are never visible. Some connections disable write capabilities or restrict writes to specific \
 columns (reads stay open); `describe_deck` reports exactly what's available.";
@@ -235,10 +242,11 @@ impl BridgeConfig {
     }
 }
 
-/// The MCP bridge over one connection and one deck.
+/// The MCP bridge over one connection. Which Deck each call addresses is
+/// decided by `scope` (pinned to one Deck, or any Deck per call → 008 §4.5).
 pub struct Bridge {
     conn: Connection,
-    deck_id: String,
+    scope: DeckScope,
     capabilities: Capabilities,
     rate_limiter: RateLimiter,
     write_scope: WriteScope,
@@ -247,16 +255,22 @@ pub struct Bridge {
 
 impl Bridge {
     /// Build a bridge with the default policy (full write capabilities).
-    pub fn new(conn: Connection, deck_id: String) -> Self {
-        Self::with_config(conn, deck_id, BridgeConfig::default())
+    /// `pinned_deck_id` is `JOT_DECK_DECK_ID`: `Some` pins the connection to that
+    /// Deck, `None` lets each call address any local Deck.
+    pub fn new(conn: Connection, pinned_deck_id: Option<String>) -> Self {
+        Self::with_config(conn, pinned_deck_id, BridgeConfig::default())
     }
 
     /// Build a bridge with an explicit connection policy (capabilities, rate
     /// limit, write scope, connection id).
-    pub fn with_config(conn: Connection, deck_id: String, config: BridgeConfig) -> Self {
+    pub fn with_config(
+        conn: Connection,
+        pinned_deck_id: Option<String>,
+        config: BridgeConfig,
+    ) -> Self {
         Self {
             conn,
-            deck_id,
+            scope: DeckScope::from_pinned(pinned_deck_id),
             capabilities: config.capabilities,
             rate_limiter: RateLimiter::new(config.max_writes_per_min),
             write_scope: config.write_scope,
@@ -321,11 +335,12 @@ impl Bridge {
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
         let result = match name {
-            "list_columns" => self.tool_list_columns(),
+            "list_decks" => self.tool_list_decks(),
+            "list_columns" => self.tool_list_columns(&args),
             "read_card" => self.tool_read_card(&args),
             "search_cards" => self.tool_search_cards(&args),
             "recent_cards" => self.tool_recent_cards(&args),
-            "describe_deck" => self.tool_describe_deck(),
+            "describe_deck" => self.tool_describe_deck(&args),
             "append_card" => self.tool_append_card(&args),
             "patch_card" => self.tool_patch_card(&args),
             "move_card" => self.tool_move_card(&args),
@@ -347,22 +362,56 @@ impl Bridge {
         }
     }
 
-    fn tool_list_columns(&self) -> Result<Value, String> {
+    // ---- deck resolution (008 §4.5) ----
+
+    /// Target Deck of a deck-addressed tool: its optional `deck_id` argument,
+    /// resolved by core (pin → argument → GUI's active Deck → error).
+    fn deck_arg(&self, args: &Value) -> Result<String, String> {
+        self.scope
+            .resolve(&self.conn, opt_str(args, "deck_id").as_deref())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Deck owning `card_id` (card ids are unique across Decks).
+    fn deck_of_card(&self, card_id: &str) -> Result<String, String> {
+        self.scope
+            .deck_for_card(&self.conn, card_id)
+            .map_err(|e| e.to_string())
+    }
+
+    /// Deck owning `column_id` (column ids are unique across Decks).
+    fn deck_of_column(&self, column_id: &str) -> Result<String, String> {
+        self.scope
+            .deck_for_column(&self.conn, column_id)
+            .map_err(|e| e.to_string())
+    }
+
+    fn tool_list_decks(&self) -> Result<Value, String> {
+        self.scope
+            .list_decks(&self.conn)
+            .map(|d| json!({ "decks": d }))
+            .map_err(|e| e.to_string())
+    }
+
+    fn tool_list_columns(&self, args: &Value) -> Result<Value, String> {
+        let deck_id = self.deck_arg(args)?;
         // Wrap the list in an object: MCP `structuredContent` must be a JSON
         // object, not a top-level array (strict hosts reject arrays).
-        query::list_columns(&self.conn, &self.deck_id)
-            .map(|c| json!({ "columns": c }))
+        query::list_columns(&self.conn, &deck_id)
+            .map(|c| json!({ "deck_id": deck_id, "columns": c }))
             .map_err(|e| e.to_string())
     }
 
     fn tool_read_card(&self, args: &Value) -> Result<Value, String> {
         let card_id = require_str(args, "card_id")?;
-        query::read_card(&self.conn, &self.deck_id, &card_id)
+        let deck_id = self.deck_of_card(&card_id)?;
+        query::read_card(&self.conn, &deck_id, &card_id)
             .map(|c| json!(c))
             .map_err(|e| e.to_string())
     }
 
     fn tool_search_cards(&self, args: &Value) -> Result<Value, String> {
+        let deck_id = self.deck_arg(args)?;
         let params = query::SearchParams {
             query: opt_str(args, "query"),
             column_id: opt_str(args, "column_id"),
@@ -370,21 +419,29 @@ impl Bridge {
             min_score: args.get("min_score").and_then(Value::as_i64).map(|n| n as i32),
             limit: args.get("limit").and_then(Value::as_u64).map(|n| n as usize),
         };
-        query::search_cards(&self.conn, &self.deck_id, &params)
+        query::search_cards(&self.conn, &deck_id, &params)
             .map(|c| json!({ "cards": c }))
             .map_err(|e| e.to_string())
     }
 
     fn tool_recent_cards(&self, args: &Value) -> Result<Value, String> {
+        let deck_id = self.deck_arg(args)?;
         let column_id = opt_str(args, "column_id");
         let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize);
-        query::recent_cards(&self.conn, &self.deck_id, column_id.as_deref(), limit)
+        query::recent_cards(&self.conn, &deck_id, column_id.as_deref(), limit)
             .map(|c| json!({ "cards": c }))
             .map_err(|e| e.to_string())
     }
 
-    fn tool_describe_deck(&self) -> Result<Value, String> {
-        let desc = query::describe_deck(&self.conn, &self.deck_id).map_err(|e| e.to_string())?;
+    fn tool_describe_deck(&self, args: &Value) -> Result<Value, String> {
+        let deck_id = self.deck_arg(args)?;
+        self.describe(&deck_id).map_err(|e| e.to_string())
+    }
+
+    /// `describe_deck` / `deck://schema` payload: the core description plus this
+    /// connection's policy.
+    fn describe(&self, deck_id: &str) -> jot_deck_core::Result<Value> {
+        let desc = query::describe_deck(&self.conn, deck_id)?;
         let mut v = json!(desc);
         // Augment the core description with this connection's write policy so the
         // agent learns its effective scope without the user explaining it (008 §4.6).
@@ -397,6 +454,9 @@ impl Bridge {
             // null = every visible column is writable; a list = only these
             // column ULIDs (write allowlist → 008 §4.5). Reads are never restricted.
             "write_columns": self.write_scope.allowed_columns(),
+            // The Deck this connection is pinned to (JOT_DECK_DECK_ID), or null
+            // when any Deck may be addressed per call (008 §4.5).
+            "pinned_deck_id": self.scope.pinned(),
         });
         if let Some(obj) = v.get_mut("constraints").and_then(Value::as_object_mut) {
             obj.insert(
@@ -427,10 +487,10 @@ impl Bridge {
     /// Log a write to stderr for connection attribution (008 §5). stdout carries
     /// JSON-RPC, so audit lines go to stderr where MCP hosts capture them. `target`
     /// is the affected card or column ULID.
-    fn log_write(&self, tool: &str, target: &str) {
+    fn log_write(&self, deck_id: &str, tool: &str, target: &str) {
         eprintln!(
             "[jot-deck-mcp] conn={} deck={} {} target={}",
-            self.connection_id, self.deck_id, tool, target
+            self.connection_id, deck_id, tool, target
         );
     }
 
@@ -439,16 +499,17 @@ impl Bridge {
         let column_id = require_str(args, "column_id")?;
         let content = require_str(args, "content")?;
         let idempotency_key = opt_str(args, "idempotency_key");
+        let deck_id = self.deck_of_column(&column_id)?;
         let card = write::append_card(
             &self.conn,
-            &self.deck_id,
+            &deck_id,
             &column_id,
             &content,
             idempotency_key.as_deref(),
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
-        self.log_write("append_card", &card.id);
+        self.log_write(&deck_id, "append_card", &card.id);
         Ok(json!({
             "card_id": card.id,
             "column_id": card.column_id,
@@ -468,16 +529,17 @@ impl Bridge {
                 "expected_updated_at must be an RFC3339 timestamp (the updated_at you last read)"
                     .to_string()
             })?;
+        let deck_id = self.deck_of_card(&card_id)?;
         let card = write::patch_card(
             &self.conn,
-            &self.deck_id,
+            &deck_id,
             &card_id,
             &content,
             expected_updated_at,
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
-        self.log_write("patch_card", &card.id);
+        self.log_write(&deck_id, "patch_card", &card.id);
         Ok(json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }))
     }
 
@@ -487,9 +549,12 @@ impl Bridge {
         let to_column_id = opt_str(args, "to_column_id");
         let before_card_id = opt_str(args, "before_card_id");
         let after_card_id = opt_str(args, "after_card_id");
+        // The card's own Deck bounds the move: a destination column in another
+        // Deck is rejected by core (no cross-Deck moves → 008 §4.4).
+        let deck_id = self.deck_of_card(&card_id)?;
         let card = write::move_card(
             &self.conn,
-            &self.deck_id,
+            &deck_id,
             &card_id,
             to_column_id.as_deref(),
             before_card_id.as_deref(),
@@ -497,16 +562,17 @@ impl Bridge {
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
-        self.log_write("move_card", &card.id);
+        self.log_write(&deck_id, "move_card", &card.id);
         Ok(json!({ "card_id": card.id, "column_id": card.column_id, "position": card.position }))
     }
 
     fn tool_delete_card(&self, args: &Value) -> Result<Value, String> {
         self.begin_write(self.capabilities.delete, "delete")?;
         let card_id = require_str(args, "card_id")?;
-        let card = write::delete_card(&self.conn, &self.deck_id, &card_id, &self.write_scope)
+        let deck_id = self.deck_of_card(&card_id)?;
+        let card = write::delete_card(&self.conn, &deck_id, &card_id, &self.write_scope)
             .map_err(|e| e.to_string())?;
-        self.log_write("delete_card", &card.id);
+        self.log_write(&deck_id, "delete_card", &card.id);
         let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
         Ok(json!({ "card_id": card.id, "deleted_at": deleted_at }))
     }
@@ -518,20 +584,22 @@ impl Bridge {
         let name = require_str(args, "name")?;
         let description = require_str(args, "description")?;
         let private = args.get("private").and_then(Value::as_bool).unwrap_or(false);
+        let deck_id = self.deck_arg(args)?;
         // structure is already enforced by begin_write above; whether a *new*
         // column may be created is derived inside ensure_column from the write
         // scope (an allowlist forbids creation → 008 §4.5).
         let result = write::ensure_column(
             &self.conn,
-            &self.deck_id,
+            &deck_id,
             &name,
             &description,
             private,
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
-        self.log_write("ensure_column", &result.column.id);
+        self.log_write(&deck_id, "ensure_column", &result.column.id);
         Ok(json!({
+            "deck_id": deck_id,
             "column_id": result.column.id,
             "name": result.column.name,
             "position": result.column.position,
@@ -549,9 +617,10 @@ impl Bridge {
             .and_then(Value::as_str)
             .map(|s| if s.is_empty() { None } else { Some(s) });
         let private = args.get("private").and_then(Value::as_bool);
+        let deck_id = self.deck_of_column(&column_id)?;
         let column = write::update_column(
             &self.conn,
-            &self.deck_id,
+            &deck_id,
             &column_id,
             name.as_deref(),
             description,
@@ -559,7 +628,7 @@ impl Bridge {
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
-        self.log_write("update_column", &column.id);
+        self.log_write(&deck_id, "update_column", &column.id);
         Ok(json!({
             "column_id": column.id,
             "name": column.name,
@@ -573,47 +642,58 @@ impl Bridge {
         let column_id = require_str(args, "column_id")?;
         let before_column_id = opt_str(args, "before_column_id");
         let after_column_id = opt_str(args, "after_column_id");
+        let deck_id = self.deck_of_column(&column_id)?;
         let column = write::move_column(
             &self.conn,
-            &self.deck_id,
+            &deck_id,
             &column_id,
             before_column_id.as_deref(),
             after_column_id.as_deref(),
             &self.write_scope,
         )
         .map_err(|e| e.to_string())?;
-        self.log_write("move_column", &column.id);
+        self.log_write(&deck_id, "move_column", &column.id);
         Ok(json!({ "column_id": column.id, "position": column.position }))
     }
 
     // ---- resources ----
 
+    /// One `deck://{id}` per Deck this connection can address, plus
+    /// `deck://schema` (the default Deck's `describe_deck`).
     fn resource_defs(&self) -> Vec<Value> {
-        vec![
-            json!({
-                "uri": format!("deck://{}", self.deck_id),
-                "name": "Deck knowledge base",
-                "description": "Columns and cards of the connected Deck (read-only).",
-                "mimeType": "application/json",
-            }),
-            json!({
-                "uri": "deck://schema",
-                "name": "Deck schema",
-                "description": "Runtime shape and constraints of this connection (same as describe_deck).",
-                "mimeType": "application/json",
-            }),
-        ]
+        let decks = self.scope.list_decks(&self.conn).unwrap_or_default();
+        let mut defs: Vec<Value> = decks
+            .into_iter()
+            .map(|d| {
+                json!({
+                    "uri": format!("deck://{}", d.deck_id),
+                    "name": format!("Deck: {}", d.name),
+                    "description": "Columns and cards of this Deck (read-only).",
+                    "mimeType": "application/json",
+                })
+            })
+            .collect();
+        defs.push(json!({
+            "uri": SCHEMA_URI,
+            "name": "Deck schema",
+            "description": "Runtime shape and constraints of the default Deck (same as describe_deck without deck_id).",
+            "mimeType": "application/json",
+        }));
+        defs
     }
 
     fn resources_read(&self, id: Value, params: Value) -> String {
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
-        let deck_uri = format!("deck://{}", self.deck_id);
 
-        let data = if uri == "deck://schema" {
-            query::describe_deck(&self.conn, &self.deck_id).map(|d| json!(d))
-        } else if uri == deck_uri {
+        let data = if uri == SCHEMA_URI {
+            self.scope
+                .resolve(&self.conn, None)
+                .and_then(|deck_id| self.describe(&deck_id))
+        } else if let Some(requested) = uri.strip_prefix("deck://").filter(|s| !s.is_empty()) {
             // KB view: the deck description plus each visible column's cards.
-            self.deck_kb()
+            self.scope
+                .resolve(&self.conn, Some(requested))
+                .and_then(|deck_id| self.deck_kb(&deck_id))
         } else {
             return error_response(id, -32602, &format!("Unknown resource: {}", uri));
         };
@@ -637,13 +717,13 @@ impl Bridge {
     }
 
     /// Build the `deck://{id}` KB payload: deck info + columns with their cards.
-    fn deck_kb(&self) -> jot_deck_core::Result<Value> {
-        let columns = query::list_columns(&self.conn, &self.deck_id)?;
+    fn deck_kb(&self, deck_id: &str) -> jot_deck_core::Result<Value> {
+        let columns = query::list_columns(&self.conn, deck_id)?;
         let mut columns_out = Vec::with_capacity(columns.len());
         for col in &columns {
             let cards = query::recent_cards(
                 &self.conn,
-                &self.deck_id,
+                deck_id,
                 Some(&col.column_id),
                 Some(query::MAX_QUERY_LIMIT),
             )?;
@@ -656,7 +736,7 @@ impl Bridge {
                 "cards": cards,
             }));
         }
-        Ok(json!({ "deck_id": self.deck_id, "columns": columns_out }))
+        Ok(json!({ "deck_id": deck_id, "columns": columns_out }))
     }
 }
 
@@ -687,18 +767,39 @@ impl Bridge {
     }
 }
 
+/// Schema of the optional `deck_id` argument shared by deck-addressed tools.
+fn deck_id_prop() -> Value {
+    json!({
+        "type": "string",
+        "description": "Deck ULID from list_decks. Omit to use the Deck last active in the Jot Deck app (or the pinned Deck)."
+    })
+}
+
 /// Read-surface tool definitions with input schemas and teaching descriptions (008 §4.6).
 fn read_tool_defs() -> Vec<Value> {
     vec![
         json!({
-            "name": "describe_deck",
-            "description": "Return this connection's runtime shape: the visible columns (with their purpose) and the constraint values (card length limit, query limits, tag syntax). Call this first, and again after the deck changes, to ground where to read.",
+            "name": "list_decks",
+            "description": "List the Decks this connection can access (deck_id, name, active). `active` marks the Deck last active in the Jot Deck app, which is the default when deck_id is omitted. Call this first to choose a deck_id.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
         }),
         json!({
+            "name": "describe_deck",
+            "description": "Return a Deck's runtime shape for this connection: the visible columns (with their purpose), what this connection may do, and the constraint values (card length limit, query limits, tag syntax). Call this before working in a Deck, and again after it changes, to ground where to read.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "deck_id": deck_id_prop() },
+                "additionalProperties": false,
+            },
+        }),
+        json!({
             "name": "list_columns",
-            "description": "List the deck's columns (id, name, purpose, position, card_count), ordered by position. Private and deleted columns are omitted. Use it to discover the column_id to search or read within.",
-            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+            "description": "List a Deck's columns (id, name, purpose, position, card_count), ordered by position. Private and deleted columns are omitted. Use it to discover the column_id to search or read within.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "deck_id": deck_id_prop() },
+                "additionalProperties": false,
+            },
         }),
         json!({
             "name": "read_card",
@@ -714,10 +815,11 @@ fn read_tool_defs() -> Vec<Value> {
         }),
         json!({
             "name": "search_cards",
-            "description": "Search cards by full-text query and/or #tags (AND), minimum score, and column. All filters are optional; with none it returns the deck's top cards. Results exclude private columns.",
+            "description": "Search one Deck's cards by full-text query and/or #tags (AND), minimum score, and column. All filters are optional; with none it returns the deck's top cards. Results exclude private columns. To search several Decks, call once per Deck.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "deck_id": deck_id_prop(),
                     "query": { "type": "string", "description": "Text to match in card content." },
                     "column_id": { "type": "string", "description": "Restrict to one column (ULID)." },
                     "tags": { "type": "array", "items": { "type": "string" }, "description": "Tag names without '#'; a card must have all of them." },
@@ -729,10 +831,11 @@ fn read_tool_defs() -> Vec<Value> {
         }),
         json!({
             "name": "recent_cards",
-            "description": "Return the most recently created cards, newest first, optionally within one column. A cheap way to see what was added lately without a query.",
+            "description": "Return a Deck's most recently created cards, newest first, optionally within one column. A cheap way to see what was added lately without a query.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
+                    "deck_id": deck_id_prop(),
                     "column_id": { "type": "string", "description": "Restrict to one column (ULID)." },
                     "limit": { "type": "integer", "description": "Max results (default 20, capped at 100)." }
                 },
@@ -779,7 +882,7 @@ fn patch_card_def() -> Value {
 fn move_card_def() -> Value {
     json!({
         "name": "move_card",
-        "description": "Reorder a card or move it to another column in this deck. Express intent with an anchor — before_card_id or after_card_id (at most one) — not a raw position; omit both to append to the target column's end. Omit to_column_id to reorder within the current column. Moving to the same spot is a no-op.",
+        "description": "Reorder a card or move it to another column of the same Deck. Express intent with an anchor — before_card_id or after_card_id (at most one) — not a raw position; omit both to append to the target column's end. Omit to_column_id to reorder within the current column. Moving to the same spot is a no-op.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -812,10 +915,11 @@ fn delete_card_def() -> Value {
 fn ensure_column_def() -> Value {
     json!({
         "name": "ensure_column",
-        "description": "Get-or-create a column by name in this deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. Give a one-line `description` of what belongs in the column — it sharpens where cards get routed. Prefer this over guessing a column id.",
+        "description": "Get-or-create a column by name in a Deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. Give a one-line `description` of what belongs in the column — it sharpens where cards get routed. Prefer this over guessing a column id.",
         "inputSchema": {
             "type": "object",
             "properties": {
+                "deck_id": deck_id_prop(),
                 "name": { "type": "string", "description": "Column name (the get-or-create key)." },
                 "description": { "type": "string", "description": "One-line description of what belongs in this column (classification axis)." },
                 "private": { "type": "boolean", "description": "Create it hidden from all connections (default false)." }
@@ -847,7 +951,7 @@ fn update_column_def() -> Value {
 fn move_column_def() -> Value {
     json!({
         "name": "move_column",
-        "description": "Reorder a column within the deck. Express intent with an anchor — before_column_id or after_column_id (at most one), not a raw position; omit both to move it to the end.",
+        "description": "Reorder a column within its Deck. Express intent with an anchor — before_column_id or after_column_id (at most one), not a raw position; omit both to move it to the end.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -967,7 +1071,7 @@ mod tests {
         )
         .unwrap();
 
-        (Bridge::new(conn, d.id.clone()), col.id, card.id)
+        (Bridge::new(conn, Some(d.id.clone())), col.id, card.id)
     }
 
     fn call(bridge: &Bridge, id: i64, name: &str, args: Value) -> Value {
@@ -1125,7 +1229,7 @@ mod tests {
     #[test]
     fn deck_resource_lists_cards_without_private() {
         let (bridge, _, _) = bridge_with_data();
-        let deck_id = bridge.deck_id.clone();
+        let deck_id = bridge.scope.pinned().unwrap().to_string();
         let req = json!({ "jsonrpc": "2.0", "id": 4, "method": "resources/read",
             "params": { "uri": format!("deck://{}", deck_id) } })
         .to_string();
@@ -1157,7 +1261,7 @@ mod tests {
             },
         )
         .unwrap();
-        (Bridge::with_config(conn, d.id, config), col.id)
+        (Bridge::with_config(conn, Some(d.id), config), col.id)
     }
 
     fn tool_names(bridge: &Bridge) -> Vec<String> {
@@ -1205,7 +1309,7 @@ mod tests {
         let d = deck::create(&conn, NewDeck { name: "KB".into(), sort_order: SortOrder::default() }).unwrap();
         let secret = column::create(&conn, NewColumn { deck_id: d.id.clone(), name: "Secret".into() }).unwrap();
         column::update(&conn, &secret.id, None, None, Some(true)).unwrap();
-        let bridge = Bridge::new(conn, d.id);
+        let bridge = Bridge::new(conn, Some(d.id));
 
         let resp = call(&bridge, 1, "append_card", json!({ "column_id": secret.id, "content": "x" }));
         assert_eq!(resp["result"]["isError"], true);
@@ -1433,7 +1537,7 @@ mod tests {
             write_scope: WriteScope::allowlist([allowed.id.clone()]),
             ..BridgeConfig::default()
         };
-        (Bridge::with_config(conn, d.id, config), allowed.id, other.id)
+        (Bridge::with_config(conn, Some(d.id), config), allowed.id, other.id)
     }
 
     #[test]
@@ -1472,5 +1576,190 @@ mod tests {
         let (bridge, _, _) = bridge_with_data();
         let resp = call(&bridge, 1, "describe_deck", json!({}));
         assert!(structured(&resp)["capabilities"]["write_columns"].is_null());
+    }
+
+    // ---- multi-deck (call-scoped deck_id → 008 §4.5) ----
+
+    /// Two decks with one public column and card each, served by an unpinned
+    /// bridge. Returns (bridge, [(deck_id, column_id, card_id); 2]).
+    fn unpinned_two_decks() -> (Bridge, Vec<(String, String, String)>) {
+        let conn = create_in_memory().unwrap();
+        let mut decks = Vec::new();
+        for name in ["Work", "Home"] {
+            let d = deck::create(
+                &conn,
+                NewDeck {
+                    name: name.to_string(),
+                    sort_order: SortOrder::default(),
+                },
+            )
+            .unwrap();
+            let col = column::create(
+                &conn,
+                NewColumn {
+                    deck_id: d.id.clone(),
+                    name: format!("{name} notes"),
+                },
+            )
+            .unwrap();
+            let c = card::create(
+                &conn,
+                NewCard {
+                    column_id: col.id.clone(),
+                    content: format!("{name} card"),
+                },
+            )
+            .unwrap();
+            decks.push((d.id, col.id, c.id));
+        }
+        (Bridge::new(conn, None), decks)
+    }
+
+    #[test]
+    fn list_decks_returns_all_decks_when_unpinned() {
+        let (bridge, decks) = unpinned_two_decks();
+        let resp = call(&bridge, 1, "list_decks", json!({}));
+        let listed = structured(&resp)["decks"].as_array().unwrap();
+        assert_eq!(listed.len(), 2);
+        for (deck_id, _, _) in &decks {
+            assert!(listed.iter().any(|d| d["deck_id"] == *deck_id));
+        }
+    }
+
+    #[test]
+    fn list_decks_returns_only_pinned_deck() {
+        let (bridge, _, _) = bridge_with_data();
+        let resp = call(&bridge, 1, "list_decks", json!({}));
+        let listed = structured(&resp)["decks"].as_array().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["deck_id"], bridge.scope.pinned().unwrap());
+    }
+
+    #[test]
+    fn unpinned_deck_tools_address_the_given_deck() {
+        let (bridge, decks) = unpinned_two_decks();
+        let (home, home_col, _) = &decks[1];
+        let resp = call(&bridge, 1, "list_columns", json!({ "deck_id": home }));
+        let cols = structured(&resp)["columns"].as_array().unwrap();
+        assert_eq!(cols.len(), 1);
+        assert_eq!(cols[0]["column_id"], *home_col);
+
+        let found = call(&bridge, 2, "search_cards", json!({ "deck_id": home }));
+        let cards = structured(&found)["cards"].as_array().unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0]["content"], "Home card");
+    }
+
+    #[test]
+    fn unpinned_without_deck_id_or_active_deck_is_error() {
+        let (bridge, _) = unpinned_two_decks();
+        let resp = call(&bridge, 1, "list_columns", json!({}));
+        assert_eq!(resp["result"]["isError"], true);
+        let msg = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(msg.contains("deck_id required"), "{msg}");
+    }
+
+    #[test]
+    fn unpinned_falls_back_to_gui_active_deck() {
+        let (bridge, decks) = unpinned_two_decks();
+        let (work, _, _) = &decks[0];
+        jot_deck_core::setting::set_active_deck_id(&bridge.conn, work).unwrap();
+
+        let resp = call(&bridge, 1, "describe_deck", json!({}));
+        assert_eq!(structured(&resp)["deck_id"], *work);
+        assert!(structured(&resp)["capabilities"]["pinned_deck_id"].is_null());
+
+        let listed = call(&bridge, 2, "list_decks", json!({}));
+        let active: Vec<_> = structured(&listed)["decks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["active"] == true)
+            .collect();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0]["deck_id"], *work);
+    }
+
+    #[test]
+    fn pinned_rejects_other_deck_id() {
+        let (bridge, _, _) = bridge_with_data();
+        let resp = call(&bridge, 1, "list_columns", json!({ "deck_id": "01OTHERDECK" }));
+        assert_eq!(resp["result"]["isError"], true);
+        let msg = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(msg.contains("Unauthorized"), "{msg}");
+    }
+
+    #[test]
+    fn unpinned_card_and_column_tools_follow_owning_deck() {
+        let (bridge, decks) = unpinned_two_decks();
+        let (_, home_col, home_card) = &decks[1];
+
+        let read = call(&bridge, 1, "read_card", json!({ "card_id": home_card }));
+        assert_eq!(read["result"]["isError"], false);
+        assert_eq!(structured(&read)["content"], "Home card");
+
+        let appended = call(
+            &bridge,
+            2,
+            "append_card",
+            json!({ "column_id": home_col, "content": "more" }),
+        );
+        assert_eq!(appended["result"]["isError"], false);
+        assert_eq!(structured(&appended)["column_id"], *home_col);
+    }
+
+    #[test]
+    fn move_card_across_decks_is_rejected() {
+        let (bridge, decks) = unpinned_two_decks();
+        let (_, _, work_card) = &decks[0];
+        let (_, home_col, _) = &decks[1];
+        let resp = call(
+            &bridge,
+            1,
+            "move_card",
+            json!({ "card_id": work_card, "to_column_id": home_col }),
+        );
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn ensure_column_creates_in_the_given_deck() {
+        let (bridge, decks) = unpinned_two_decks();
+        let (home, _, _) = &decks[1];
+        let resp = call(
+            &bridge,
+            1,
+            "ensure_column",
+            json!({ "deck_id": home, "name": "Ideas", "description": "loose ideas" }),
+        );
+        assert_eq!(resp["result"]["isError"], false);
+        assert_eq!(structured(&resp)["deck_id"], *home);
+        assert_eq!(structured(&resp)["created"], true);
+    }
+
+    #[test]
+    fn resources_list_and_read_every_deck_when_unpinned() {
+        let (bridge, decks) = unpinned_two_decks();
+        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "resources/list" }).to_string();
+        let resp: Value = serde_json::from_str(&bridge.handle_message(&req).unwrap()).unwrap();
+        let uris: Vec<&str> = resp["result"]["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["uri"].as_str().unwrap())
+            .collect();
+        for (deck_id, _, _) in &decks {
+            assert!(uris.contains(&format!("deck://{deck_id}").as_str()));
+        }
+        assert!(uris.contains(&SCHEMA_URI));
+
+        let (home, _, _) = &decks[1];
+        let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "resources/read",
+            "params": { "uri": format!("deck://{home}") } })
+        .to_string();
+        let resp: Value = serde_json::from_str(&bridge.handle_message(&req).unwrap()).unwrap();
+        let text = resp["result"]["contents"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Home card"));
+        assert!(!text.contains("Work card"));
     }
 }

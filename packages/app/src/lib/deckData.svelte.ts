@@ -17,6 +17,10 @@ import { CardEditSessions, type EditSession } from "./cardEditSessions";
 export type { EditSession };
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
+/** Shared `settings` key the MCP bridge reads as its default deck when a call
+ * omits `deck_id` (008-mcp-server.md §4.5). Value: the deck ULID as JSON. Keep
+ * in sync with `setting::ACTIVE_DECK_KEY` in crates/core. */
+export const ACTIVE_DECK_SETTING_KEY = "active_deck_id";
 
 /** Everything the board shows for one deck, loaded off-state and committed at once. */
 interface DeckSnapshot {
@@ -198,6 +202,15 @@ export class DeckData {
     } catch {
       // localStorage unavailable — ignore
     }
+    this.publishActiveDeck(id);
+  }
+
+  /** Record the active deck in the shared DB so external processes (the MCP
+   * bridge) can default to it. Best-effort: a failure never blocks a switch. */
+  private publishActiveDeck(id: string) {
+    this.db
+      .setSettings(ACTIVE_DECK_SETTING_KEY, JSON.stringify(id))
+      .catch((e) => console.warn("Failed to record active deck:", e));
   }
 
   /** Switch to `deck`. The previous deck's board is cleared immediately so it
@@ -416,11 +429,11 @@ export class DeckData {
     }
   }
 
-  /** Build a paste-ready mcpServers config snippet for the given deck.
+  /** Build a paste-ready mcpServers config snippet.
    * Returns null when unavailable (browser backend). */
-  async generateMcpConfig(deckId: string): Promise<string | null> {
+  async generateMcpConfig(): Promise<string | null> {
     try {
-      return await this.db.generateMcpConfig(deckId);
+      return await this.db.generateMcpConfig();
     } catch (e) {
       this.error = `Failed to generate MCP config: ${e}`;
       return null;

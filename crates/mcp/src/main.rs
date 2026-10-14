@@ -4,8 +4,9 @@
 //! config. Configuration is passed through environment variables — the host
 //! does not hand ULIDs on argv:
 //!
-//! - `JOT_DECK_DECK_ID`  — ULID of the Deck to serve (required; copy it from the
-//!   GUI, which can also generate the whole config snippet).
+//! - `JOT_DECK_DECK_ID`  — optional ULID that pins the connection to one Deck
+//!   (copy it from the GUI's "Deck id"). Unset, every local Deck is reachable and
+//!   each call names its Deck via a `deck_id` argument (008 §4.5).
 //! - `JOT_DECK_DB_PATH`  — optional override of the `jot-deck.db` path. The DB
 //!   lives at a fixed, identifier-based location (same as the GUI), so this is
 //!   only for dev or non-standard installs; normally it is not set.
@@ -37,13 +38,9 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let deck_id = match std::env::var("JOT_DECK_DECK_ID") {
-        Ok(d) if !d.is_empty() => d,
-        _ => {
-            eprintln!("jot-deck-mcp: JOT_DECK_DECK_ID is required (the Deck ULID to serve)");
-            return ExitCode::FAILURE;
-        }
-    };
+    let pinned_deck_id = std::env::var("JOT_DECK_DECK_ID")
+        .ok()
+        .filter(|d| !d.is_empty());
 
     // Same open path as the CLI/GUI: WAL + busy_timeout let us share the file
     // with a running GUI.
@@ -55,7 +52,7 @@ fn main() -> ExitCode {
         }
     };
 
-    let bridge = Bridge::with_config(conn, deck_id, BridgeConfig::from_env());
+    let bridge = Bridge::with_config(conn, pinned_deck_id, BridgeConfig::from_env());
     serve(&bridge);
     ExitCode::SUCCESS
 }

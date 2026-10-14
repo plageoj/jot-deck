@@ -364,10 +364,11 @@ fn set_settings(state: State<AppState>, key: String, value: String) -> CommandRe
 /// MCP ホスト（Claude Desktop / Claude Code）の `mcpServers` に貼り付けられる
 /// 設定スニペットを生成する。ブリッジのバイナリパスはアプリだけが正確に知って
 /// いるので生成側で埋める。DB パスは本体と同じ固定の app data dir をブリッジが
-/// 自力で導出するため env には出さず、接続ごとに変わる deck id だけを渡す
-/// （008-mcp-server.md §4.6）。
+/// 自力で導出するため env には出さない。`JOT_DECK_DECK_ID` も含めない全 Deck
+/// 対象の最小構成とし、1 Deck に固定したいユーザは「Deck id」を自分で足す
+/// （008-mcp-server.md §4.5）。
 #[tauri::command]
-fn generate_mcp_config(deck_id: String) -> CommandResult<String> {
+fn generate_mcp_config() -> CommandResult<String> {
     let bridge_path = mcp_sidecar_path().ok_or_else(|| CommandError {
         message: "Could not resolve the bundled MCP bridge path".to_string(),
     })?;
@@ -376,9 +377,6 @@ fn generate_mcp_config(deck_id: String) -> CommandResult<String> {
         "mcpServers": {
             "jot-deck": {
                 "command": bridge_path,
-                "env": {
-                    "JOT_DECK_DECK_ID": deck_id,
-                }
             }
         }
     });

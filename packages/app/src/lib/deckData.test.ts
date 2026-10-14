@@ -29,7 +29,7 @@ vi.mock("#lib/db/index.ts", async () => {
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: mockListen }));
 
-const { DeckData } = await import("./deckData.svelte");
+const { DeckData, ACTIVE_DECK_SETTING_KEY } = await import("./deckData.svelte");
 const { FOCUS_STATE_PREFIX } = await import("./focusManager.svelte");
 const focusKey = (deckId: string) => FOCUS_STATE_PREFIX + deckId;
 
@@ -137,6 +137,19 @@ describe("DeckData deck lifecycle", () => {
     await fresh.init();
 
     expect(fresh.currentDeck?.id).toBe("second");
+  });
+
+  it("publishes the selected deck to the shared settings for the MCP bridge", async () => {
+    state.decks = [makeDeck("first"), makeDeck("second")];
+
+    const fresh = new DeckData();
+    await fresh.init();
+    await fresh.selectDeck(makeDeck("second"));
+
+    expect(state.settingsWrites).toEqual([
+      [ACTIVE_DECK_SETTING_KEY, JSON.stringify("first")],
+      [ACTIVE_DECK_SETTING_KEY, JSON.stringify("second")],
+    ]);
   });
 });
 
