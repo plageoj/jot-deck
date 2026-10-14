@@ -37,7 +37,7 @@ const DEFAULT_PROTOCOL_VERSION: &str = "2025-06-18";
 const SUPPORTED_PROTOCOL_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_NAME: &str = "jot-deck";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
-/// Resource carrying the default Deck's `describe_deck` payload (008 §4.6).
+/// Resource carrying the pinned Deck's `describe_deck` payload (008 §4.6).
 const SCHEMA_URI: &str = "deck://schema";
 
 /// Tauri bundle identifier — keep in sync with packages/app/src-tauri/tauri.conf.json.
@@ -71,9 +71,10 @@ pub fn resolve_db_path() -> Option<String> {
 /// Primer loaded into the host's system context on `initialize` (008 §4.6).
 const INSTRUCTIONS: &str = "\
 Jot Deck exposes local Decks as a read/write knowledge base. Hierarchy: Deck > Column > Card. \
-A Card is a tweet-sized atomic note. Start with `list_decks` to pick a Deck and pass its id as \
-`deck_id` to deck-level tools (omitting it targets the Deck last active in the Jot Deck app, or \
-the one Deck a pinned connection serves). Then `describe_deck` or `list_columns` to learn \
+A Card is a tweet-sized atomic note. Start with `list_decks` to pick a Deck (`active` marks the \
+one last open in the Jot Deck app — use it when the user means \"this deck\") and pass its id as \
+`deck_id` on every deck-level call; only a connection pinned to one Deck may omit it. Card and \
+column tools follow the id they name. Then `describe_deck` or `list_columns` to learn \
 the columns (each has a purpose) and what this connection may do, then `search_cards` \
 (full-text + tag/score/column filters), `recent_cards`, or `read_card` to read. To write: \
 `append_card` adds a card to a column's end — for long input, append several short cards \
@@ -364,8 +365,8 @@ impl Bridge {
 
     // ---- deck resolution (008 §4.5) ----
 
-    /// Target Deck of a deck-addressed tool: its optional `deck_id` argument,
-    /// resolved by core (pin → argument → GUI's active Deck → error).
+    /// Target Deck of a deck-addressed tool: its `deck_id` argument, resolved by
+    /// core (pin → argument → error; no implicit default).
     fn deck_arg(&self, args: &Value) -> Result<String, String> {
         self.scope
             .resolve(&self.conn, opt_str(args, "deck_id").as_deref())
@@ -420,7 +421,7 @@ impl Bridge {
             limit: args.get("limit").and_then(Value::as_u64).map(|n| n as usize),
         };
         query::search_cards(&self.conn, &deck_id, &params)
-            .map(|c| json!({ "cards": c }))
+            .map(|c| json!({ "deck_id": deck_id, "cards": c }))
             .map_err(|e| e.to_string())
     }
 
@@ -429,7 +430,7 @@ impl Bridge {
         let column_id = opt_str(args, "column_id");
         let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize);
         query::recent_cards(&self.conn, &deck_id, column_id.as_deref(), limit)
-            .map(|c| json!({ "cards": c }))
+            .map(|c| json!({ "deck_id": deck_id, "cards": c }))
             .map_err(|e| e.to_string())
     }
 
@@ -659,7 +660,8 @@ impl Bridge {
     // ---- resources ----
 
     /// One `deck://{id}` per Deck this connection can address, plus
-    /// `deck://schema` (the default Deck's `describe_deck`).
+    /// `deck://schema` (the pinned Deck's `describe_deck`) on a pinned connection
+    /// — unpinned, there is no single Deck it could describe.
     fn resource_defs(&self) -> Vec<Value> {
         let decks = self.scope.list_decks(&self.conn).unwrap_or_default();
         let mut defs: Vec<Value> = decks
@@ -673,12 +675,14 @@ impl Bridge {
                 })
             })
             .collect();
-        defs.push(json!({
-            "uri": SCHEMA_URI,
-            "name": "Deck schema",
-            "description": "Runtime shape and constraints of the default Deck (same as describe_deck without deck_id).",
-            "mimeType": "application/json",
-        }));
+        if self.scope.pinned().is_some() {
+            defs.push(json!({
+                "uri": SCHEMA_URI,
+                "name": "Deck schema",
+                "description": "Runtime shape and constraints of this connection's Deck (same as describe_deck).",
+                "mimeType": "application/json",
+            }));
+        }
         defs
     }
 
@@ -771,7 +775,7 @@ impl Bridge {
 fn deck_id_prop() -> Value {
     json!({
         "type": "string",
-        "description": "Deck ULID from list_decks. Omit to use the Deck last active in the Jot Deck app (or the pinned Deck)."
+        "description": "Deck ULID from list_decks. Required unless this connection is pinned to one Deck."
     })
 }
 
@@ -780,7 +784,7 @@ fn read_tool_defs() -> Vec<Value> {
     vec![
         json!({
             "name": "list_decks",
-            "description": "List the Decks this connection can access (deck_id, name, active). `active` marks the Deck last active in the Jot Deck app, which is the default when deck_id is omitted. Call this first to choose a deck_id.",
+            "description": "List the Decks this connection can access (deck_id, name, active). `active` marks the Deck last open in the Jot Deck app — a hint for requests like \"this deck\", not a default. Call this first, then pass the chosen deck_id on deck-level calls.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
         }),
         json!({
@@ -1645,9 +1649,13 @@ mod tests {
         assert_eq!(cols[0]["column_id"], *home_col);
 
         let found = call(&bridge, 2, "search_cards", json!({ "deck_id": home }));
+        assert_eq!(structured(&found)["deck_id"], *home);
         let cards = structured(&found)["cards"].as_array().unwrap();
         assert_eq!(cards.len(), 1);
         assert_eq!(cards[0]["content"], "Home card");
+
+        let recent = call(&bridge, 3, "recent_cards", json!({ "deck_id": home }));
+        assert_eq!(structured(&recent)["deck_id"], *home);
     }
 
     #[test]
@@ -1660,12 +1668,16 @@ mod tests {
     }
 
     #[test]
-    fn unpinned_falls_back_to_gui_active_deck() {
+    fn gui_active_deck_is_a_hint_not_a_default() {
         let (bridge, decks) = unpinned_two_decks();
         let (work, _, _) = &decks[0];
         jot_deck_core::setting::set_active_deck_id(&bridge.conn, work).unwrap();
 
-        let resp = call(&bridge, 1, "describe_deck", json!({}));
+        // Omitting deck_id still errors: the call's target never depends on GUI state.
+        let omitted = call(&bridge, 1, "describe_deck", json!({}));
+        assert_eq!(omitted["result"]["isError"], true);
+
+        let resp = call(&bridge, 3, "describe_deck", json!({ "deck_id": work }));
         assert_eq!(structured(&resp)["deck_id"], *work);
         assert!(structured(&resp)["capabilities"]["pinned_deck_id"].is_null());
 
@@ -1751,7 +1763,8 @@ mod tests {
         for (deck_id, _, _) in &decks {
             assert!(uris.contains(&format!("deck://{deck_id}").as_str()));
         }
-        assert!(uris.contains(&SCHEMA_URI));
+        // No single Deck to describe without a pin.
+        assert!(!uris.contains(&SCHEMA_URI));
 
         let (home, _, _) = &decks[1];
         let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "resources/read",

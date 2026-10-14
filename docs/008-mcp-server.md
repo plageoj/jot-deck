@@ -21,7 +21,7 @@ Jot Deck 本体は、自身の Deck に対する **書き込み・読み出し�
 | **外部変更観測** | 別プロセス起因のカード追加/更新を GUI が検知して差分描画 | エージェント起因の変更も同経路で反映（→ §7） |
 | **認証スコープ** | 書き込み可能なカラム/デッキを絞る | エージェントのスコープ制限に流用（§5） |
 | **カード長 backstop** | 1 カードの最大長 / 最大オープン時間の上限 | 暴走 append の抑止に流用（§5） |
-| **共有 `settings` テーブル** | 本体 GUI が使う key-value 設定ストア（テーマ/キーバインド等）。SQLite ファイル内にあり、GUI・CLI・ブリッジがどれも直接読み書きできる | GUI の直近アクティブ Deck をブリッジが `deck_id` 省略時の既定値として読む（§4.5） |
+| **共有 `settings` テーブル** | 本体 GUI が使う key-value 設定ストア（テーマ/キーバインド等）。SQLite ファイル内にあり、GUI・CLI・ブリッジがどれも直接読み書きできる | GUI の直近アクティブ Deck をブリッジが読み、`list_decks` の `active` ヒントとして返す（§4.5） |
 
 > これらの詳細と設計根拠は `007-reporter-protocol.md` にもあるが、本書の理解には上表で足りる。
 
@@ -107,7 +107,7 @@ flowchart LR
 | tool | `recent_cards` | `deck.query` | 読み（モード2） | カラムの直近カードを取得 |
 | tool | `describe_deck` | ― | オンボーディング | 指定 Deck の実行時実体（カラム・実効範囲・制約値）を返す。→ §4.6 |
 | resource | `deck://{deck_id}` | ― | 読み（モード2） | Deck/カラム/カードの読み取り面（KB 用途） |
-| resource | `deck://schema` | ― | オンボーディング | `describe_deck` と同内容の読み取り面（自動ロード対応ホスト向けの補助）。→ §4.6 |
+| resource | `deck://schema` | ― | オンボーディング | `describe_deck` と同内容の読み取り面（自動ロード対応ホスト向けの補助。1 Deck 固定接続のみ）。→ §4.6 |
 
 引数の `deck_id` / `column_id` / `card_id` はいずれも本体が採番した **ULID**。エージェントはまず `list_decks` で Deck を、次に `list_columns` / `search_cards` でカラム/カード ID を発見してから書き込む（ID をエージェントに推測・生成させない）。この「まず一覧して ID を得てから操作する」流儀は、Figma MCP など**呼び出しごとにリソース(ファイル/プロジェクト)を明示引数で解決する** MCP サーバと同型である。**Deck はブリッジ起動時に固定するのではなく、対象 Deck を呼び出しごとの明示引数にする**のが既定（→ §4.5）。1 Deck に固定して運用したい接続は `JOT_DECK_DECK_ID` を設定すればよく、その場合は各 tool で `deck_id` を省略できる。
 
@@ -135,7 +135,7 @@ flowchart LR
 - **意味**: カードを**論理削除**（`deleted_at` を打つ）。物理削除・カラム連動削除・復元はエージェントに公開しない ―― 30 日後の物理削除は本体の cleanup が担い、復元はユーザの削除スタック（`u` / ゴミ箱）に委ねる。誤削除しても失われないことを安全域（§5）の前提にする。この tool は書き込みスコープに `delete` 権限が含まれる場合のみ有効（§5）。
 
 #### `ensure_column`
-- **引数**: `deck_id`（string, ULID, 省略可 ―― 作成/検索先の Deck。省略時は §4.5 の解決順に従う）, `name`（string, 必須）, `description`（string, 必須 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
+- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string, 必須 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
 - **返り値**: `{ deck_id, column_id, name, position, created }`（`created` は新規作成なら true / 既存ヒットなら false）
 - **意味**: **名前キーで get-or-create するべき等な作成**。同名カラムが**指定 Deck の可視範囲に**あればその ULID を返し（get）、無ければ末尾に作成する（create）。自由な `create` を避けることで、再送での重複列と、既存列を見落としたニアデュープ（`ToDo`/`Tasks` 乱立）を同時に抑える。
 - **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続、または allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし可視範囲の同名カラムがあれば get として id を返す ―― **既存カラムの読み取りは妨げない**。名前 lookup は指定 Deck の可視範囲のみを探索し、private / スコープ外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
@@ -154,12 +154,12 @@ flowchart LR
 
 #### `list_decks`
 - **引数**: なし
-- **返り値**: `[{ deck_id, name, active }]`（`active` は GUI の直近アクティブ Deck に立つ真偽値。§4.5 の解決順で使う既定値をエージェントが把握できる）
+- **返り値**: `[{ deck_id, name, active }]`（`active` は GUI の直近アクティブ Deck に立つ真偽値。**既定値ではなくヒント**で、「今開いている Deck で」といった曖昧な依頼をエージェントがこれで解釈し、`deck_id` として明示する → §4.5）
 - **意味**: `deck_id` 発見の入口。`JOT_DECK_DECK_ID` が設定されている接続では、その 1 件のみを返す(このモードでは Deck 探索の必要がないことをエージェントに示す)。未設定なら、このブリッジがアクセスできるローカルの全 Deck を返す ―― **Deck 単位の可視性除外は無い**(private はカラム単位のみ → §4.5)。
 
 #### `list_columns`
-- **引数**: `deck_id`（string, ULID, 省略可 ―― 省略時は §4.5 の解決順に従う）
-- **返り値**: `[{ column_id, name, description, position, card_count }]`（position 昇順、削除済み・非公開カラムを除く）
+- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）
+- **返り値**: `{ deck_id, columns: [{ column_id, name, description, position, card_count }] }`（position 昇順、削除済み・非公開カラムを除く）
 - **意味**: 書き込み/検索対象のカラム ID をエージェントが発見するための入口。read 可視性制御（§5）で除外されたカラムは返さない。
 
 #### `read_card`
@@ -168,12 +168,12 @@ flowchart LR
 - **意味**: 文脈把握・patch 対象の特定に使う単体取得。`card_id` は全 Deck を通じて一意な ULID なので `deck_id` は取らない ―― 所属 Deck は本体が `card_id` から判定し、可視性チェックもそれに基づく。
 
 #### `search_cards`
-- **引数**: `deck_id`（string, ULID, 省略可 ―― 省略時は §4.5 の解決順に従う）, `query`（string, 任意, FTS5 全文検索）, `column_id`（string, 任意, 指定 Deck 内での絞り込み）, `tags`（string[], 任意, AND）, `min_score`（number, 任意）, `limit`（number, 任意, 既定 20 / 上限あり）
-- **返り値**: `[{ card_id, column_id, content, score, tags, created_at }]`（関連度 or スコア降順）
+- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）, `query`（string, 任意, FTS5 全文検索）, `column_id`（string, 任意, 指定 Deck 内での絞り込み）, `tags`（string[], 任意, AND）, `min_score`（number, 任意）, `limit`（number, 任意, 既定 20 / 上限あり）
+- **返り値**: `{ deck_id, cards: [{ card_id, column_id, content, score, tags, created_at }] }`（関連度 or スコア降順。`deck_id` は検索した Deck で、結果の出所をエージェントが確認できる）
 - **意味**: モード2（KB としての Deck）の中核。FTS5・タグ・スコア・カラム所属という第一級のインデックスをそのまま tool 面に出す。非公開カラムのカードは結果から除外。検索は指定 Deck 内に閉じる（Deck を跨いだ横断検索は提供しない ―― 必要なら Deck ごとに呼び分ける）。
 
 #### `recent_cards`
-- **引数**: `deck_id`（string, ULID, 省略可 ―― 省略時は §4.5 の解決順に従う）, `column_id`（string, 任意）, `limit`（number, 任意, 既定 20 / 上限あり）
+- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）, `column_id`（string, 任意）, `limit`（number, 任意, 既定 20 / 上限あり）
 - **返り値**: `search_cards` と同形（`created_at` 降順）
 - **意味**: 「直近何が起きたか」をクエリ無しで引く軽量パス。エージェント・タスクログ用途（追記の直後に自分の書いた末尾を読み返す）で使う。
 
@@ -194,12 +194,12 @@ flowchart LR
 **対象 Deck は呼び出しごとの明示引数 `deck_id` で決まる。**（Figma MCP など、リソース(ファイル/プロジェクト)を接続時ではなく呼び出しごとに解決する一般的な MCP サーバに倣う方式。詳細は §4 冒頭。）ブリッジを 1 つの Deck に固定して起動する運用（プロセス再起動でしか Deck を切り替えられない）ではなく、エージェントが `list_decks` で対象を発見し、以後の呼び出しで `deck_id` を明示する。これにより Deck 切り替えにブリッジの再起動を要しない。
 
 - **`deck_id` の解決順**（各 tool が `deck_id` 引数を取る場合の決定ロジック）:
-    1. **`JOT_DECK_DECK_ID` が設定されていれば最優先**。接続はその 1 Deck に**厳格に固定**される ―― 引数を省略すればそれが使われ、明示的に別の `deck_id` を渡してもその接続では authorization error になる（越境しない旧来の壁がそのまま欲しい接続向け）。
-    2. **未設定で、呼び出しが `deck_id` を明示していればそれを使う**（call-scoped、§4 冒頭）。
-    3. **未設定かつ引数も省略された場合、共有 `settings` テーブルの GUI 直近アクティブ Deck を既定値として使う**（前提節）。GUI（`packages/app` の Deck 切り替え UI）がアクティブ Deck を切り替えるたびにこのテーブルへ書き込むので、ブリッジは追加の IPC なしに「今 GUI で見ている Deck」を既定として拾える。GUI が一度も起動していない、または該当キーが無ければこの既定値は使えない。
-    4. **どれも解決できなければ `deck_id required` エラー**（`list_decks` で明示的に選ばせる）。
-    - **③はあくまで利便性の既定値であり、安全境界ではない**。①の厳格固定と違い、エージェントは同じ呼び出しで別の `deck_id` を明示すれば別 Deck へ普通にアクセスできる ―― GUI の直近アクティブ Deck を追いかけるのは「何も指定しなかったときの気の利いた振る舞い」に過ぎない。
-    - **GUI 側の直近アクティブ Deck は「最後にフォーカスしていた Deck」であり「今この瞬間ユーザーが見ている Deck」を保証しない**（GUI を閉じていても値は残り、複数ウィンドウがあれば最後の書き込みが勝つ単純な仕様）。厳密なリアルタイム同期が要る用途には向かない。
+    1. **`JOT_DECK_DECK_ID` が設定されていれば最優先**。接続はその 1 Deck に**厳格に固定**される ―― 引数を省略すればそれが使われ、明示的に別の `deck_id` を渡してもその接続では authorization error になる（越境させたくない接続向け）。
+    2. **未設定なら、呼び出しが明示した `deck_id` を使う**（call-scoped、§4 冒頭）。
+    3. **未設定で引数も省略されていれば `deck_id required` エラー**（`list_decks` で明示的に選ばせる）。
+    - **暗黙の既定 Deck は持たない**。GUI の状態など呼び出しの外側にある値で対象を決めると、ユーザが GUI で Deck を切り替えた瞬間に同じ呼び出しが黙って別 Deck を読み書きし、エージェントはそれに気づけない。対象は常に呼び出しから一意に決まり（再現可能）、付け忘れは即座の自己修正可能なエラーになる。
+- **GUI の直近アクティブ Deck は `list_decks` の `active` ヒントとして公開する**（前提節の共有 `settings` テーブル）。GUI（`packages/app` の Deck 切り替え UI）がアクティブ Deck を切り替えるたびにこのテーブルへ書き込み、ブリッジは追加の IPC なしにそれを読む。エージェントは「今開いている Deck」といった依頼をこのヒントで解釈し、以後の呼び出しで `deck_id` を明示する。
+    - **これは「最後にフォーカスしていた Deck」であり「今この瞬間ユーザーが見ている Deck」を保証しない**（GUI を閉じていても値は残り、複数ウィンドウがあれば最後の書き込みが勝つ単純な仕様）。GUI が一度も起動していなければどの Deck にも立たない。
 - **`private` が唯一の hard 除外（変更なし）**。ユーザが本体 UI で `private` を立てたカラムは、どの `deck_id` を指定していても全接続から読めず・書けない。read allowlist を手で書かせない ―― これが「ゼロ実装 KB」（§6）の約束。
 - **カラム単位 allowlist・capability は接続単位で、対象になり得る全 Deck に共通適用**。`JOT_DECK_WRITE_COLUMNS`（write allowlist）・`JOT_DECK_DENY`（capability opt-out）は、その接続が呼び出しで指定するどの Deck に対しても同じ制約として働く（column ULID は Deck を跨いで一意なので、allowlist は複数 Deck のカラムを混在させても指定できる）。**write allowlist を明示した接続では `ensure_column` の新規作成が無効**（固定集合の意図と排他。既存カラムの取得は可）＝ allowlist と新規作成は両立しない。
 - **構造変更は既定 ON・opt-out**。既定接続は指定 Deck 内をフル再編できる（§4.4）。structure capability を deny すれば構造変更（`ensure_column` / `update_column` / `move_column`）を封じられる。
@@ -233,7 +233,7 @@ flowchart LR
 - 階層は Deck > Column > Card。カードは **tweet サイズの原子単位**。
 - **長い入力は 1 枚を成長させず、短いカードの連なりとして `append_card` を複数回**呼ぶ（最重要）。
 - `#tag` は本文に書けば本体が自動抽出。position / ID は本体が採番するので**推測・生成しない**。
-- この接続が複数 Deck を対象にできる場合は、**まず `list_decks` で `deck_id` を決めてから** `list_columns` / `search_cards` に進む（1 Deck に固定された接続では不要）。
+- この接続が複数 Deck を対象にできる場合は、**まず `list_decks` で `deck_id` を決め、以後 Deck を対象とする呼び出しには毎回 `deck_id` を付ける**（1 Deck に固定された接続では不要）。
 - カラム作成は `structure` capability が有効で write allowlist 未指定の接続に限り `ensure_column` で行える（allowlist を明示した接続では新規作成は無効。→ §4.5）。削除は論理削除で復元可能。
 
 **2. `describe_deck`（bootstrap tool）＝この接続の実行時実体と制約**
@@ -243,7 +243,7 @@ flowchart LR
 - **この接続の実効範囲**（読める / 書けるカラム、対象 Deck）。既定は指定 Deck 全体（§4.5）だが、絞り込み接続や `private` の除外結果をエージェントが自分で把握でき、ユーザが口頭で説明する必要がなくなる。
 - 制約値：カード最大長、`search_cards` / `recent_cards` の `limit` 上限、append レート上限、タグ記法。
 
-**tool を主とする**理由：これはモデル起点で・冪等で・全 MCP ホストで均一に動き、かつ **move / ensure で構造を変えた後にエージェントが最新実体を取り直せる**（resource は再取得がモデル駆動でない）。常時プライマは 1 の `instructions` が賄うので、`describe_deck` の価値は「変化する実体の再取得」にある。補助として、セッション開始時に自動ロードできるホスト向けに resource `deck://schema` を併設してよい（同じ内容の読み取り面）。
+**tool を主とする**理由：これはモデル起点で・冪等で・全 MCP ホストで均一に動き、かつ **move / ensure で構造を変えた後にエージェントが最新実体を取り直せる**（resource は再取得がモデル駆動でない）。常時プライマは 1 の `instructions` が賄うので、`describe_deck` の価値は「変化する実体の再取得」にある。補助として、セッション開始時に自動ロードできるホスト向けに resource `deck://schema` を併設する（固定 Deck についての同じ内容の読み取り面。対象 Deck が一意に決まらない非固定接続では公開しない）。
 
 **3. カラムの purpose メタ（分類軸の説明）**
 `list_columns` / `describe_deck` は名前だけでなく **「ここに何を入れるか」の 1 行説明**を返す。`決定事項` `ToDo` `論点` のような名前だけでは振り分けが当てずっぽうになる。これは Reporter のカラムテンプレート（`007` §9）を tool 面へ出したもので、分類精度に最も効く。

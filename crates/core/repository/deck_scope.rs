@@ -2,10 +2,12 @@
 //!
 //! A connection is either pinned to one Deck (`JOT_DECK_DECK_ID`) or may address
 //! any local Deck per call. Deck-addressed tools resolve their target with
-//! [`DeckScope::resolve`] (pinned → explicit `deck_id` → the GUI's last active
-//! Deck in the shared `settings` table → error); card/column-addressed tools
-//! derive it from the id they name. Like `query.rs`/`write.rs`, this validation
-//! lives in core — the bridge is untrusted (008 §4.5).
+//! [`DeckScope::resolve`] (pinned → explicit `deck_id` → error — there is no
+//! implicit default, so a call's target never depends on GUI state);
+//! card/column-addressed tools derive it from the id they name. The GUI's last
+//! active Deck is only surfaced as a hint (`DeckSummary::active`). Like
+//! `query.rs`/`write.rs`, this validation lives in core — the bridge is
+//! untrusted (008 §4.5).
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -18,7 +20,8 @@ use crate::repository::{deck, setting};
 pub struct DeckSummary {
     pub deck_id: String,
     pub name: String,
-    /// GUI の直近アクティブ Deck（`deck_id` 省略時の既定値）かどうか。
+    /// GUI の直近アクティブ Deck かどうか。既定値ではなく、エージェントが
+    /// 「今開いている Deck」を解釈するためのヒント。
     pub active: bool,
 }
 
@@ -51,8 +54,7 @@ impl DeckScope {
     ///
     /// 1. 固定接続ならその Deck（別の `deck_id` 明示は Unauthorized）
     /// 2. 呼び出しが明示した `deck_id`
-    /// 3. 共有 `settings` の GUI 直近アクティブ Deck
-    /// 4. いずれも無ければ InvalidOperation（`list_decks` で選ばせる）
+    /// 3. いずれも無ければ InvalidOperation（`list_decks` で選ばせる）
     pub fn resolve(&self, conn: &Connection, requested: Option<&str>) -> Result<String> {
         let requested = requested.filter(|id| !id.is_empty());
         if let Self::Pinned(pinned) = self {
@@ -66,19 +68,13 @@ impl DeckScope {
             }
             return Ok(deck::get_by_id(conn, pinned)?.id);
         }
-        if let Some(req) = requested {
-            return Ok(deck::get_by_id(conn, req)?.id);
+        match requested {
+            Some(req) => Ok(deck::get_by_id(conn, req)?.id),
+            None => Err(JotDeckError::InvalidOperation(
+                "deck_id required: call list_decks and pass a deck_id (the `active` Deck is the one last open in the Jot Deck app)."
+                    .to_string(),
+            )),
         }
-        if let Some(active) = setting::get_active_deck_id(conn)? {
-            // A recorded Deck that has since been deleted is not a usable default.
-            if deck_exists(conn, &active)? {
-                return Ok(active);
-            }
-        }
-        Err(JotDeckError::InvalidOperation(
-            "deck_id required: no deck_id was given and the Jot Deck app has no active Deck recorded. Call list_decks and pass a deck_id."
-                .to_string(),
-        ))
     }
 
     /// カードを ID で指す tool の対象 Deck。固定接続では固定 Deck（他 Deck の
@@ -130,13 +126,6 @@ impl DeckScope {
     }
 }
 
-fn deck_exists(conn: &Connection, id: &str) -> Result<bool> {
-    Ok(conn
-        .query_row("SELECT 1 FROM decks WHERE id = ?1", params![id], |_| Ok(()))
-        .optional()?
-        .is_some())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,34 +170,26 @@ mod tests {
     }
 
     #[test]
-    fn any_deck_prefers_explicit_then_active_then_errors() {
+    fn any_deck_requires_an_explicit_existing_deck() {
         let conn = create_in_memory().unwrap();
         let a = new_deck(&conn, "A");
         let b = new_deck(&conn, "B");
         let scope = DeckScope::AnyDeck;
 
-        assert!(matches!(
-            scope.resolve(&conn, None),
-            Err(JotDeckError::InvalidOperation(_))
-        ));
-
-        setting::set_active_deck_id(&conn, &a).unwrap();
-        assert_eq!(scope.resolve(&conn, None).unwrap(), a);
         assert_eq!(scope.resolve(&conn, Some(&b)).unwrap(), b);
         assert!(matches!(
             scope.resolve(&conn, Some("missing")),
             Err(JotDeckError::NotFound(_))
         ));
-    }
 
-    #[test]
-    fn stale_active_deck_is_not_a_default() {
-        let conn = create_in_memory().unwrap();
-        let a = new_deck(&conn, "A");
+        // The GUI's active Deck is a hint only, never an implicit target.
         setting::set_active_deck_id(&conn, &a).unwrap();
-        deck::delete(&conn, &a).unwrap();
         assert!(matches!(
-            DeckScope::AnyDeck.resolve(&conn, None),
+            scope.resolve(&conn, None),
+            Err(JotDeckError::InvalidOperation(_))
+        ));
+        assert!(matches!(
+            scope.resolve(&conn, Some("")),
             Err(JotDeckError::InvalidOperation(_))
         ));
     }

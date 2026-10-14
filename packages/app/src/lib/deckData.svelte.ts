@@ -17,9 +17,10 @@ import { CardEditSessions, type EditSession } from "./cardEditSessions";
 export type { EditSession };
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
-/** Shared `settings` key the MCP bridge reads as its default deck when a call
- * omits `deck_id` (008-mcp-server.md §4.5). Value: the deck ULID as JSON. Keep
- * in sync with `setting::ACTIVE_DECK_KEY` in crates/core. */
+/** Shared `settings` key the MCP bridge reads to flag the `active` deck in
+ * `list_decks` — a hint for agents, not a default (008-mcp-server.md §4.5).
+ * Value: the deck ULID as JSON. Keep in sync with `setting::ACTIVE_DECK_KEY`
+ * in crates/core. */
 export const ACTIVE_DECK_SETTING_KEY = "active_deck_id";
 
 /** Everything the board shows for one deck, loaded off-state and committed at once. */
@@ -206,7 +207,7 @@ export class DeckData {
   }
 
   /** Record the active deck in the shared DB so external processes (the MCP
-   * bridge) can default to it. Best-effort: a failure never blocks a switch. */
+   * bridge) can report it. Best-effort: a failure never blocks a switch. */
   private publishActiveDeck(id: string) {
     this.db
       .setSettings(ACTIVE_DECK_SETTING_KEY, JSON.stringify(id))

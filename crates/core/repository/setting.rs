@@ -5,8 +5,8 @@ use crate::error::Result;
 
 pub const APP_SETTINGS_KEY: &str = "app";
 /// GUI が Deck を切り替えるたびに書き込む「直近アクティブ Deck」のキー。値は
-/// Deck ULID の JSON 文字列。MCP ブリッジが `deck_id` 省略時の既定値として読む
-/// （008-mcp-server.md §4.5）。
+/// Deck ULID の JSON 文字列。MCP ブリッジが `list_decks` の `active` ヒントとして
+/// 読む（既定値にはしない → 008-mcp-server.md §4.5）。
 pub const ACTIVE_DECK_KEY: &str = "active_deck_id";
 
 /// 指定キーの設定値（JSON 文字列）を取得する。未保存の場合は `None`。
