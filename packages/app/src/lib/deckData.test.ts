@@ -740,6 +740,35 @@ describe("DeckData new cards", () => {
     expect(data.cardsByColumn["col-active"]).toHaveLength(1);
   });
 
+  it("keeps a new card undoable when its edit lock cannot be acquired", async () => {
+    const original = mockBackend.acquireCardLock;
+    mockBackend.acquireCardLock = async () => {
+      throw new Error("Card is locked by another editor");
+    };
+    const card = await data.createNewCard("col-active");
+
+    expect(await data.startCardEdit(card!.id)).toBeNull();
+    mockBackend.acquireCardLock = original;
+
+    expect(data.history.canUndo).toBe(true);
+    await data.history.undo();
+    expect(state.deleteCardCalls).toEqual([card!.id]);
+  });
+
+  it("drops a discarded card locally even when the reload fails", async () => {
+    const { card, session } = await editNewCard();
+    const original = mockBackend.getColumnsByDeck;
+    mockBackend.getColumnsByDeck = async () => {
+      throw new Error("db unavailable");
+    };
+
+    expect(await data.cancelCardEdit(session)).toBe(true);
+    mockBackend.getColumnsByDeck = original;
+
+    expect(state.discardEmptyCardCalls).toEqual([card.id]);
+    expect(data.cardsByColumn["col-active"]).toEqual([]);
+  });
+
   it("keeps the session when discarding fails so it can be retried", async () => {
     const original = mockBackend.discardEmptyCard;
     mockBackend.discardEmptyCard = async () => {

@@ -630,8 +630,18 @@ export class DeckData {
       return await this.editSessions.start(cardId);
     } catch (e) {
       this.error = `Failed to edit card: ${e}`;
+      this.keepNewCard(cardId);
       return null;
     }
+  }
+
+  /** A new card whose editor never opened cannot be discarded (that needs its
+   * edit lock), so keep it as an ordinary card whose create can be undone. */
+  keepNewCard(cardId: string): void {
+    const generation = this.newCardGenerations.get(cardId);
+    if (generation === undefined) return;
+    this.newCardGenerations.delete(cardId);
+    this.recordCardCreate(cardId, generation);
   }
 
   /** Commit a GUI edit using its owner and version. `release` is :wq/Ctrl+Enter. */
@@ -707,6 +717,12 @@ export class DeckData {
       return false;
     }
     this.newCardGenerations.delete(session.cardId);
+    // Drop it locally first: a failed reload keeps the previous snapshot.
+    for (const [columnId, cards] of Object.entries(this.cardsByColumn)) {
+      if (cards.some((c) => c.id === session.cardId)) {
+        this.cardsByColumn[columnId] = cards.filter((c) => c.id !== session.cardId);
+      }
+    }
     await this.refreshDeck();
     return true;
   }

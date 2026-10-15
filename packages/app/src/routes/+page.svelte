@@ -223,7 +223,10 @@
 
   async function startCardEditImpl(cardId: string) {
     if (editSession?.cardId === cardId) return;
-    if (editSession && !(await exitActiveEditor(editSession))) return;
+    if (editSession && !(await exitActiveEditor(editSession))) {
+      data.keepNewCard(cardId);
+      return;
+    }
     const session = await data.startCardEdit(cardId);
     if (!session) return;
     if (isCardFocused(cardId)) {

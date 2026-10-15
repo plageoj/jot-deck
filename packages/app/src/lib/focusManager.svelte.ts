@@ -50,12 +50,14 @@ export class FocusManager {
   // would let `card` mode trigger scroll effects against stale columns.
   private pendingFocusMode: PersistedFocusMode | null = null;
 
-  // Where focus was before a new card was created for editing; restored if
-  // that card is discarded on exit (dismissed while still empty).
-  private beforeNewCard: {
+  // The card being created for editing, and where focus was before it. If the
+  // card is discarded on exit (dismissed while still empty), focus returns to
+  // `restore` — unless the user moved focus meanwhile, which clears it.
+  private newCard: {
     cardId: string;
-    mode: PersistedFocusMode;
+    columnIndex: number;
     cardIndex: number;
+    restore: { mode: PersistedFocusMode; cardIndex: number } | null;
   } | null = null;
 
   constructor(data: DeckData) {
@@ -114,25 +116,39 @@ export class FocusManager {
   /** Remember the current column/card focus as the place to return to if the
    * new card `cardId` is discarded when its editor exits. */
   rememberFocusBeforeNewCard(cardId: string, mode: PersistedFocusMode, cardIndex: number) {
-    this.beforeNewCard = { cardId, mode, cardIndex };
+    const location = this.locateCard(cardId);
+    this.newCard = location && { cardId, ...location, restore: { mode, cardIndex } };
   }
 
   exitEdit() {
     const cardId = this.editingCardId;
-    const before = this.beforeNewCard;
-    this.beforeNewCard = null;
+    const newCard = this.newCard;
+    this.newCard = null;
     this.editingCardId = null;
     this.focusMode = "card";
-    if (before === null || before.cardId !== cardId || this.cardExists(cardId)) return;
-    this.focusMode = before.mode;
-    this.focusedCardIndex = before.cardIndex;
+    if (newCard === null || newCard.cardId !== cardId || this.locateCard(cardId)) return;
+    if (newCard.restore) {
+      this.focusMode = newCard.restore.mode;
+      this.focusedCardIndex = newCard.restore.cardIndex;
+    } else if (
+      // The user moved focus while editing (e.g. clicked another card). Keep
+      // that choice, following its card up past the removed one.
+      this.focusedColumnIndex === newCard.columnIndex &&
+      this.focusedCardIndex > newCard.cardIndex
+    ) {
+      this.focusedCardIndex--;
+    }
     this.clampToCurrentDeck();
   }
 
-  private cardExists(cardId: string): boolean {
-    return Object.values(this.data.cardsByColumn).some((cards) =>
-      cards.some((card) => card.id === cardId),
-    );
+  private locateCard(cardId: string): { columnIndex: number; cardIndex: number } | null {
+    for (const [columnIndex, column] of this.data.columns.entries()) {
+      const cardIndex = (this.data.cardsByColumn[column.id] ?? []).findIndex(
+        (card) => card.id === cardId,
+      );
+      if (cardIndex !== -1) return { columnIndex, cardIndex };
+    }
+    return null;
   }
 
   cancelEdit() {
@@ -153,6 +169,7 @@ export class FocusManager {
   }
 
   handleFocusColumn(columnIndex: number) {
+    if (this.newCard) this.newCard.restore = null;
     if (this.focusedColumnIndex !== columnIndex) {
       this.saveCurrentCardIndex();
     }
@@ -161,6 +178,7 @@ export class FocusManager {
   }
 
   handleFocusCard(columnIndex: number, cardIndex: number) {
+    if (this.newCard) this.newCard.restore = null;
     if (this.focusedColumnIndex !== columnIndex) {
       this.saveCurrentCardIndex();
     }

@@ -620,18 +620,25 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
 }
 
 /// 作成直後に空のまま編集を抜けた Card を物理削除する（ゴミ箱を経由しない）。
-/// `holder` が現在のロック所有者で、内容が空白のみのときだけ削除し、position を詰める。
+/// `holder` が有効なリース付きでロックを所有し、内容が空白のみのときだけ削除し、position を詰める。
+/// 条件は削除と同じトランザクション内で DELETE の WHERE にも課すため、確認後に別接続が
+/// 内容を保存したりロックを奪ったりした Card は削除されない。
 pub fn discard_empty(conn: &Connection, id: &str, holder: &str) -> Result<()> {
-    let card = get_by_id(conn, id)?;
+    let now = Utc::now();
+    let cutoff = now - chrono::Duration::seconds(LOCK_LEASE_SECONDS);
+
+    let tx = conn.unchecked_transaction()?;
+    let card = get_by_id(&tx, id)?;
 
     if card.deleted_at.is_some() {
         return Err(JotDeckError::InvalidOperation(
             "Cannot discard deleted card".to_string(),
         ));
     }
-    if card.locked_by.as_deref() != Some(holder) {
+    let lease_live = card.locked_at.is_some_and(|locked_at| locked_at >= cutoff);
+    if card.locked_by.as_deref() != Some(holder) || !lease_live {
         return Err(JotDeckError::InvalidOperation(format!(
-            "Card edit lock is no longer held by {}",
+            "Card edit lock is not held by {} or has expired",
             holder
         )));
     }
@@ -641,12 +648,19 @@ pub fn discard_empty(conn: &Connection, id: &str, holder: &str) -> Result<()> {
         ));
     }
 
-    let now = Utc::now();
-
-    let tx = conn.unchecked_transaction()?;
-
     tx.execute("DELETE FROM card_tags WHERE card_id = ?1", params![id])?;
-    tx.execute("DELETE FROM cards WHERE id = ?1", params![id])?;
+    let deleted = tx.execute(
+        "DELETE FROM cards
+         WHERE id = ?1 AND locked_by = ?2 AND locked_at >= ?3 AND content = ?4
+           AND deleted_at IS NULL",
+        params![id, holder, lock_timestamp(cutoff), &card.content],
+    )?;
+    if deleted != 1 {
+        // tx は commit せずに drop されるのでロールバックされる
+        return Err(JotDeckError::InvalidOperation(
+            "Card changed before it could be discarded".to_string(),
+        ));
+    }
 
     // position を詰める
     tx.execute(
@@ -870,6 +884,22 @@ mod tests {
         assert!(discard_empty(&conn, &empty.id, "gui:owner").is_err());
 
         assert_eq!(get_by_column_id(&conn, &column_id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_discard_empty_rejects_expired_lease() {
+        let (conn, _, column_id) = setup();
+        let empty = card_with(&conn, &column_id, "");
+        acquire_lock(&conn, &empty.id, "gui:owner").unwrap();
+        let expired = Utc::now() - chrono::Duration::seconds(LOCK_LEASE_SECONDS + 1);
+        conn.execute(
+            "UPDATE cards SET locked_at = ?1 WHERE id = ?2",
+            params![lock_timestamp(expired), &empty.id],
+        )
+        .unwrap();
+
+        assert!(discard_empty(&conn, &empty.id, "gui:owner").is_err());
+        assert!(get_by_id(&conn, &empty.id).is_ok());
     }
 
     #[test]
