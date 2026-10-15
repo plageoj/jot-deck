@@ -212,7 +212,11 @@
     draftEnv = Object.entries(r.env)
       .map(([k, v]) => `${k}=${v}`)
       .join("\n");
-    draftDeny = [...r.deny];
+    // Normalize like the host (`Capabilities::try_from_deny`) so a stored
+    // `"Delete"` still shows — and saves — as denied.
+    draftDeny = r.deny
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d.length > 0);
     draftMaxWrites =
       r.max_writes_per_min === null ? "" : String(r.max_writes_per_min);
     draftRestrictColumns = r.allowed_columns !== null;
@@ -320,7 +324,12 @@
       args: parseArgs(draftArgs),
       env,
       // Canonical (capability / deck column) order regardless of click order.
-      deny: CAPABILITIES.map((c) => c.name).filter((n) => draftDeny.includes(n)),
+      // Unrecognized entries are kept, never dropped: the host then rejects the
+      // save visibly instead of this form silently widening the grant.
+      deny: [
+        ...CAPABILITIES.map((c) => c.name).filter((n) => draftDeny.includes(n)),
+        ...draftDeny.filter((n) => !CAPABILITIES.some((c) => c.name === n)),
+      ],
       max_writes_per_min: maxWrites,
       allowed_columns: draftRestrictColumns
         ? columns.filter((c) => draftColumns.includes(c.id)).map((c) => c.id)

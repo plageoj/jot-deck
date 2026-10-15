@@ -591,6 +591,30 @@ describe("ReportersDialog add/edit form", () => {
     );
   });
 
+  it("normalizes stored deny entries and never drops unknown ones on save", async () => {
+    const props = await renderDialog({
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", { deny: [" Delete ", "bogus"] }),
+      ]),
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    // The host treats " Delete " as `delete`, so the form must show it denied.
+    expect((screen.getByLabelText("Delete cards") as HTMLInputElement).checked).toBe(
+      false,
+    );
+
+    // An unrelated edit must not widen the grant.
+    await fireEvent.input(screen.getByLabelText("Name"), {
+      target: { value: "Renamed" },
+    });
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onUpdate).toHaveBeenCalledWith(
+      "deck-1",
+      expect.objectContaining({ deny: ["delete", "bogus"] }),
+    );
+  });
+
   it("summarizes each reporter's auth scope in its row", async () => {
     await renderDialog({
       listReporters: vi.fn(async () => [
