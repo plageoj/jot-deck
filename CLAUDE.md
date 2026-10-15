@@ -53,7 +53,13 @@ snippet ("Copy MCP server config") and can also copy just the deck id ("Deck id"
 The sidecar is staged by `scripts/build-mcp-sidecar.mjs` (run via `pnpm --filter app
 build:mcp-sidecar`, and automatically from `beforeBuildCommand`). **Run it once before
 `cargo check`/`cargo build` on `packages/app/src-tauri`** — `externalBin` fails the build
-if the staged binary is missing.
+if the staged binary is missing. `beforeDevCommand` passes `--debug` so `pnpm dev` builds
+the sidecar with the debug profile and reuses the app's debug dependency artifacts; the
+script locates the output via `cargo metadata`, so `CARGO_TARGET_DIR` is honored.
+
+To share Rust compile artifacts across worktrees, install sccache
+(`cargo binstall sccache`) and set `RUSTC_WRAPPER=sccache` in your user environment.
+Each worktree keeps its own `target/`, so parallel `pnpm dev` runs do not collide.
 
 ## Architecture
 

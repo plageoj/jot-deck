@@ -3,9 +3,14 @@
 //
 // Tauri's `externalBin` expects each binary to exist with a target-triple
 // suffix (e.g. jot-deck-mcp-x86_64-unknown-linux-gnu). This script compiles the
-// `jot-deck-mcp` workspace member in release mode and copies the result into
+// `jot-deck-mcp` workspace member and copies the result into
 // packages/app/src-tauri/binaries/ with the correct suffix so the bundler picks
-// it up. Run automatically from tauri.conf.json's beforeBuildCommand.
+// it up. Run automatically from tauri.conf.json's beforeBuildCommand (release)
+// and beforeDevCommand (`--debug`, so `tauri dev` reuses the debug dependency
+// artifacts instead of compiling every dependency a second time in release).
+//
+// Output location: read from `cargo metadata` so CARGO_TARGET_DIR and
+// build.target-dir overrides are honored.
 //
 // Target triple: uses TAURI_ENV_TARGET_TRIPLE when Tauri provides it (including
 // cross-compiles), otherwise the host triple from `rustc -vV`.
@@ -18,6 +23,17 @@ import { fileURLToPath } from "node:url";
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, "..");
 const destDir = join(repoRoot, "packages", "app", "src-tauri", "binaries");
+const debug = process.argv.includes("--debug");
+const profileDir = debug ? "debug" : "release";
+
+function targetDirectory() {
+  const out = execFileSync("cargo", ["metadata", "--format-version", "1", "--no-deps"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  return JSON.parse(out).target_directory;
+}
 
 function hostTriple() {
   const out = execFileSync("rustc", ["-vV"], { encoding: "utf8" });
@@ -28,8 +44,9 @@ function hostTriple() {
 
 function buildForTriple(triple) {
   // Build. Pass --target only when a specific triple is requested so a plain host
-  // build lands in target/release (no triple subdir).
-  const cargoArgs = ["build", "-p", "jot-deck-mcp", "--release"];
+  // build lands in <target-dir>/<profile> (no triple subdir).
+  const cargoArgs = ["build", "-p", "jot-deck-mcp"];
+  if (!debug) cargoArgs.push("--release");
   if (triple) {
     cargoArgs.push("--target", triple);
   }
@@ -37,8 +54,8 @@ function buildForTriple(triple) {
   execFileSync("cargo", cargoArgs, { cwd: repoRoot, stdio: "inherit" });
 
   const builtDir = triple
-    ? join(repoRoot, "target", triple, "release")
-    : join(repoRoot, "target", "release");
+    ? join(targetDir, triple, profileDir)
+    : join(targetDir, profileDir);
   return join(builtDir, `jot-deck-mcp${exeSuffix}`);
 }
 
@@ -47,6 +64,7 @@ const triple = requestedTriple || hostTriple();
 const isWindows = triple.includes("windows");
 const exeSuffix = isWindows ? ".exe" : "";
 const destBin = join(destDir, `jot-deck-mcp-${triple}${exeSuffix}`);
+const targetDir = targetDirectory();
 
 mkdirSync(destDir, { recursive: true });
 
