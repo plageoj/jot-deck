@@ -58,6 +58,13 @@ describe("column-focus navigation", () => {
     expect(focus.focusedColumnIndex).toBe(0);
   });
 
+  it("moveRight is a no-op when the deck has no columns", async () => {
+    data.columns = [];
+    focus.focusedColumnIndex = 0;
+    await actions.executeColumnAction("moveRight");
+    expect(focus.focusedColumnIndex).toBe(0);
+  });
+
   it("enterCardFocusFirst moves to first card and switches to card mode", async () => {
     await actions.executeColumnAction("enterCardFocusFirst");
     expect(focus.focusMode).toBe("card");
@@ -145,6 +152,13 @@ describe("card-focus navigation", () => {
     focus.focusedCardIndex = from;
     await actions.executeCardAction(action);
     expect(focus.focusedCardIndex).toBe(expected);
+  });
+
+  it("moveDown is a no-op in an empty column", async () => {
+    data.cardsByColumn = { ...data.cardsByColumn, "col-0": [] };
+    focus.focusedCardIndex = 0;
+    await actions.executeCardAction("moveDown");
+    expect(focus.focusedCardIndex).toBe(0);
   });
 
   it("moveLeft is a no-op at the first column in card mode", async () => {

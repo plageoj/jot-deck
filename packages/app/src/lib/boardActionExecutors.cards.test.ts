@@ -146,6 +146,12 @@ describe("card operations", () => {
       expect(focus.focusedCardIndex).toBe(2);
     });
 
+    it("reordering is a no-op when no card is focused", async () => {
+      focus.focusedCardIndex = 5; // out of range → no focused card
+      await actions.executeCardAction("reorderCardUp");
+      expect(boardState.moveCardCalls).toHaveLength(0);
+    });
+
     it("reordering is a no-op in a single-card column", async () => {
       focus.focusedColumnIndex = 1;
       focus.focusedCardIndex = 0;
