@@ -146,6 +146,13 @@ describe("card operations", () => {
       expect(focus.focusedCardIndex).toBe(2);
     });
 
+    it("reordering keeps focus when the move fails", async () => {
+      vi.spyOn(data, "moveCard").mockResolvedValue(false);
+      focus.focusedCardIndex = 2;
+      await actions.executeCardAction("reorderCardDown");
+      expect(focus.focusedCardIndex).toBe(2);
+    });
+
     it("reordering is a no-op when no card is focused", async () => {
       focus.focusedCardIndex = 5; // out of range → no focused card
       await actions.executeCardAction("reorderCardUp");
