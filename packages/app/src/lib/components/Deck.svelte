@@ -75,6 +75,7 @@
     <div bind:this={columnRefs[index]} class="column-wrapper">
       <ColumnComponent
         {column}
+        columnNumber={index + 1}
         cards={cardsByColumn[column.id] ?? []}
         focused={isCurrentColumn}
         focusedCardIndex={isCurrentColumn ? focusedCardIndex : -1}
