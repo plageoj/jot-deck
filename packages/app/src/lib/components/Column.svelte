@@ -79,7 +79,7 @@
   <div class="column-header" class:focused>
     <span class="column-title">
       {#if columnNumber !== undefined && columnNumber >= 1 && columnNumber <= 9}
-        <kbd class="column-number" title="g {columnNumber}">{columnNumber}</kbd>
+        <kbd class="column-number" title="g {columnNumber}: Focus this column">{columnNumber}</kbd>
       {/if}
       <span class="column-name">{column.name}</span>
     </span>
@@ -159,14 +159,19 @@
 
   .column-number {
     flex-shrink: 0;
-    min-width: 1.25rem;
-    padding: 0.0625rem 0.3125rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     background-color: var(--bg-primary);
     color: var(--text-muted);
     font-family: monospace;
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     line-height: 1.4;
     text-align: center;
   }
