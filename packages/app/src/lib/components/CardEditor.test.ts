@@ -1,7 +1,7 @@
 import { fireEvent, render } from "@testing-library/svelte";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
-import { getCM } from "@replit/codemirror-vim";
+import { getCM, Vim } from "@replit/codemirror-vim";
 import CardEditor from "./CardEditor.svelte";
 import { settingsStore } from "#lib/settings.svelte.ts";
 import type { EditEntry } from "#lib/types.ts";
@@ -80,5 +80,18 @@ describe("CardEditor entry position", () => {
     await fireEvent.keyDown(view.contentDOM, { key: "Enter", ctrlKey: true });
 
     expect(onSave).toHaveBeenCalledWith(CONTENT, true, FIRST_LINE_END);
+  });
+
+  it("reports the cursor offset when saving with `:w`", () => {
+    settingsStore.state.vimEnabled = true;
+    const onSave = vi.fn(async (_content: string, _release: boolean, _cursor: number) => true);
+    const view = mountEditor(FIRST_LINE_END, onSave);
+    const cm = getCM(view);
+    if (!cm?.state.vim) throw new Error("Vim is not attached");
+
+    // Vim state is present once attached, which handleEx's narrower type expects.
+    Vim.handleEx(cm as Parameters<typeof Vim.handleEx>[0], "w");
+
+    expect(onSave).toHaveBeenCalledWith(CONTENT, false, FIRST_LINE_END);
   });
 });
