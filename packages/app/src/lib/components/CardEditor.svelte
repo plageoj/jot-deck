@@ -146,8 +146,8 @@
       "&": {
         backgroundColor: "var(--card-bg)",
         color: "var(--text)",
-        fontSize: "0.875rem",
-        lineHeight: "1.4",
+        fontSize: "1rem",
+        lineHeight: "var(--app-line-height, 1.5)",
       },
       ".cm-content": {
         caretColor: "var(--accent)",
