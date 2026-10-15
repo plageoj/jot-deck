@@ -55,9 +55,36 @@ describe("column operations from column focus", () => {
     expect(boardState.moveColumnCalls[0].id).toBe("col-1");
   });
 
-  it("reorderColumnLeft is a no-op at the first column", async () => {
+  it("reorderColumnLeft wraps the first column to the end", async () => {
     focus.focusedColumnIndex = 0;
     await actions.executeColumnAction("reorderColumnLeft");
+    expect(boardState.moveColumnCalls[0]).toEqual({ id: "col-0", position: 2 });
+    expect(focus.focusedColumnIndex).toBe(2);
+  });
+
+  it("reorderColumnRight wraps the last column to the start", async () => {
+    focus.focusedColumnIndex = 2;
+    await actions.executeColumnAction("reorderColumnRight");
+    expect(boardState.moveColumnCalls[0]).toEqual({ id: "col-2", position: 0 });
+    expect(focus.focusedColumnIndex).toBe(0);
+  });
+
+  it("reordering is a no-op when no column is focused", async () => {
+    focus.focusedColumnIndex = 5; // out of range → no focused column
+    await actions.executeColumnAction("reorderColumnLeft");
+    expect(boardState.moveColumnCalls).toHaveLength(0);
+  });
+
+  it("reordering keeps focus when the move fails", async () => {
+    vi.spyOn(data, "moveColumn").mockResolvedValue(false);
+    await actions.executeColumnAction("reorderColumnRight");
+    expect(focus.focusedColumnIndex).toBe(1);
+  });
+
+  it("reordering is a no-op when the deck has a single column", async () => {
+    data.columns = [data.columns[0]];
+    focus.focusedColumnIndex = 0;
+    await actions.executeColumnAction("reorderColumnRight");
     expect(boardState.moveColumnCalls).toHaveLength(0);
   });
 

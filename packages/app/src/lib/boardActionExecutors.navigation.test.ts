@@ -41,10 +41,10 @@ describe("column-focus navigation", () => {
     expect(focus.focusedColumnIndex).toBe(0);
   });
 
-  it("moveLeft is a no-op at the first column", async () => {
+  it("moveLeft wraps from the first column to the last", async () => {
     focus.focusedColumnIndex = 0;
     await actions.executeColumnAction("moveLeft");
-    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedColumnIndex).toBe(2);
   });
 
   it("moveRight increments focusedColumnIndex", async () => {
@@ -52,10 +52,17 @@ describe("column-focus navigation", () => {
     expect(focus.focusedColumnIndex).toBe(2);
   });
 
-  it("moveRight is a no-op at the last column", async () => {
+  it("moveRight wraps from the last column to the first", async () => {
     focus.focusedColumnIndex = 2;
     await actions.executeColumnAction("moveRight");
-    expect(focus.focusedColumnIndex).toBe(2);
+    expect(focus.focusedColumnIndex).toBe(0);
+  });
+
+  it("moveRight is a no-op when the deck has no columns", async () => {
+    data.columns = [];
+    focus.focusedColumnIndex = 0;
+    await actions.executeColumnAction("moveRight");
+    expect(focus.focusedColumnIndex).toBe(0);
   });
 
   it("enterCardFocusFirst moves to first card and switches to card mode", async () => {
@@ -112,10 +119,10 @@ describe("card-focus navigation", () => {
       expected: 2,
     },
     {
-      name: "moveDown is a no-op at the last card",
+      name: "moveDown wraps from the last card to the first",
       action: "moveDown",
       from: 2,
-      expected: 2,
+      expected: 0,
     },
     {
       name: "moveUp decrements focusedCardIndex",
@@ -124,10 +131,10 @@ describe("card-focus navigation", () => {
       expected: 0,
     },
     {
-      name: "moveUp is a no-op at the first card",
+      name: "moveUp wraps from the first card to the last",
       action: "moveUp",
       from: 0,
-      expected: 0,
+      expected: 2,
     },
     {
       name: "goFirst snaps focusedCardIndex to 0",
@@ -147,9 +154,24 @@ describe("card-focus navigation", () => {
     expect(focus.focusedCardIndex).toBe(expected);
   });
 
-  it("moveLeft is a no-op at the first column in card mode", async () => {
+  it("moveDown is a no-op in an empty column", async () => {
+    data.cardsByColumn = { ...data.cardsByColumn, "col-0": [] };
+    focus.focusedCardIndex = 0;
+    await actions.executeCardAction("moveDown");
+    expect(focus.focusedCardIndex).toBe(0);
+  });
+
+  it("moveLeft wraps from the first column to the last in card mode", async () => {
+    await actions.executeCardAction("moveLeft");
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("moveLeft is a no-op in card mode when the deck has a single column", async () => {
+    data.columns = [data.columns[0]];
     await actions.executeCardAction("moveLeft");
     expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(1);
   });
 
   it("moveRight switches columns and saves/restores card index", async () => {
