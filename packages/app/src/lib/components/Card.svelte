@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { Card } from "#lib/types.ts";
+  import type { Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
   import CardEditor from "./CardEditor.svelte";
@@ -11,13 +11,19 @@
     focused?: boolean;
     editing?: boolean;
     editSession?: EditSession | null;
+    editEntry?: EditEntry;
     dimmed?: boolean;
     activeTag?: string | null;
     /** In-progress streamed text from a Reporter (007 §6.2). When non-null the
      * card is read-only and shows an "AI generating" affordance; the streamed
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
-    onSave?: (session: EditSession, content: string, release: boolean) => Promise<boolean>;
+    onSave?: (
+      session: EditSession,
+      content: string,
+      release: boolean,
+      cursor: number,
+    ) => Promise<boolean>;
     onCancelEdit?: (session: EditSession) => Promise<boolean>;
     onStartEdit?: () => void;
     onExitEdit?: (session: EditSession) => void;
@@ -35,6 +41,7 @@
     focused = false,
     editing = false,
     editSession = null,
+    editEntry = "start",
     dimmed = false,
     activeTag = null,
     streamingText = null,
@@ -57,8 +64,9 @@
     session: EditSession,
     content: string,
     release: boolean,
+    cursor: number,
   ): Promise<boolean> {
-    return (await onSave?.(session, content, release)) ?? false;
+    return (await onSave?.(session, content, release, cursor)) ?? false;
   }
 
   async function handleCancel(session: EditSession): Promise<boolean> {
@@ -98,7 +106,8 @@
     {@const session = editSession}
     <CardEditor
       content={card.content}
-      onSave={(content, release) => handleSave(session, content, release)}
+      entry={editEntry}
+      onSave={(content, release, cursor) => handleSave(session, content, release, cursor)}
       onCancel={() => handleCancel(session)}
       onExitEdit={() => handleExit(session)}
       onRegisterExit={(exit) => onRegisterExit?.(session, exit)}

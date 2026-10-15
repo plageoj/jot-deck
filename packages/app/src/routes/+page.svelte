@@ -19,6 +19,7 @@
     UpdateBanner,
   } from "#lib/components/index.ts";
   import { DeckData, type EditSession } from "#lib/deckData.svelte.ts";
+  import { CursorMemory } from "#lib/cursorMemory.ts";
   import { FocusManager } from "#lib/focusManager.svelte.ts";
   import { ActionDispatcher } from "#lib/actionDispatcher.svelte.ts";
   import {
@@ -26,7 +27,7 @@
     settingsStore,
   } from "#lib/settings.svelte.ts";
   import { updaterStore } from "#lib/updater.svelte.ts";
-  import type { Column, Deck, TrashItem } from "#lib/types.ts";
+  import type { Column, Deck, EditEntry, TrashItem } from "#lib/types.ts";
   import "#lib/styles/theme.css";
 
   const data = new DeckData();
@@ -124,6 +125,8 @@
   // Raw: DeckData tracks sessions by object identity, so the editor must
   // receive the exact object it returned — not a deep $state proxy of it.
   let editSession = $state.raw<EditSession | null>(null);
+  let editEntry = $state<EditEntry>("start");
+  const cursorMemory = new CursorMemory();
   let activeEditorExit: (() => Promise<boolean>) | null = null;
   let editTransition = Promise.resolve();
 
@@ -215,18 +218,19 @@
     return data.cardsByColumn[column?.id]?.[focus.focusedCardIndex]?.id === cardId;
   }
 
-  function startCardEdit(cardId: string) {
-    const transition = editTransition.then(() => startCardEditImpl(cardId));
+  function startCardEdit(cardId: string, entry: EditEntry = "start") {
+    const transition = editTransition.then(() => startCardEditImpl(cardId, entry));
     editTransition = transition.catch(() => {});
     return transition;
   }
 
-  async function startCardEditImpl(cardId: string) {
+  async function startCardEditImpl(cardId: string, entry: EditEntry) {
     if (editSession?.cardId === cardId) return;
     if (editSession && !(await exitActiveEditor(editSession))) return;
     const session = await data.startCardEdit(cardId);
     if (!session) return;
     if (isCardFocused(cardId)) {
+      editEntry = cursorMemory.resolve(cardId, entry, data.findCardContent(cardId));
       editSession = session;
       focus.startEdit(cardId);
     } else {
@@ -335,6 +339,7 @@
       focusedCardIndex={focus.focusMode === "card" ? focus.focusedCardIndex : -1}
       editingCardId={focus.editingCardId}
       {editSession}
+      {editEntry}
       streamingText={data.streamingText}
       onAddCard={async (columnId) => {
         const card = await data.createCard(columnId);
@@ -346,8 +351,11 @@
           await startCardEdit(card.id);
         }
       }}
-      onSaveCard={async (session, content, release) =>
-        data.saveCardEdit(session, content, release)}
+      onSaveCard={async (session, content, release, cursor) => {
+        const saved = await data.saveCardEdit(session, content, release);
+        if (saved && release) cursorMemory.remember(session.cardId, cursor, content);
+        return saved;
+      }}
       onCancelEdit={(session) => data.cancelCardEdit(session)}
       onStartEdit={(cardId) => {
         // A card being streamed by a Reporter is read-only (007 §7).

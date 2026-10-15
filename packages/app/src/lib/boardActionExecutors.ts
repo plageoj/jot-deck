@@ -1,6 +1,6 @@
 import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
-import type { Card, Column } from "./types";
+import type { Card, Column, EditEntry } from "./types";
 
 const HALF_PAGE_SIZE = 5;
 
@@ -10,7 +10,7 @@ interface BoardActionContext {
   focusedColumn: Column | undefined;
   focusedCards: Card[];
   focusedCard: Card | undefined;
-  startEdit: ((cardId: string) => void | Promise<void>) | null;
+  startEdit: ((cardId: string, entry?: EditEntry) => void | Promise<void>) | null;
   renameColumn: (() => void) | null;
   runTask: (task: Promise<unknown>) => void;
 }
@@ -97,7 +97,10 @@ export class BoardActionExecutors {
         await this.cardReorder(-1);
         break;
       case "startEdit":
-        this.cardStartEdit();
+        this.cardStartEdit("start");
+        break;
+      case "startEditAtEnd":
+        this.cardStartEdit("end");
         break;
       case "renameColumn":
         this.context().renameColumn?.();
@@ -290,11 +293,11 @@ export class BoardActionExecutors {
     }
   }
 
-  private cardStartEdit(): void {
+  private cardStartEdit(entry: EditEntry): void {
     const { data, focus, focusedCard, startEdit, runTask } = this.context();
     if (!focusedCard || data.isStreaming(focusedCard.id)) return;
     if (startEdit) {
-      runTask(Promise.resolve().then(() => startEdit(focusedCard.id)));
+      runTask(Promise.resolve().then(() => startEdit(focusedCard.id, entry)));
     } else {
       focus.startEdit(focusedCard.id);
     }

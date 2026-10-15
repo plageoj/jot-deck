@@ -1,6 +1,6 @@
 import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
-import type { Card, Column } from "./types";
+import type { Card, Column, EditEntry } from "./types";
 import { findAction } from "./keybindings";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
@@ -35,7 +35,7 @@ export class ActionDispatcher {
   onDeleteDeck: (() => void) | null = null;
   onRenameColumn: (() => void) | null = null;
   onDeleteColumn: (() => void) | null = null;
-  onStartEdit: ((cardId: string) => void | Promise<void>) | null = null;
+  onStartEdit: ((cardId: string, entry?: EditEntry) => void | Promise<void>) | null = null;
 
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;

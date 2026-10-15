@@ -25,6 +25,9 @@ describe("findAction", () => {
     expect(findAction("j", "card")).toBe("moveDown");
     expect(findAction("k", "card")).toBe("moveUp");
     expect(findAction("i", "card")).toBe("startEdit");
+    expect(findAction("I", "card")).toBe("startEdit");
+    expect(findAction("a", "card")).toBe("startEditAtEnd");
+    expect(findAction("A", "card")).toBe("startEditAtEnd");
     expect(findAction("c", "card")).toBe("createColumn");
   });
 

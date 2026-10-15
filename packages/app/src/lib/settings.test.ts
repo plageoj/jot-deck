@@ -8,6 +8,7 @@ import {
   deserializeSettings,
 } from "./settings.svelte";
 import type { DatabaseBackend } from "./db";
+import { DEFAULT_KEYBINDINGS, signatureOf } from "./keybindings";
 
 /**
  * Minimal in-memory backend stub. Only the settings methods are exercised by
@@ -96,6 +97,29 @@ describe("deserializeSettings", () => {
     expect(deserializeSettings(raw).keybindingOverrides).toEqual({
       a: "x",
       b: null,
+    });
+  });
+
+  describe("renamed default binding signatures", () => {
+    const appendSignature = signatureOf(
+      DEFAULT_KEYBINDINGS.find((b) => b.action === "startEditAtEnd" && b.sequence === "a")!,
+    );
+
+    it("carries a remapped `a` override over to startEditAtEnd", () => {
+      const raw = JSON.stringify({ keybindingOverrides: { "startEdit card a": "e" } });
+      expect(deserializeSettings(raw).keybindingOverrides).toEqual({ [appendSignature]: "e" });
+    });
+
+    it("keeps a disabled `a` binding disabled", () => {
+      const raw = JSON.stringify({ keybindingOverrides: { "startEdit card a": null } });
+      expect(deserializeSettings(raw).keybindingOverrides).toEqual({ [appendSignature]: null });
+    });
+
+    it("prefers an override already saved under the new signature", () => {
+      const raw = JSON.stringify({
+        keybindingOverrides: { "startEdit card a": "e", [appendSignature]: "x" },
+      });
+      expect(deserializeSettings(raw).keybindingOverrides).toEqual({ [appendSignature]: "x" });
     });
   });
 

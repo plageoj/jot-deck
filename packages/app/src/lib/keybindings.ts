@@ -64,8 +64,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Card focus - Edit
   { sequence: "i", action: "startEdit", modes: ["card"], description: "Edit card" },
-  { sequence: "a", action: "startEdit", modes: ["card"], description: "Edit card" },
+  { sequence: "I", action: "startEdit", modes: ["card"], description: "Edit card" },
   { sequence: "Enter", action: "startEdit", modes: ["card"], description: "Edit card" },
+  { sequence: "a", action: "startEditAtEnd", modes: ["card"], description: "Edit card at end" },
+  { sequence: "A", action: "startEditAtEnd", modes: ["card"], description: "Edit card at end" },
 
   // Card focus - Create
   { sequence: "o", action: "createCardBelow", modes: ["card"], description: "New card below" },

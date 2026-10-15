@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { EditorView, keymap, placeholder } from "@codemirror/view";
-  import { EditorState } from "@codemirror/state";
+  import { EditorSelection, EditorState } from "@codemirror/state";
   import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-  import { vim, Vim } from "@replit/codemirror-vim";
+  import { getCM, vim, Vim } from "@replit/codemirror-vim";
   import {
     autocompletion,
     acceptCompletion,
@@ -12,19 +12,20 @@
     type CompletionContext,
     type CompletionResult,
   } from "@codemirror/autocomplete";
-  import { TAG_PATTERN } from "#lib/types.ts";
+  import { TAG_PATTERN, type EditEntry } from "#lib/types.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
 
   interface Props {
     content: string;
-    onSave: (content: string, release: boolean) => Promise<boolean>;
+    entry?: EditEntry;
+    onSave: (content: string, release: boolean, cursor: number) => Promise<boolean>;
     onCancel: () => Promise<boolean>;
     onExitEdit?: () => void;
     onRegisterExit?: (exit: (() => Promise<boolean>) | null) => void;
     onTagSuggestions?: (prefix: string) => Promise<{ name: string }[]>;
   }
 
-  let { content, onSave, onCancel, onExitEdit, onRegisterExit, onTagSuggestions }: Props =
+  let { content, entry = "start", onSave, onCancel, onExitEdit, onRegisterExit, onTagSuggestions }: Props =
     $props();
 
   let editorContainer: HTMLDivElement;
@@ -37,13 +38,17 @@
     return view?.state.doc.toString() ?? content;
   }
 
+  function getCursor(): number {
+    return view?.state.selection.main.head ?? 0;
+  }
+
   function save() {
-    void onSave(getContent(), false);
+    void onSave(getContent(), false, getCursor());
   }
 
   function saveAndExit(): Promise<boolean> {
     if (terminalAction) return terminalAction;
-    const action = onSave(getContent(), true).then((saved) => {
+    const action = onSave(getContent(), true, getCursor()).then((saved) => {
       if (saved) {
         exited = true;
         onExitEdit?.();
@@ -90,6 +95,12 @@
         type: "keyword",
       })),
     }));
+  }
+
+  function initialCursor(): number {
+    if (entry === "start") return 0;
+    if (entry === "end") return content.length;
+    return Math.min(Math.max(entry, 0), content.length);
   }
 
   onMount(() => {
@@ -231,6 +242,7 @@
 
     const state = EditorState.create({
       doc: content,
+      selection: EditorSelection.cursor(initialCursor()),
       extensions: [
         ...(vimEnabled ? [vim()] : []),
         customKeymap,
@@ -267,8 +279,18 @@
       parent: editorContainer,
     });
 
-    // Focus and enter insert mode
     view.focus();
+
+    // Land in Insert mode like Vim's `i` / `a`. Normal mode clamps the cursor
+    // onto the last character of a line, so re-place it once Insert mode
+    // allows the end-of-line position.
+    if (vimEnabled) {
+      const cm = getCM(view);
+      if (cm) {
+        Vim.handleKey(cm, "i", "api");
+        view.dispatch({ selection: EditorSelection.cursor(initialCursor()) });
+      }
+    }
   });
 
   onDestroy(() => {
