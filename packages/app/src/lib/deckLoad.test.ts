@@ -61,6 +61,7 @@ async function pass(stage: Stage, deckId: string): Promise<void> {
 
 const mockBackend: Partial<DatabaseBackend> = {
   getAllDecks: async () => decks,
+  setSettings: async () => {},
   getColumnsByDeck: async (deckId) => {
     await pass("columns", deckId);
     return content[deckId].columns;

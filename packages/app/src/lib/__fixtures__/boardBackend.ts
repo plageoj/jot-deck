@@ -57,6 +57,7 @@ export function resetBoardState(): void {
 
 export const mockBackend: Partial<DatabaseBackend> = {
   getAllDecks: () => Promise.resolve(boardState.decks),
+  setSettings: () => Promise.resolve(),
   getColumnsByDeck: () => Promise.resolve(boardState.columns),
   getCardsByColumn: (columnId: string) =>
     Promise.resolve(boardState.cardsByColumn.get(columnId) ?? []),

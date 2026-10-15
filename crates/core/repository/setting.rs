@@ -4,6 +4,10 @@ use rusqlite::{params, Connection};
 use crate::error::Result;
 
 pub const APP_SETTINGS_KEY: &str = "app";
+/// GUI が Deck を切り替えるたびに書き込む「直近アクティブ Deck」のキー。値は
+/// Deck ULID の JSON 文字列。MCP ブリッジが `list_decks` の `active` ヒントとして
+/// 読む（既定値にはしない → 008-mcp-server.md §4.5）。
+pub const ACTIVE_DECK_KEY: &str = "active_deck_id";
 
 /// 指定キーの設定値（JSON 文字列）を取得する。未保存の場合は `None`。
 pub fn get(conn: &Connection, key: &str) -> Result<Option<String>> {
@@ -29,6 +33,19 @@ pub fn set(conn: &Connection, key: &str, value: &str) -> Result<()> {
         params![key, value, now],
     )?;
     Ok(())
+}
+
+/// GUI の直近アクティブ Deck ID を取得する。未保存・不正な値なら `None`。
+pub fn get_active_deck_id(conn: &Connection) -> Result<Option<String>> {
+    Ok(get(conn, ACTIVE_DECK_KEY)?
+        .and_then(|raw| serde_json::from_str::<String>(&raw).ok())
+        .filter(|id| !id.is_empty()))
+}
+
+/// GUI の直近アクティブ Deck ID を保存する。
+pub fn set_active_deck_id(conn: &Connection, deck_id: &str) -> Result<()> {
+    let value = serde_json::to_string(deck_id).expect("serializing a string cannot fail");
+    set(conn, ACTIVE_DECK_KEY, &value)
 }
 
 #[cfg(test)]
@@ -65,5 +82,21 @@ mod tests {
         set(&conn, "beta", "2").unwrap();
         assert_eq!(get(&conn, "alpha").unwrap(), Some("1".to_string()));
         assert_eq!(get(&conn, "beta").unwrap(), Some("2".to_string()));
+    }
+
+    #[test]
+    fn active_deck_id_round_trips_as_json_string() {
+        let conn = create_in_memory().unwrap();
+        assert_eq!(get_active_deck_id(&conn).unwrap(), None);
+        set_active_deck_id(&conn, "01DECK").unwrap();
+        assert_eq!(get(&conn, ACTIVE_DECK_KEY).unwrap(), Some("\"01DECK\"".to_string()));
+        assert_eq!(get_active_deck_id(&conn).unwrap(), Some("01DECK".to_string()));
+    }
+
+    #[test]
+    fn malformed_active_deck_id_is_ignored() {
+        let conn = create_in_memory().unwrap();
+        set(&conn, ACTIVE_DECK_KEY, "not json").unwrap();
+        assert_eq!(get_active_deck_id(&conn).unwrap(), None);
     }
 }

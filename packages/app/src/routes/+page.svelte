@@ -401,7 +401,7 @@
       focus.closePalette();
       handleDeleteDeck(deck);
     }}
-    getMcpConfig={(deck) => data.generateMcpConfig(deck.id)}
+    getMcpConfig={() => data.generateMcpConfig()}
     onClose={() => focus.closePalette()}
   />
 {:else if focus.activePalette === "tag"}

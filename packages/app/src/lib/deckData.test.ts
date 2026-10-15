@@ -29,7 +29,7 @@ vi.mock("#lib/db/index.ts", async () => {
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: mockListen }));
 
-const { DeckData } = await import("./deckData.svelte");
+const { DeckData, ACTIVE_DECK_SETTING_KEY } = await import("./deckData.svelte");
 const { FOCUS_STATE_PREFIX } = await import("./focusManager.svelte");
 const focusKey = (deckId: string) => FOCUS_STATE_PREFIX + deckId;
 
@@ -137,6 +137,62 @@ describe("DeckData deck lifecycle", () => {
     await fresh.init();
 
     expect(fresh.currentDeck?.id).toBe("second");
+  });
+
+  it("publishes the selected deck to the shared settings for the MCP bridge", async () => {
+    state.decks = [makeDeck("first"), makeDeck("second")];
+
+    const fresh = new DeckData();
+    await fresh.init();
+    await fresh.selectDeck(makeDeck("second"));
+
+    expect(state.settingsWrites).toEqual([
+      [ACTIVE_DECK_SETTING_KEY, JSON.stringify("first")],
+      [ACTIVE_DECK_SETTING_KEY, JSON.stringify("second")],
+    ]);
+  });
+
+  it("serializes active-deck writes so the last switch wins, even past a failure", async () => {
+    state.decks = [makeDeck("a"), makeDeck("b"), makeDeck("c")];
+    const fresh = new DeckData();
+    await fresh.init();
+    await vi.waitFor(() => expect(state.settingsWrites).toHaveLength(1));
+
+    // Hold the next write open, fail the one after, and let the last succeed.
+    let releaseSlow!: () => void;
+    const landed: string[] = [];
+    const spy = vi
+      .spyOn(mockBackend, "setSettings")
+      .mockImplementationOnce(
+        (_key, value) =>
+          new Promise<void>((r) => {
+            releaseSlow = () => {
+              landed.push(value);
+              r();
+            };
+          }),
+      )
+      .mockImplementationOnce(() => Promise.reject(new Error("locked")))
+      .mockImplementationOnce(async (_key, value) => {
+        landed.push(value);
+      });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    void fresh.selectDeck(makeDeck("a"));
+    void fresh.selectDeck(makeDeck("b"));
+    void fresh.selectDeck(makeDeck("c"));
+    await Promise.resolve();
+    // Later writes wait behind the open one instead of racing it.
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    releaseSlow();
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(landed).toHaveLength(2));
+    expect(landed).toEqual([JSON.stringify("a"), JSON.stringify("c")]);
+    expect(warn).toHaveBeenCalledOnce();
+
+    spy.mockRestore();
+    warn.mockRestore();
   });
 });
 

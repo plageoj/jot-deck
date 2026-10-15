@@ -196,8 +196,8 @@ export class TauriBackend implements DatabaseBackend {
   }
 
   // MCP operations
-  async generateMcpConfig(deckId: string): Promise<string | null> {
-    return invoke<string>("generate_mcp_config", { deckId });
+  async generateMcpConfig(): Promise<string | null> {
+    return invoke<string>("generate_mcp_config");
   }
 
   // Reporter host operations

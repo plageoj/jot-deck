@@ -37,6 +37,7 @@ export const deckState = {
   reporters: [] as ReporterConfig[],
   runningReporters: [] as string[],
   reporterCalls: [] as string[][],
+  settingsWrites: [] as Array<[string, string]>,
 };
 
 export function resetDeckState(): void {
@@ -59,6 +60,7 @@ export function resetDeckState(): void {
   deckState.reporters = [];
   deckState.runningReporters = [];
   deckState.reporterCalls = [];
+  deckState.settingsWrites = [];
   localStorage.clear();
 }
 
@@ -79,6 +81,10 @@ function findCard(id: string): Card {
 
 export const mockBackend: Partial<DatabaseBackend> = {
   getAllDecks: () => Promise.resolve(deckState.decks),
+  setSettings: (key: string, value: string) => {
+    deckState.settingsWrites.push([key, value]);
+    return Promise.resolve();
+  },
   getColumnsByDeck: () => Promise.resolve(deckState.columns),
   getCardsByColumn: (columnId: string) =>
     Promise.resolve(deckState.cardsByColumn.get(columnId) ?? []),

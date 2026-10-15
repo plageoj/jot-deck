@@ -17,6 +17,11 @@ import { CardEditSessions, type EditSession } from "./cardEditSessions";
 export type { EditSession };
 
 const LAST_DECK_KEY = "jot-deck:last-deck-id";
+/** Shared `settings` key the MCP bridge reads to flag the `active` deck in
+ * `list_decks` — a hint for agents, not a default (008-mcp-server.md §4.5).
+ * Value: the deck ULID as JSON. Keep in sync with `setting::ACTIVE_DECK_KEY`
+ * in crates/core. */
+export const ACTIVE_DECK_SETTING_KEY = "active_deck_id";
 
 /** Everything the board shows for one deck, loaded off-state and committed at once. */
 interface DeckSnapshot {
@@ -28,6 +33,8 @@ interface DeckSnapshot {
 
 export class DeckData {
   private db!: DatabaseBackend;
+  /** Tail of the serialized active-deck writes (see `publishActiveDeck`). */
+  private activeDeckWrite: Promise<void> = Promise.resolve();
 
   decks = $state<Deck[]>([]);
   currentDeck = $state<Deck | null>(null);
@@ -198,6 +205,19 @@ export class DeckData {
     } catch {
       // localStorage unavailable — ignore
     }
+    this.publishActiveDeck(id);
+  }
+
+  /** Record the active deck in the shared DB so external processes (the MCP
+   * bridge) can report it. Writes are chained FIFO so rapid switches land in
+   * order (the last switch wins). Best-effort: a failure never blocks a switch
+   * or later writes. */
+  private publishActiveDeck(id: string) {
+    this.activeDeckWrite = this.activeDeckWrite.then(() =>
+      this.db
+        .setSettings(ACTIVE_DECK_SETTING_KEY, JSON.stringify(id))
+        .catch((e) => console.warn("Failed to record active deck:", e)),
+    );
   }
 
   /** Switch to `deck`. The previous deck's board is cleared immediately so it
@@ -416,11 +436,11 @@ export class DeckData {
     }
   }
 
-  /** Build a paste-ready mcpServers config snippet for the given deck.
+  /** Build a paste-ready mcpServers config snippet.
    * Returns null when unavailable (browser backend). */
-  async generateMcpConfig(deckId: string): Promise<string | null> {
+  async generateMcpConfig(): Promise<string | null> {
     try {
-      return await this.db.generateMcpConfig(deckId);
+      return await this.db.generateMcpConfig();
     } catch (e) {
       this.error = `Failed to generate MCP config: ${e}`;
       return null;
