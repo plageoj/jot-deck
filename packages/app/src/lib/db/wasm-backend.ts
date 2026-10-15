@@ -6,6 +6,7 @@
  */
 
 import initSqlJs, { type Database, type SqlValue } from "sql.js";
+import sqlWasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url";
 import { ulid } from "ulid";
 import {
   TAG_PATTERN,
@@ -22,8 +23,6 @@ import type {
   CreateCardParams,
 } from "./types";
 
-// SQL.js WASM binary URL - loaded from CDN
-const SQL_WASM_URL = "https://sql.js.org/dist/sql-wasm.wasm";
 const LOCK_LEASE_MS = 120_000;
 
 // Type for a row of values from sql.js
@@ -52,7 +51,7 @@ export class WasmBackend implements DatabaseBackend {
 
   private async _doInit(): Promise<void> {
     const SQL = await initSqlJs({
-      locateFile: () => SQL_WASM_URL,
+      locateFile: () => sqlWasmUrl,
     });
 
     this.db = new SQL.Database();
