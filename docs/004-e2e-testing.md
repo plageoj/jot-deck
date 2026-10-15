@@ -208,11 +208,13 @@ pnpm test:e2e:demo
 
 ### WASM ファイルの読み込みエラー
 
-sql.js の WASM バイナリは CDN から読み込まれます。ネットワーク接続を確認してください。
+sql.js の WASM バイナリは、インストール済みの `sql.js` パッケージに同梱されたものを Vite アセットとして読み込みます。JS グルーと WASM のバージョンが必ず一致するよう、CDN など外部の URL は使いません（バージョンがずれると `LinkError` で初期化に失敗します）。
 
 ```typescript
-const SQL_WASM_URL = "https://sql.js.org/dist/sql-wasm.wasm";
+import sqlWasmUrl from "sql.js/dist/sql-wasm-browser.wasm?url";
 ```
+
+Vitest（jsdom）ではアセットパスを fetch できないため、`wasm-backend.test.ts` が同じバイナリを data: URL としてモックしています。
 
 ### タイムアウトエラー
 
