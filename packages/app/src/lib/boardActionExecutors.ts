@@ -134,11 +134,17 @@ export class BoardActionExecutors {
     }
   }
 
-  private columnMove(direction: -1 | 1): void {
+  /** Index one step away from the focused column, wrapping past either end of the deck. */
+  private wrappedColumnIndex(direction: -1 | 1): number {
     const { data, focus } = this.context();
     const count = data.columns.length;
-    if (count === 0) return;
-    focus.focusedColumnIndex = (focus.focusedColumnIndex + direction + count) % count;
+    return (focus.focusedColumnIndex + direction + count) % count;
+  }
+
+  private columnMove(direction: -1 | 1): void {
+    const { data, focus } = this.context();
+    if (data.columns.length === 0) return;
+    focus.focusedColumnIndex = this.wrappedColumnIndex(direction);
     focus.scrollToFocusedColumn();
   }
 
@@ -152,12 +158,9 @@ export class BoardActionExecutors {
 
   private async columnReorder(direction: -1 | 1): Promise<void> {
     const { data, focus, focusedColumn } = this.context();
-    const targetIndex = focus.focusedColumnIndex + direction;
-    const inBounds =
-      direction < 0
-        ? focus.focusedColumnIndex > 0
-        : focus.focusedColumnIndex < data.columns.length - 1;
-    if (inBounds && focusedColumn && (await data.moveColumn(focusedColumn.id, targetIndex))) {
+    if (!focusedColumn || data.columns.length < 2) return;
+    const targetIndex = this.wrappedColumnIndex(direction);
+    if (await data.moveColumn(focusedColumn.id, targetIndex)) {
       focus.focusedColumnIndex = targetIndex;
       focus.scrollToFocusedColumn();
     }
@@ -242,13 +245,9 @@ export class BoardActionExecutors {
 
   private cardMoveColumn(direction: -1 | 1): void {
     const { data, focus } = this.context();
-    const inBounds =
-      direction < 0
-        ? focus.focusedColumnIndex > 0
-        : focus.focusedColumnIndex < data.columns.length - 1;
-    if (!inBounds) return;
+    if (data.columns.length < 2) return;
     focus.saveCurrentCardIndex();
-    focus.focusedColumnIndex += direction;
+    focus.focusedColumnIndex = this.wrappedColumnIndex(direction);
     focus.restoreCardIndex();
     if (this.context().focusedCards.length === 0) focus.focusMode = "column";
     focus.scrollToFocusedColumn();
@@ -268,14 +267,11 @@ export class BoardActionExecutors {
 
   private async cardMoveToAdjacentColumn(direction: -1 | 1): Promise<void> {
     const { data, focus, focusedCard } = this.context();
-    const inBounds =
-      direction < 0
-        ? focus.focusedColumnIndex > 0
-        : focus.focusedColumnIndex < data.columns.length - 1;
-    if (!inBounds || !focusedCard) return;
-    const targetColumn = data.columns[focus.focusedColumnIndex + direction];
+    if (!focusedCard || data.columns.length < 2) return;
+    const targetIndex = this.wrappedColumnIndex(direction);
+    const targetColumn = data.columns[targetIndex];
     if (await data.moveCardToColumn(focusedCard.id, targetColumn.id)) {
-      focus.focusedColumnIndex += direction;
+      focus.focusedColumnIndex = targetIndex;
       const newCards = data.cardsByColumn[targetColumn.id] ?? [];
       focus.focusedCardIndex = newCards.length - 1;
       focus.scrollToFocusedColumn();

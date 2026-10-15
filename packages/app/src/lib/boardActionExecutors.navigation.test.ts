@@ -161,9 +161,17 @@ describe("card-focus navigation", () => {
     expect(focus.focusedCardIndex).toBe(0);
   });
 
-  it("moveLeft is a no-op at the first column in card mode", async () => {
+  it("moveLeft wraps from the first column to the last in card mode", async () => {
+    await actions.executeCardAction("moveLeft");
+    expect(focus.focusedColumnIndex).toBe(1);
+    expect(focus.focusMode).toBe("card");
+  });
+
+  it("moveLeft is a no-op in card mode when the deck has a single column", async () => {
+    data.columns = [data.columns[0]];
     await actions.executeCardAction("moveLeft");
     expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusedCardIndex).toBe(1);
   });
 
   it("moveRight switches columns and saves/restores card index", async () => {

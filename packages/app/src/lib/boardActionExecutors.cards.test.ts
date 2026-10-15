@@ -179,7 +179,29 @@ describe("card operations", () => {
       expect(focus.focusedColumnIndex).toBe(0);
     });
 
-    it("moveCardLeft is a no-op at the first column", async () => {
+    it("moveCardLeft wraps from the first column to the last", async () => {
+      await actions.executeCardAction("moveCardLeft");
+      expect(boardState.moveCardToColumnCalls[0]).toEqual({
+        id: "c-0-b",
+        column_id: "col-1",
+      });
+      expect(focus.focusedColumnIndex).toBe(1);
+    });
+
+    it("moveCardRight is a no-op when no card is focused", async () => {
+      focus.focusedCardIndex = 5; // out of range → no focused card
+      await actions.executeCardAction("moveCardRight");
+      expect(boardState.moveCardToColumnCalls).toHaveLength(0);
+    });
+
+    it("moveCardRight keeps focus when the move fails", async () => {
+      vi.spyOn(data, "moveCardToColumn").mockResolvedValue(false);
+      await actions.executeCardAction("moveCardRight");
+      expect(focus.focusedColumnIndex).toBe(0);
+    });
+
+    it("moveCardLeft is a no-op when the deck has a single column", async () => {
+      data.columns = [data.columns[0]];
       await actions.executeCardAction("moveCardLeft");
       expect(boardState.moveCardToColumnCalls).toHaveLength(0);
     });
@@ -191,11 +213,15 @@ describe("card operations", () => {
       expect(focus.focusedColumnIndex).toBe(1);
     });
 
-    it("moveCardRight is a no-op at the last column", async () => {
+    it("moveCardRight wraps from the last column to the first", async () => {
       focus.focusedColumnIndex = 1;
       focus.focusedCardIndex = 0;
       await actions.executeCardAction("moveCardRight");
-      expect(boardState.moveCardToColumnCalls).toHaveLength(0);
+      expect(boardState.moveCardToColumnCalls[0]).toEqual({
+        id: "c-1-a",
+        column_id: "col-0",
+      });
+      expect(focus.focusedColumnIndex).toBe(0);
     });
   });
 
