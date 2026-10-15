@@ -16,6 +16,7 @@ type CardLockBackend = Pick<
   | "updateCardContentCasOwned"
   | "updateCardContentCasAndRelease"
   | "releaseCardLock"
+  | "discardEmptyCard"
 >;
 
 interface CardEditSessionsOptions {
@@ -93,6 +94,22 @@ export class CardEditSessions {
         .getBackend()
         .releaseCardLock(session.cardId, session.owner);
       this.options.onCardChanged(released);
+      this.complete(session);
+    } catch (e) {
+      this.abortRelease(session);
+      throw e;
+    }
+  }
+
+  /** Physically delete the still-empty card while releasing its session. Like
+   * `release`, a failure keeps the session so the UI can retry. */
+  async discard(session: EditSession): Promise<void> {
+    if (!this.isActive(session)) return;
+    try {
+      await this.prepareRelease(session);
+      await this.options
+        .getBackend()
+        .discardEmptyCard(session.cardId, session.owner);
       this.complete(session);
     } catch (e) {
       this.abortRelease(session);

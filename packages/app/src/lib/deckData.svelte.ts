@@ -31,6 +31,10 @@ interface DeckSnapshot {
   tags: Tag[];
 }
 
+function isBlank(content: string): boolean {
+  return content.trim() === "";
+}
+
 export class DeckData {
   private db!: DatabaseBackend;
   /** Tail of the serialized active-deck writes (see `publishActiveDeck`). */
@@ -71,6 +75,11 @@ export class DeckData {
       this.error = `Failed to renew card edit lock: ${e}`;
     },
   });
+  // Cards created for immediate editing that have not yet been saved with
+  // content, mapped to the history generation captured at creation. Their
+  // create is recorded on the first non-empty save; dismissed while still
+  // empty, they are physically deleted instead (no trash, no undo entry).
+  private readonly newCardGenerations = new Map<string, number>();
 
   async init() {
     this.db = await getDatabase();
@@ -230,6 +239,7 @@ export class DeckData {
     this.cardsByColumn = {};
     this.deckTags = [];
     this.history.clear();
+    this.newCardGenerations.clear();
     this.saveLastDeckId(deck.id);
     this.clearTagFilter();
     return this.refreshDeck();
@@ -583,6 +593,16 @@ export class DeckData {
     }
   }
 
+  /** Create an empty card for immediate editing. Nothing is recorded until it
+   * is saved with content; dismissing it empty discards it (see
+   * `finishCardEdit`). */
+  async createNewCard(columnId: string, position?: number): Promise<Card | null> {
+    const generation = this.history.currentGeneration;
+    const card = await this.createCard(columnId, "", position, false);
+    if (card) this.newCardGenerations.set(card.id, generation);
+    return card;
+  }
+
   /** Raw mutation, no error swallowing and no recording — used both by the
    * public wrapper below and directly by undo/redo effects, so a failure
    * rejects instead of leaving the history stack advanced past an operation
@@ -625,12 +645,23 @@ export class DeckData {
       this.error = "Cannot save card: edit lock is not held";
       return false;
     }
+    const newCardGeneration = this.newCardGenerations.get(session.cardId);
+    if (newCardGeneration !== undefined && release && isBlank(content)) {
+      return this.discardNewCard(session);
+    }
     const previousContent = this.findCardContent(session.cardId);
     const generation = this.history.currentGeneration;
     try {
       await this.editSessions.save(session, content, release);
       await this.refreshDeckTags();
-      if (record && previousContent !== null && previousContent !== content) {
+      if (newCardGeneration !== undefined) {
+        // The first non-empty save is what creates the card, as far as undo
+        // is concerned; its earlier empty state is never a step to return to.
+        if (!isBlank(content)) {
+          this.newCardGenerations.delete(session.cardId);
+          if (record) this.recordCardCreate(session.cardId, newCardGeneration);
+        }
+      } else if (record && previousContent !== null && previousContent !== content) {
         this.history.push(
           {
             undo: () => this.saveCardImpl(session.cardId, previousContent),
@@ -651,6 +682,12 @@ export class DeckData {
   }
 
   async finishCardEdit(session: EditSession): Promise<boolean> {
+    if (
+      this.newCardGenerations.has(session.cardId) &&
+      isBlank(this.findCardContent(session.cardId) ?? "")
+    ) {
+      return this.discardNewCard(session);
+    }
     try {
       await this.editSessions.release(session);
       return true;
@@ -659,6 +696,19 @@ export class DeckData {
       // The session is kept so the UI can retry without abandoning the lock owner.
       return false;
     }
+  }
+
+  private async discardNewCard(session: EditSession): Promise<boolean> {
+    try {
+      await this.editSessions.discard(session);
+    } catch (e) {
+      this.error = `Failed to discard empty card: ${e}`;
+      // The session is kept so the UI can retry without abandoning the lock owner.
+      return false;
+    }
+    this.newCardGenerations.delete(session.cardId);
+    await this.refreshDeck();
+    return true;
   }
 
   private replaceCard(updatedCard: Card) {

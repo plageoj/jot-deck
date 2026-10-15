@@ -534,6 +534,37 @@ describe("FocusManager focus helpers", () => {
     expect(focus.focusMode).toBe("card");
   });
 
+  it("exitEdit restores the focus remembered before a discarded new card", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    data.columns = [makeColumn("col-1", "deck-1")];
+    data.cardsByColumn = { "col-1": [makeCard("a", "col-1"), makeCard("b", "col-1")] };
+    focus.focusedCardIndex = 0;
+    focus.rememberFocusBeforeNewCard("new", "column", 0);
+    focus.focusedCardIndex = 2;
+    focus.startEdit("new");
+
+    focus.exitEdit();
+
+    expect(focus.focusMode).toBe("column");
+    expect(focus.focusedCardIndex).toBe(0);
+  });
+
+  it("exitEdit keeps focus on a new card that was saved", () => {
+    const data = new DeckData();
+    const focus = new FocusManager(data);
+    data.columns = [makeColumn("col-1", "deck-1")];
+    data.cardsByColumn = { "col-1": [makeCard("a", "col-1"), makeCard("new", "col-1")] };
+    focus.rememberFocusBeforeNewCard("new", "card", 0);
+    focus.focusedCardIndex = 1;
+    focus.startEdit("new");
+
+    focus.exitEdit();
+
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedCardIndex).toBe(1);
+  });
+
   it("cancelEdit clears editingCardId without changing focus mode", () => {
     const data = new DeckData();
     const focus = new FocusManager(data);

@@ -25,6 +25,7 @@ function createSessions() {
         lockedCard(id, null, content),
     ),
     releaseCardLock: vi.fn(async (id: string, _owner: string) => lockedCard(id, null)),
+    discardEmptyCard: vi.fn(async (_id: string, _owner: string) => {}),
   };
   const onCardChanged = vi.fn<(card: Card) => void>();
   const onRenewalError = vi.fn<(error: unknown) => void>();
@@ -66,6 +67,28 @@ describe("CardEditSessions", () => {
 
     expect(second.owner).not.toBe(first.owner);
     expect(sessions.isActive(first)).toBe(false);
+  });
+
+  it("discards the card with the session's owner and ends the session", async () => {
+    const { backend, sessions } = createSessions();
+    const session = await sessions.start("card-1");
+
+    await sessions.discard(session);
+
+    expect(backend.discardEmptyCard).toHaveBeenCalledWith("card-1", session.owner);
+    expect(backend.releaseCardLock).not.toHaveBeenCalled();
+    expect(sessions.isActive(session)).toBe(false);
+  });
+
+  it("keeps the session after a failed discard so it can be retried", async () => {
+    const { backend, sessions } = createSessions();
+    backend.discardEmptyCard.mockRejectedValueOnce(new Error("temporary failure"));
+    const session = await sessions.start("card-1");
+
+    await expect(sessions.discard(session)).rejects.toThrow("temporary failure");
+    expect(sessions.isActive(session)).toBe(true);
+    await sessions.discard(session);
+    expect(sessions.isActive(session)).toBe(false);
   });
 
   it("does not enter a session when lock acquisition fails", async () => {

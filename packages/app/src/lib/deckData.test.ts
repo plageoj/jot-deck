@@ -670,6 +670,90 @@ describe("DeckData card edit sessions", () => {
   });
 });
 
+describe("DeckData new cards", () => {
+  let data: InstanceType<typeof DeckData>;
+
+  beforeEach(async () => {
+    seedSingleDeck();
+    data = new DeckData();
+    await data.init();
+  });
+
+  async function editNewCard() {
+    const card = await data.createNewCard("col-active");
+    const session = await data.startCardEdit(card!.id);
+    return { card: card!, session: session! };
+  }
+
+  it("discards a new card dismissed while empty, bypassing trash and history", async () => {
+    const { card, session } = await editNewCard();
+
+    expect(await data.cancelCardEdit(session)).toBe(true);
+
+    expect(state.discardEmptyCardCalls).toEqual([card.id]);
+    expect(state.deleteCardCalls).toEqual([]);
+    expect(data.cardsByColumn["col-active"]).toEqual([]);
+    expect(data.history.canUndo).toBe(false);
+  });
+
+  it("discards a new card saved and closed with only whitespace", async () => {
+    const { card, session } = await editNewCard();
+
+    expect(await data.saveCardEdit(session, "  \n", true)).toBe(true);
+
+    expect(state.discardEmptyCardCalls).toEqual([card.id]);
+    expect(data.history.canUndo).toBe(false);
+  });
+
+  it("records a single create when a new card is first saved with content", async () => {
+    const { card, session } = await editNewCard();
+    expect(data.history.canUndo).toBe(false);
+
+    expect(await data.saveCardEdit(session, "idea", true)).toBe(true);
+    expect(state.discardEmptyCardCalls).toEqual([]);
+
+    await data.history.undo();
+    expect(state.deleteCardCalls).toEqual([card.id]);
+    expect(data.history.canUndo).toBe(false);
+  });
+
+  it("keeps a new card once it has been saved with content", async () => {
+    const { card, session } = await editNewCard();
+    expect(await data.saveCardEdit(session, "idea")).toBe(true);
+
+    expect(await data.cancelCardEdit(session)).toBe(true);
+
+    expect(state.discardEmptyCardCalls).toEqual([]);
+    expect(data.cardsByColumn["col-active"].map((c) => c.id)).toEqual([card.id]);
+  });
+
+  it("keeps an existing empty card when its edit is dismissed", async () => {
+    state.cardsByColumn = new Map([
+      ["col-active", [makeCard("card-1", "col-active", { content: "" })]],
+    ]);
+    await data.refreshDeck();
+    const session = await data.startCardEdit("card-1");
+
+    expect(await data.cancelCardEdit(session!)).toBe(true);
+
+    expect(state.discardEmptyCardCalls).toEqual([]);
+    expect(data.cardsByColumn["col-active"]).toHaveLength(1);
+  });
+
+  it("keeps the session when discarding fails so it can be retried", async () => {
+    const original = mockBackend.discardEmptyCard;
+    mockBackend.discardEmptyCard = async () => {
+      throw new Error("temporary failure");
+    };
+    const { session } = await editNewCard();
+
+    expect(await data.cancelCardEdit(session)).toBe(false);
+    expect(data.error).toContain("Failed to discard empty card");
+    mockBackend.discardEmptyCard = original;
+    expect(await data.cancelCardEdit(session)).toBe(true);
+  });
+});
+
 describe("DeckData refreshDeck", () => {
   let data: InstanceType<typeof DeckData>;
 

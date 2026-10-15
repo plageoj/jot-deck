@@ -337,12 +337,14 @@
       {editSession}
       streamingText={data.streamingText}
       onAddCard={async (columnId) => {
-        const card = await data.createCard(columnId);
+        const card = await data.createNewCard(columnId);
         if (card) {
           focus.focusedColumnIndex = data.columns.findIndex((c) => c.id === columnId);
           focus.focusedCardIndex = (data.cardsByColumn[columnId] ?? []).findIndex(
             (candidate) => candidate.id === card.id,
           );
+          // Discarding it leaves focus on the column's new last card, if any.
+          focus.rememberFocusBeforeNewCard(card.id, "card", focus.focusedCardIndex);
           await startCardEdit(card.id);
         }
       }}

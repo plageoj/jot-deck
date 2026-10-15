@@ -50,6 +50,14 @@ export class FocusManager {
   // would let `card` mode trigger scroll effects against stale columns.
   private pendingFocusMode: PersistedFocusMode | null = null;
 
+  // Where focus was before a new card was created for editing; restored if
+  // that card is discarded on exit (dismissed while still empty).
+  private beforeNewCard: {
+    cardId: string;
+    mode: PersistedFocusMode;
+    cardIndex: number;
+  } | null = null;
+
   constructor(data: DeckData) {
     this.data = data;
   }
@@ -103,9 +111,28 @@ export class FocusManager {
     this.focusMode = "edit";
   }
 
+  /** Remember the current column/card focus as the place to return to if the
+   * new card `cardId` is discarded when its editor exits. */
+  rememberFocusBeforeNewCard(cardId: string, mode: PersistedFocusMode, cardIndex: number) {
+    this.beforeNewCard = { cardId, mode, cardIndex };
+  }
+
   exitEdit() {
+    const cardId = this.editingCardId;
+    const before = this.beforeNewCard;
+    this.beforeNewCard = null;
     this.editingCardId = null;
     this.focusMode = "card";
+    if (before === null || before.cardId !== cardId || this.cardExists(cardId)) return;
+    this.focusMode = before.mode;
+    this.focusedCardIndex = before.cardIndex;
+    this.clampToCurrentDeck();
+  }
+
+  private cardExists(cardId: string): boolean {
+    return Object.values(this.data.cardsByColumn).some((cards) =>
+      cards.some((card) => card.id === cardId),
+    );
   }
 
   cancelEdit() {

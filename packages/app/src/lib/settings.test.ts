@@ -43,6 +43,7 @@ function makeBackend(): {
     moveCardToColumn: reject,
     moveCard: reject,
     deleteCard: reject,
+    discardEmptyCard: reject,
     restoreCard: reject,
     getDeletedCards: reject,
     getTagsByDeck: reject,

@@ -773,6 +773,30 @@ export class WasmBackend implements DatabaseBackend {
     );
   }
 
+  async discardEmptyCard(id: string, holder: string): Promise<void> {
+    await this.init();
+    const db = this.ensureDb();
+    const card = await this.getCard(id);
+    if (card.deleted_at) throw new Error("Cannot discard deleted card");
+    if (card.locked_by !== holder) {
+      throw new Error(`Card edit lock is no longer held by ${holder}`);
+    }
+    if (card.content.trim() !== "") {
+      throw new Error("Cannot discard a card with content");
+    }
+    const now = this.now();
+
+    db.run("DELETE FROM card_tags WHERE card_id = ?", [id]);
+    db.run("DELETE FROM cards WHERE id = ?", [id]);
+
+    // Compact positions
+    db.run(
+      `UPDATE cards SET position = position - 1, updated_at = ?
+       WHERE column_id = ? AND position > ? AND deleted_at IS NULL`,
+      [now, card.column_id, card.position]
+    );
+  }
+
   async restoreCard(id: string): Promise<Card> {
     await this.init();
     const db = this.ensureDb();
