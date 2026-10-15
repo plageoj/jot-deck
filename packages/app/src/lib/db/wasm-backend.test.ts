@@ -1,5 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { WasmBackend } from "./wasm-backend";
+
+// jsdom cannot fetch the Vite asset path, so hand sql.js the same bundled
+// binary inline (Node's fetch supports data: URLs).
+vi.mock("sql.js/dist/sql-wasm-browser.wasm?url", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { createRequire } = await import("node:module");
+  const require = createRequire(import.meta.url);
+  const binary = readFileSync(
+    require.resolve("sql.js/dist/sql-wasm-browser.wasm"),
+  );
+  return {
+    default: `data:application/wasm;base64,${binary.toString("base64")}`,
+  };
+});
 
 // The browser backend cannot spawn child processes, so the Reporter surface is
 // deliberately inert there (007-reporter-protocol.md): reads answer empty so the
