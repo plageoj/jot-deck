@@ -284,6 +284,21 @@ mod tests {
     }
 
     #[test]
+    fn try_from_deny_parses_known_capabilities() {
+        let c = Capabilities::try_from_deny(&["Delete".to_string(), " structure ".to_string()])
+            .expect("known verbs parse");
+        assert!(c.append && c.edit);
+        assert!(!c.delete && !c.structure);
+    }
+
+    #[test]
+    fn try_from_deny_rejects_unknown_tokens() {
+        let err = Capabilities::try_from_deny(&["append".to_string(), "delte".to_string()])
+            .expect_err("a typo must fail closed, not leave the verb enabled");
+        assert_eq!(err, vec!["delte".to_string()]);
+    }
+
+    #[test]
     fn deny_append_disables_capability() {
         let (conn, deck_id, col_id, _, _) = deck_with_data();
         let scope = ReporterScope::new(

@@ -77,18 +77,37 @@ pub struct ReporterConfig {
 }
 
 impl ReporterConfig {
-    /// Build the runtime auth scope this registration authorizes.
-    fn to_scope(&self) -> ReporterScope {
-        let capabilities = Capabilities::from_deny_list(&self.deny.join(","));
+    /// Build the runtime auth scope this registration authorizes. Fail-closed:
+    /// a scope that can't be honored exactly (unknown capability, zero rate,
+    /// empty allowlist) is an error rather than a silently wider grant.
+    fn to_scope(&self) -> CommandResult<ReporterScope> {
+        let capabilities = Capabilities::try_from_deny(&self.deny).map_err(|unknown| {
+            CommandError {
+                message: format!(
+                    "Unknown capability in deny list: {} (expected append/edit/delete/structure)",
+                    unknown.join(", ")
+                ),
+            }
+        })?;
+        if self.max_writes_per_min == Some(0) {
+            return Err(CommandError {
+                message: "Max writes per minute must be at least 1.".to_string(),
+            });
+        }
+        if self.allowed_columns.as_ref().is_some_and(|cols| cols.is_empty()) {
+            return Err(CommandError {
+                message: "Column allowlist must name at least one column.".to_string(),
+            });
+        }
         let max = self
             .max_writes_per_min
             .unwrap_or(jot_deck_reporter_host::DEFAULT_MAX_WRITES_PER_MIN);
-        ReporterScope::new(
+        Ok(ReporterScope::new(
             capabilities,
             max,
             self.allowed_columns.clone(),
             self.reporter_id.clone(),
-        )
+        ))
     }
 }
 
@@ -159,6 +178,7 @@ pub fn add_reporter(
     if config.reporter_id.is_empty() {
         config.reporter_id = ulid::Ulid::generate().to_string();
     }
+    config.to_scope()?;
     let mut configs = load_configs(&state, &deck_id)?;
     configs.push(config.clone());
     save_configs(&state, &deck_id, &configs)?;
@@ -166,14 +186,16 @@ pub fn add_reporter(
 }
 
 /// Update an existing Reporter registration in place (matched by `reporter_id`,
-/// which is preserved). Edits to `command`/`args`/`env` take effect on the next
-/// `start_reporter`; a currently running child is not restarted here.
+/// which is preserved). Edits to `command`/`args`/`env` and the auth scope take
+/// effect on the next `start_reporter`; a currently running child is not
+/// restarted here.
 #[tauri::command]
 pub fn update_reporter(
     state: State<AppState>,
     deck_id: String,
     config: ReporterConfig,
 ) -> CommandResult<ReporterConfig> {
+    config.to_scope()?;
     let mut configs = load_configs(&state, &deck_id)?;
     let slot = configs
         .iter_mut()
@@ -254,7 +276,7 @@ pub fn start_reporter(
             message: format!("No reporter registered with id {}", reporter_id),
         })?;
 
-    let scope = std::sync::Arc::new(config.to_scope());
+    let scope = std::sync::Arc::new(config.to_scope()?);
     let handle = app.clone();
     let deck_id_task = deck_id.clone();
     let reporter_id_task = reporter_id.clone();
@@ -478,5 +500,66 @@ fn emit_committed(app: &AppHandle, reporter_id: &str, committed: Committed) {
                 }),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> ReporterConfig {
+        ReporterConfig {
+            reporter_id: "r1".to_string(),
+            name: "Minutes".to_string(),
+            command: "/opt/whisper".to_string(),
+            args: Vec::new(),
+            env: HashMap::new(),
+            deny: Vec::new(),
+            max_writes_per_min: None,
+            allowed_columns: None,
+        }
+    }
+
+    #[test]
+    fn to_scope_applies_registered_scope() {
+        let scope = ReporterConfig {
+            deny: vec!["delete".to_string()],
+            max_writes_per_min: Some(30),
+            allowed_columns: Some(vec!["col-1".to_string()]),
+            ..config()
+        }
+        .to_scope()
+        .expect("valid scope");
+        assert!(!scope.capabilities().delete);
+        assert!(scope.capabilities().append);
+        assert_eq!(scope.max_writes_per_min(), 30);
+    }
+
+    #[test]
+    fn to_scope_defaults_rate_when_unset() {
+        let scope = config().to_scope().expect("default scope");
+        assert_eq!(
+            scope.max_writes_per_min(),
+            jot_deck_reporter_host::DEFAULT_MAX_WRITES_PER_MIN
+        );
+    }
+
+    #[test]
+    fn to_scope_rejects_scopes_it_cannot_honor() {
+        let unknown = ReporterConfig {
+            deny: vec!["delte".to_string()],
+            ..config()
+        };
+        assert!(unknown.to_scope().is_err());
+        let zero_rate = ReporterConfig {
+            max_writes_per_min: Some(0),
+            ..config()
+        };
+        assert!(zero_rate.to_scope().is_err());
+        let empty_allowlist = ReporterConfig {
+            allowed_columns: Some(Vec::new()),
+            ..config()
+        };
+        assert!(empty_allowlist.to_scope().is_err());
     }
 }

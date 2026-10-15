@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { isTauri } from "#lib/db/index.ts";
-  import type { ReporterConfig } from "#lib/types.ts";
+  import type { Column, ReporterConfig } from "#lib/types.ts";
 
   interface Props {
     /** Deck whose Reporters are being managed (007 registrations are per-deck). */
     deckId: string;
+    /** The deck's columns, offered as the per-Reporter write allowlist. */
+    columns: Column[];
     listReporters: (deckId: string) => Promise<ReporterConfig[]>;
     listRunning: () => Promise<string[]>;
     onAdd: (deckId: string, config: ReporterConfig) => Promise<ReporterConfig>;
@@ -21,6 +23,7 @@
 
   let {
     deckId,
+    columns,
     listReporters,
     listRunning,
     onAdd,
@@ -56,11 +59,24 @@
   let draftArgs = $state("");
   let draftEnv = $state("");
   let formError = $state<string | null>(null);
-  // Auth-scope fields aren't editable in this UI yet (007 §10); preserved from
-  // the original config when editing, defaulted when adding.
-  let preservedDeny = $state<string[]>([]);
-  let preservedMaxWrites = $state<number | null>(null);
-  let preservedAllowedColumns = $state<string[] | null>(null);
+  // Auth scope (007 §10). `draftDeny` holds the capabilities switched off;
+  // `draftMaxWrites` is blank for the host default; the allowlist only applies
+  // when `draftRestrictColumns` is on.
+  let draftDeny = $state<string[]>([]);
+  let draftMaxWrites = $state("");
+  let draftRestrictColumns = $state(false);
+  let draftColumns = $state<string[]>([]);
+
+  /** Mirrors the host's `DEFAULT_MAX_WRITES_PER_MIN` (crates/reporter-host). */
+  const DEFAULT_MAX_WRITES_PER_MIN = 120;
+
+  /** Capabilities a registration can deny, with the methods each one gates. */
+  const CAPABILITIES = [
+    { name: "append", label: "Append cards" },
+    { name: "edit", label: "Edit, move, and stream cards" },
+    { name: "delete", label: "Delete cards" },
+    { name: "structure", label: "Create, rename, and reorder columns" },
+  ] as const;
 
   let reporterExitUnlisten: (() => void) | null = null;
   // `listen()` is awaited after mount, so the dialog can be closed before the
@@ -180,9 +196,10 @@
     draftCommand = "";
     draftArgs = "";
     draftEnv = "";
-    preservedDeny = [];
-    preservedMaxWrites = null;
-    preservedAllowedColumns = null;
+    draftDeny = [];
+    draftMaxWrites = "";
+    draftRestrictColumns = false;
+    draftColumns = [];
     formError = null;
     formMode = "add";
   }
@@ -195,9 +212,19 @@
     draftEnv = Object.entries(r.env)
       .map(([k, v]) => `${k}=${v}`)
       .join("\n");
-    preservedDeny = r.deny;
-    preservedMaxWrites = r.max_writes_per_min;
-    preservedAllowedColumns = r.allowed_columns;
+    // Normalize like the host (`Capabilities::try_from_deny`) so a stored
+    // `"Delete"` still shows — and saves — as denied.
+    draftDeny = r.deny
+      .map((d) => d.trim().toLowerCase())
+      .filter((d) => d.length > 0);
+    draftMaxWrites =
+      r.max_writes_per_min === null ? "" : String(r.max_writes_per_min);
+    draftRestrictColumns = r.allowed_columns !== null;
+    // Ids of columns no longer in the deck are dropped: the allowlist only ever
+    // holds columns the user can see and confirm here.
+    draftColumns = (r.allowed_columns ?? []).filter((id) =>
+      columns.some((c) => c.id === id),
+    );
     formError = null;
     formMode = "edit";
   }
@@ -205,6 +232,34 @@
   function closeForm() {
     formMode = "closed";
     formError = null;
+  }
+
+  /** Checked = allowed, so unchecking adds the capability to the deny list. */
+  function setAllowed(name: string, allowed: boolean) {
+    draftDeny = allowed
+      ? draftDeny.filter((n) => n !== name)
+      : [...draftDeny.filter((n) => n !== name), name];
+  }
+
+  function setColumnSelected(id: string, selected: boolean) {
+    draftColumns = selected
+      ? [...draftColumns.filter((c) => c !== id), id]
+      : draftColumns.filter((c) => c !== id);
+  }
+
+  /** One-line summary of a registration's auth scope for its list row. */
+  function scopeSummary(r: ReporterConfig): string {
+    const caps =
+      r.deny.length === 0 ? "All capabilities" : `Denied: ${r.deny.join(", ")}`;
+    const rate = `${r.max_writes_per_min ?? DEFAULT_MAX_WRITES_PER_MIN} writes/min`;
+    let cols = "All columns";
+    if (r.allowed_columns !== null) {
+      const names = r.allowed_columns.map(
+        (id) => columns.find((c) => c.id === id)?.name ?? "(removed column)",
+      );
+      cols = `Columns: ${names.join(", ")}`;
+    }
+    return `${caps} · ${rate} · ${cols}`;
   }
 
   function parseArgs(text: string): string[] {
@@ -249,15 +304,36 @@
       formError = envError;
       return;
     }
+    const rawMax = draftMaxWrites.trim();
+    let maxWrites: number | null = null;
+    if (rawMax) {
+      maxWrites = Number(rawMax);
+      if (!Number.isInteger(maxWrites) || maxWrites < 1) {
+        formError = "Max writes per minute must be a whole number of at least 1.";
+        return;
+      }
+    }
+    if (draftRestrictColumns && draftColumns.length === 0) {
+      formError = "Select at least one column, or allow all columns.";
+      return;
+    }
     const config: ReporterConfig = {
       reporter_id: editingId ?? "",
       name,
       command,
       args: parseArgs(draftArgs),
       env,
-      deny: preservedDeny,
-      max_writes_per_min: preservedMaxWrites,
-      allowed_columns: preservedAllowedColumns,
+      // Canonical (capability / deck column) order regardless of click order.
+      // Unrecognized entries are kept, never dropped: the host then rejects the
+      // save visibly instead of this form silently widening the grant.
+      deny: [
+        ...CAPABILITIES.map((c) => c.name).filter((n) => draftDeny.includes(n)),
+        ...draftDeny.filter((n) => !CAPABILITIES.some((c) => c.name === n)),
+      ],
+      max_writes_per_min: maxWrites,
+      allowed_columns: draftRestrictColumns
+        ? columns.filter((c) => draftColumns.includes(c.id)).map((c) => c.id)
+        : null,
     };
     formError = null;
     try {
@@ -320,6 +396,9 @@
                   >
                 </div>
                 <code class="reporter-command" title={r.command}>{r.command}</code
+                >
+                <span class="reporter-scope" title={scopeSummary(r)}
+                  >{scopeSummary(r)}</span
                 >
                 {#if rowError[r.reporter_id]}
                   <span class="error-text">{rowError[r.reporter_id]}</span>
@@ -435,13 +514,85 @@
             ></textarea>
           </div>
 
+          <fieldset class="field scope-group">
+            <legend>Permissions</legend>
+            {#each CAPABILITIES as cap (cap.name)}
+              <label class="check">
+                <input
+                  type="checkbox"
+                  checked={!draftDeny.includes(cap.name)}
+                  onchange={(e) => setAllowed(cap.name, e.currentTarget.checked)}
+                />
+                {cap.label}
+              </label>
+            {/each}
+          </fieldset>
+
+          <div class="field">
+            <label for="reporter-max-writes">Max writes per minute</label>
+            <input
+              id="reporter-max-writes"
+              type="text"
+              inputmode="numeric"
+              class="text-input narrow"
+              autocomplete="off"
+              placeholder={`Default (${DEFAULT_MAX_WRITES_PER_MIN})`}
+              bind:value={draftMaxWrites}
+            />
+          </div>
+
+          <fieldset class="field scope-group">
+            <legend>Writable columns</legend>
+            <label class="check">
+              <input
+                type="radio"
+                name="reporter-column-scope"
+                checked={!draftRestrictColumns}
+                onchange={() => (draftRestrictColumns = false)}
+              />
+              All columns
+            </label>
+            <label class="check">
+              <input
+                type="radio"
+                name="reporter-column-scope"
+                checked={draftRestrictColumns}
+                onchange={() => (draftRestrictColumns = true)}
+              />
+              Only selected columns
+            </label>
+            {#if draftRestrictColumns}
+              <div class="column-picks">
+                {#each columns as col (col.id)}
+                  <label class="check" class:disabled={col.private}>
+                    <input
+                      type="checkbox"
+                      disabled={col.private}
+                      checked={!col.private && draftColumns.includes(col.id)}
+                      onchange={(e) =>
+                        setColumnSelected(col.id, e.currentTarget.checked)}
+                    />
+                    {col.name}{col.private ? " (private)" : ""}
+                  </label>
+                {:else}
+                  <span class="hint">This deck has no columns yet.</span>
+                {/each}
+              </div>
+              <span class="hint"
+                >A reporter limited to selected columns cannot create new
+                columns.</span
+              >
+            {/if}
+            <span class="hint">Private columns are never readable or writable.</span
+            >
+          </fieldset>
+
           {#if formError}
             <p class="error-text">{formError}</p>
           {/if}
           {#if formMode === "edit"}
             <p class="hint">
-              Changes to command, arguments, or environment apply the next time
-              this reporter is started.
+              Changes apply the next time this reporter is started.
             </p>
           {/if}
 
@@ -657,6 +808,49 @@
   .field label {
     font-size: 0.8125rem;
     color: var(--text);
+  }
+
+  .reporter-scope {
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .scope-group {
+    border: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .scope-group legend {
+    font-size: 0.8125rem;
+    color: var(--text);
+    margin-bottom: 0.25rem;
+  }
+
+  .field .check {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+
+  .field .check.disabled {
+    color: var(--text-muted);
+  }
+
+  .column-picks {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding-left: 1.25rem;
+    max-height: 8rem;
+    overflow-y: auto;
+  }
+
+  .text-input.narrow {
+    max-width: 10rem;
   }
 
   .text-input {
