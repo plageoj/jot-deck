@@ -164,7 +164,7 @@ export class TauriBackend implements DatabaseBackend {
     return invoke("delete_card", { id });
   }
 
-  async discardEmptyCard(id: string, holder: string): Promise<void> {
+  discardEmptyCard(id: string, holder: string): Promise<void> {
     return invoke("discard_empty_card", { id, holder });
   }
 
