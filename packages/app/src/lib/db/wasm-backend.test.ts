@@ -83,6 +83,45 @@ describe("WasmBackend GUI card edit surface", () => {
     expect(unchanged.locked_by).toBe("owner");
   });
 
+  it("discards an owned blank card and compacts positions", async () => {
+    const backend = new WasmBackend();
+    const deck = await backend.createDeck({ name: "Test deck" });
+    const column = await backend.createColumn({ deck_id: deck.id, name: "Inbox" });
+    const empty = await backend.createCard({ column_id: column.id, content: " " });
+    const after = await backend.createCard({ column_id: column.id, content: "after" });
+    await backend.acquireCardLock(empty.id, "owner");
+
+    await backend.discardEmptyCard(empty.id, "owner");
+
+    const cards = await backend.getCardsByColumn(column.id);
+    expect(cards.map((c) => [c.id, c.position])).toEqual([[after.id, 0]]);
+    expect(await backend.getDeletedCards(deck.id)).toEqual([]);
+  });
+
+  it("refuses to discard a card with content, another owner, or an expired lease", async () => {
+    const backend = new WasmBackend();
+    const deck = await backend.createDeck({ name: "Test deck" });
+    const column = await backend.createColumn({ deck_id: deck.id, name: "Inbox" });
+    const filled = await backend.createCard({ column_id: column.id, content: "keep" });
+    await backend.acquireCardLock(filled.id, "owner");
+    await expect(backend.discardEmptyCard(filled.id, "owner")).rejects.toThrow();
+
+    const empty = await backend.createCard({ column_id: column.id, content: "" });
+    await backend.acquireCardLock(empty.id, "other");
+    await expect(backend.discardEmptyCard(empty.id, "owner")).rejects.toThrow();
+
+    await backend.acquireCardLock(empty.id, "owner").catch(() => {});
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 121_000);
+      await expect(backend.discardEmptyCard(empty.id, "other")).rejects.toThrow();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(await backend.getCardsByColumn(column.id)).toHaveLength(2);
+  });
+
   it("rejects a stale CAS update without changing the card", async () => {
     const backend = new WasmBackend();
     const deck = await backend.createDeck({ name: "Test deck" });
