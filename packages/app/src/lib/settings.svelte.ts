@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS: SettingsState = {
   theme: "auto",
   fontFamily:
     '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif',
-  fontSize: 14,
+  fontSize: 16,
   lineHeight: 1.5,
   markdownEnabled: true,
   vimEnabled: false,

@@ -145,8 +145,8 @@
     background-color: var(--card-bg, #1a1a2e);
     border: 1px solid var(--card-border, #0f3460);
     border-radius: 6px;
-    font-size: 0.875rem;
-    line-height: 1.4;
+    font-size: 1rem;
+    line-height: var(--app-line-height, 1.5);
     position: relative;
     cursor: pointer;
     transition:
