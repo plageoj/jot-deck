@@ -136,9 +136,9 @@ export class BoardActionExecutors {
 
   private columnMove(direction: -1 | 1): void {
     const { data, focus } = this.context();
-    const next = focus.focusedColumnIndex + direction;
-    if (next < 0 || next >= data.columns.length) return;
-    focus.focusedColumnIndex = next;
+    const count = data.columns.length;
+    if (count === 0) return;
+    focus.focusedColumnIndex = (focus.focusedColumnIndex + direction + count) % count;
     focus.scrollToFocusedColumn();
   }
 
@@ -227,13 +227,17 @@ export class BoardActionExecutors {
     }
   }
 
+  /** Index one step away from the focused card, wrapping past either end of the column. */
+  private wrappedCardIndex(direction: -1 | 1): number {
+    const { focus, focusedCards } = this.context();
+    const count = focusedCards.length;
+    return (focus.focusedCardIndex + direction + count) % count;
+  }
+
   private cardMove(direction: -1 | 1): void {
     const { focus, focusedCards } = this.context();
-    if (direction > 0) {
-      if (focus.focusedCardIndex < focusedCards.length - 1) focus.focusedCardIndex++;
-    } else if (focus.focusedCardIndex > 0) {
-      focus.focusedCardIndex--;
-    }
+    if (focusedCards.length === 0) return;
+    focus.focusedCardIndex = this.wrappedCardIndex(direction);
   }
 
   private cardMoveColumn(direction: -1 | 1): void {
@@ -280,12 +284,9 @@ export class BoardActionExecutors {
 
   private async cardReorder(direction: -1 | 1): Promise<void> {
     const { focus, data, focusedCard, focusedCards } = this.context();
-    const targetIndex = focus.focusedCardIndex + direction;
-    const inBounds =
-      direction > 0
-        ? focus.focusedCardIndex < focusedCards.length - 1
-        : focus.focusedCardIndex > 0;
-    if (inBounds && focusedCard && (await data.moveCard(focusedCard.id, targetIndex))) {
+    if (!focusedCard || focusedCards.length < 2) return;
+    const targetIndex = this.wrappedCardIndex(direction);
+    if (await data.moveCard(focusedCard.id, targetIndex)) {
       focus.focusedCardIndex = targetIndex;
     }
   }

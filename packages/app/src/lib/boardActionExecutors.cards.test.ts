@@ -131,6 +131,27 @@ describe("card operations", () => {
       await actions.executeCardAction("reorderCardUp");
       expect(boardState.moveCardCalls[0]).toEqual({ id: "c-0-b", position: 0 });
     });
+
+    it("reorderCardDown wraps the last card to the top", async () => {
+      focus.focusedCardIndex = 2;
+      await actions.executeCardAction("reorderCardDown");
+      expect(boardState.moveCardCalls[0]).toEqual({ id: "c-0-c", position: 0 });
+      expect(focus.focusedCardIndex).toBe(0);
+    });
+
+    it("reorderCardUp wraps the first card to the bottom", async () => {
+      focus.focusedCardIndex = 0;
+      await actions.executeCardAction("reorderCardUp");
+      expect(boardState.moveCardCalls[0]).toEqual({ id: "c-0-a", position: 2 });
+      expect(focus.focusedCardIndex).toBe(2);
+    });
+
+    it("reordering is a no-op in a single-card column", async () => {
+      focus.focusedColumnIndex = 1;
+      focus.focusedCardIndex = 0;
+      await actions.executeCardAction("reorderCardDown");
+      expect(boardState.moveCardCalls).toHaveLength(0);
+    });
   });
 
   describe("cross-column moves", () => {
