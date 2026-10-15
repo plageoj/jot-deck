@@ -5,6 +5,8 @@
 
   interface Props {
     column: Column;
+    /** 1-based position in the Deck; shown as a `g n` jump hint for 1–9. */
+    columnNumber?: number;
     cards: Card[];
     focused?: boolean;
     focusedCardIndex?: number;
@@ -32,6 +34,7 @@
 
   let {
     column,
+    columnNumber,
     cards,
     focused = false,
     focusedCardIndex = -1,
@@ -74,7 +77,12 @@
 
 <div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} onkeydown={() => {}}>
   <div class="column-header" class:focused>
-    <span class="column-name">{column.name}</span>
+    <span class="column-title">
+      {#if columnNumber !== undefined && columnNumber >= 1 && columnNumber <= 9}
+        <kbd class="column-number" title="g {columnNumber}">{columnNumber}</kbd>
+      {/if}
+      <span class="column-name">{column.name}</span>
+    </span>
     {#if onAddCard}
       <button
         class="add-card"
@@ -140,6 +148,31 @@
     background-color: var(--column-header-bg-focus, #1a4a7a);
     box-shadow: inset 4px 0 0 var(--accent, #e94560);
     padding-left: 0.75rem;
+  }
+
+  .column-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+
+  .column-number {
+    flex-shrink: 0;
+    min-width: 1.25rem;
+    padding: 0.0625rem 0.3125rem;
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 3px;
+    background-color: var(--bg-primary);
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    text-align: center;
+  }
+
+  .column-header.focused .column-number {
+    color: var(--accent, #e94560);
   }
 
   .column-name {
