@@ -772,6 +772,44 @@ export class WasmBackend implements DatabaseBackend {
     );
   }
 
+  async discardEmptyCard(id: string, holder: string): Promise<void> {
+    await this.init();
+    const db = this.ensureDb();
+    const card = await this.getCard(id);
+    if (card.deleted_at) throw new Error("Cannot discard deleted card");
+    if (card.content.trim() !== "") {
+      throw new Error("Cannot discard a card with content");
+    }
+    const now = this.now();
+    const cutoff = new Date(Date.now() - LOCK_LEASE_MS).toISOString();
+
+    db.run("BEGIN");
+    try {
+      db.run("DELETE FROM card_tags WHERE card_id = ?", [id]);
+      // Holder, live lease and unchanged blank content are all re-checked by
+      // the delete itself, so a card saved or re-locked meanwhile survives.
+      db.run(
+        `DELETE FROM cards
+         WHERE id = ? AND locked_by = ? AND locked_at >= ? AND content = ?
+           AND deleted_at IS NULL`,
+        [id, holder, cutoff, card.content],
+      );
+      if (db.getRowsModified() !== 1) {
+        throw new Error("Card edit lock is not held, has expired, or the card was modified");
+      }
+      // Compact positions
+      db.run(
+        `UPDATE cards SET position = position - 1, updated_at = ?
+         WHERE column_id = ? AND position > ? AND deleted_at IS NULL`,
+        [now, card.column_id, card.position],
+      );
+      db.run("COMMIT");
+    } catch (error) {
+      db.run("ROLLBACK");
+      throw error;
+    }
+  }
+
   async restoreCard(id: string): Promise<Card> {
     await this.init();
     const db = this.ensureDb();

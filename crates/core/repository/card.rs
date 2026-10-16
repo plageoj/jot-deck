@@ -619,6 +619,60 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// 作成直後に空のまま編集を抜けた Card を物理削除する（ゴミ箱を経由しない）。
+/// `holder` が有効なリース付きでロックを所有し、内容が空白のみのときだけ削除し、position を詰める。
+/// 条件は削除と同じトランザクション内で DELETE の WHERE にも課すため、確認後に別接続が
+/// 内容を保存したりロックを奪ったりした Card は削除されない。
+pub fn discard_empty(conn: &Connection, id: &str, holder: &str) -> Result<()> {
+    let now = Utc::now();
+    let cutoff = now - chrono::Duration::seconds(LOCK_LEASE_SECONDS);
+
+    let tx = conn.unchecked_transaction()?;
+    let card = get_by_id(&tx, id)?;
+
+    if card.deleted_at.is_some() {
+        return Err(JotDeckError::InvalidOperation(
+            "Cannot discard deleted card".to_string(),
+        ));
+    }
+    let lease_live = card.locked_at.is_some_and(|locked_at| locked_at >= cutoff);
+    if card.locked_by.as_deref() != Some(holder) || !lease_live {
+        return Err(JotDeckError::InvalidOperation(format!(
+            "Card edit lock is not held by {} or has expired",
+            holder
+        )));
+    }
+    if !card.content.trim().is_empty() {
+        return Err(JotDeckError::InvalidOperation(
+            "Cannot discard a card with content".to_string(),
+        ));
+    }
+
+    tx.execute("DELETE FROM card_tags WHERE card_id = ?1", params![id])?;
+    let deleted = tx.execute(
+        "DELETE FROM cards
+         WHERE id = ?1 AND locked_by = ?2 AND locked_at >= ?3 AND content = ?4
+           AND deleted_at IS NULL",
+        params![id, holder, lock_timestamp(cutoff), &card.content],
+    )?;
+    if deleted != 1 {
+        // tx は commit せずに drop されるのでロールバックされる
+        return Err(JotDeckError::InvalidOperation(
+            "Card changed before it could be discarded".to_string(),
+        ));
+    }
+
+    // position を詰める
+    tx.execute(
+        "UPDATE cards SET position = position - 1, updated_at = ?1 WHERE column_id = ?2 AND position > ?3 AND deleted_at IS NULL",
+        params![now.to_rfc3339(), &card.column_id, card.position],
+    )?;
+
+    tx.commit()?;
+
+    Ok(())
+}
+
 /// Card を復元する（元の位置に挿入）
 pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     let card = get_by_id(conn, id)?;
@@ -783,6 +837,69 @@ mod tests {
 
         let restored = restore(&conn, &card.id).unwrap();
         assert!(restored.deleted_at.is_none());
+    }
+
+    fn card_with(conn: &Connection, column_id: &str, content: &str) -> Card {
+        create(
+            conn,
+            NewCard {
+                column_id: column_id.to_string(),
+                content: content.to_string(),
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_discard_empty_removes_row_and_compacts_positions() {
+        let (conn, deck_id, column_id) = setup();
+        let a = card_with(&conn, &column_id, "A");
+        let empty = card_with(&conn, &column_id, "  \n");
+        let c = card_with(&conn, &column_id, "C");
+        acquire_lock(&conn, &empty.id, "gui:owner").unwrap();
+
+        discard_empty(&conn, &empty.id, "gui:owner").unwrap();
+
+        assert!(matches!(
+            get_by_id(&conn, &empty.id),
+            Err(JotDeckError::NotFound(_))
+        ));
+        let cards = get_by_column_id(&conn, &column_id).unwrap();
+        let ids: Vec<_> = cards.iter().map(|card| card.id.as_str()).collect();
+        assert_eq!(ids, vec![a.id.as_str(), c.id.as_str()]);
+        assert_eq!(cards[1].position, 1);
+        assert!(get_deleted_by_deck(&conn, &deck_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_discard_empty_rejects_content_or_foreign_lock() {
+        let (conn, _, column_id) = setup();
+        let filled = card_with(&conn, &column_id, "keep me");
+        acquire_lock(&conn, &filled.id, "gui:owner").unwrap();
+        assert!(discard_empty(&conn, &filled.id, "gui:owner").is_err());
+
+        let empty = card_with(&conn, &column_id, "");
+        assert!(discard_empty(&conn, &empty.id, "gui:owner").is_err());
+        acquire_lock(&conn, &empty.id, "gui:other").unwrap();
+        assert!(discard_empty(&conn, &empty.id, "gui:owner").is_err());
+
+        assert_eq!(get_by_column_id(&conn, &column_id).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_discard_empty_rejects_expired_lease() {
+        let (conn, _, column_id) = setup();
+        let empty = card_with(&conn, &column_id, "");
+        acquire_lock(&conn, &empty.id, "gui:owner").unwrap();
+        let expired = Utc::now() - chrono::Duration::seconds(LOCK_LEASE_SECONDS + 1);
+        conn.execute(
+            "UPDATE cards SET locked_at = ?1 WHERE id = ?2",
+            params![lock_timestamp(expired), &empty.id],
+        )
+        .unwrap();
+
+        assert!(discard_empty(&conn, &empty.id, "gui:owner").is_err());
+        assert!(get_by_id(&conn, &empty.id).is_ok());
     }
 
     #[test]

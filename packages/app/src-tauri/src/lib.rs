@@ -316,6 +316,12 @@ fn delete_card(state: State<AppState>, id: String) -> CommandResult<()> {
 }
 
 #[tauri::command]
+fn discard_empty_card(state: State<AppState>, id: String, holder: String) -> CommandResult<()> {
+    let conn = get_conn(&state)?;
+    card::discard_empty(&conn, &id, &holder).map_err(Into::into)
+}
+
+#[tauri::command]
 fn restore_card(state: State<AppState>, id: String) -> CommandResult<Card> {
     let conn = get_conn(&state)?;
     card::restore(&conn, &id).map_err(Into::into)
@@ -499,6 +505,7 @@ pub fn run() {
             move_card_to_column,
             move_card,
             delete_card,
+            discard_empty_card,
             restore_card,
             get_deleted_cards,
             // Tag commands

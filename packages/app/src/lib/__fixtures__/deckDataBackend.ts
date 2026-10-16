@@ -30,6 +30,7 @@ export const deckState = {
   deleteDeckCalls: [] as string[],
   deleteColumnCalls: [] as string[],
   deleteCardCalls: [] as string[],
+  discardEmptyCardCalls: [] as string[],
   moveColumnCalls: [] as Array<{ id: string; position: number }>,
   moveCardCalls: [] as Array<{ id: string; position: number }>,
   moveCardToColumnCalls: [] as Array<{ id: string; columnId: string }>,
@@ -53,6 +54,7 @@ export function resetDeckState(): void {
   deckState.deleteDeckCalls = [];
   deckState.deleteColumnCalls = [];
   deckState.deleteCardCalls = [];
+  deckState.discardEmptyCardCalls = [];
   deckState.moveColumnCalls = [];
   deckState.moveCardCalls = [];
   deckState.moveCardToColumnCalls = [];
@@ -127,13 +129,15 @@ export const mockBackend: Partial<DatabaseBackend> = {
       }),
       name: name ?? `${id}-name`,
     }),
-  createCard: (params) =>
-    Promise.resolve(
-      makeCard(uniqueId("new-card"), params.column_id, {
-        content: params.content,
-        position: params.position,
-      }),
-    ),
+  createCard: (params) => {
+    const card = makeCard(uniqueId("new-card"), params.column_id, {
+      content: params.content,
+      position: params.position,
+    });
+    const cards = deckState.cardsByColumn.get(params.column_id);
+    if (cards) deckState.cardsByColumn.set(params.column_id, [...cards, card]);
+    return Promise.resolve(card);
+  },
   updateCardContent: (id, content) =>
     Promise.resolve(makeCard(id, "col-active", { content })),
   acquireCardLock: (id) => Promise.resolve({ ...findCard(id), locked_by: "user" }),
@@ -151,6 +155,16 @@ export const mockBackend: Partial<DatabaseBackend> = {
   },
   deleteCard: (id) => {
     deckState.deleteCardCalls.push(id);
+    return Promise.resolve();
+  },
+  discardEmptyCard: (id) => {
+    deckState.discardEmptyCardCalls.push(id);
+    for (const [columnId, cards] of deckState.cardsByColumn) {
+      deckState.cardsByColumn.set(
+        columnId,
+        cards.filter((card) => card.id !== id),
+      );
+    }
     return Promise.resolve();
   },
   moveColumn: (id, position) => {

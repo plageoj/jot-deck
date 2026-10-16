@@ -172,8 +172,11 @@ export class BoardActionExecutors {
   private async columnCreateCard(): Promise<void> {
     const { data, focus, focusedColumn, startEdit } = this.context();
     if (!focusedColumn) return;
-    const card = await data.createCard(focusedColumn.id);
+    const previousMode = focus.focusMode === "card" ? "card" : "column";
+    const previousCardIndex = focus.focusedCardIndex;
+    const card = await data.createNewCard(focusedColumn.id);
     if (!card) return;
+    focus.rememberFocusBeforeNewCard(card.id, previousMode, previousCardIndex);
     const cards = data.cardsByColumn[focusedColumn.id] ?? [];
     focus.focusedCardIndex = cards.findIndex((candidate) => candidate.id === card.id);
     focus.focusMode = "card";
@@ -303,8 +306,10 @@ export class BoardActionExecutors {
   private async cardCreate(position: number): Promise<void> {
     const { data, focus, focusedColumn, startEdit } = this.context();
     if (!focusedColumn) return;
-    const card = await data.createCard(focusedColumn.id, "", position);
+    const previousCardIndex = focus.focusedCardIndex;
+    const card = await data.createNewCard(focusedColumn.id, position);
     if (!card) return;
+    focus.rememberFocusBeforeNewCard(card.id, "card", previousCardIndex);
     const updated = data.cardsByColumn[focusedColumn.id] ?? [];
     focus.focusedCardIndex = updated.findIndex((candidate) => candidate.id === card.id);
     if (focus.focusedCardIndex === -1) focus.focusedCardIndex = 0;

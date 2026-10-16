@@ -84,6 +84,9 @@ export interface DatabaseBackend {
   moveCardToColumn(id: string, columnId: string): Promise<Card>;
   moveCard(id: string, position: number): Promise<Card>;
   deleteCard(id: string): Promise<void>;
+  /** Physically delete a still-empty card whose edit lock `holder` owns,
+   * bypassing the trash. Used when a newly created card is dismissed. */
+  discardEmptyCard(id: string, holder: string): Promise<void>;
   restoreCard(id: string): Promise<Card>;
   getDeletedCards(deckId: string): Promise<Card[]>;
 
