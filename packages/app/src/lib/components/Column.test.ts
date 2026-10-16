@@ -65,3 +65,68 @@ describe("Column header double-click", () => {
     expect(onRenameColumn).not.toHaveBeenCalled();
   });
 });
+
+describe("Column in-place rename", () => {
+  function renderRenaming(renameDraft: string | null = "Inbox") {
+    const callbacks = {
+      onRenameColumn: vi.fn(),
+      onRenameDraftChange: vi.fn(),
+      onCommitRename: vi.fn(),
+      onCancelRename: vi.fn(),
+    };
+    const { container } = render(Column, {
+      props: { column, cards: [], renameDraft, renameFocusRequest: 1, ...callbacks },
+    });
+    const input = container.querySelector<HTMLInputElement>("input.column-name-input");
+    return { container, input, ...callbacks };
+  }
+
+  it("shows the name as text when not renaming", () => {
+    const { container, input } = renderRenaming(null);
+    expect(input).toBeNull();
+    expect(container.querySelector(".column-name")?.textContent).toBe("Inbox");
+  });
+
+  it("opens a focused input with the whole name selected", () => {
+    const { input } = renderRenaming();
+    expect(input?.value).toBe("Inbox");
+    expect(document.activeElement).toBe(input);
+    expect(input?.selectionStart).toBe(0);
+    expect(input?.selectionEnd).toBe("Inbox".length);
+  });
+
+  it("reports typed text as the draft", async () => {
+    const { input, onRenameDraftChange } = renderRenaming();
+    await fireEvent.input(input!, { target: { value: "Later" } });
+    expect(onRenameDraftChange).toHaveBeenCalledWith("Later");
+  });
+
+  it("commits on Enter and cancels on Escape", async () => {
+    const { input, onCommitRename, onCancelRename } = renderRenaming();
+    await fireEvent.keyDown(input!, { key: "Enter" });
+    expect(onCommitRename).toHaveBeenCalledOnce();
+    await fireEvent.keyDown(input!, { key: "Escape" });
+    expect(onCancelRename).toHaveBeenCalledOnce();
+  });
+
+  it("does not commit on the Enter that confirms an IME composition", async () => {
+    const { input, onCommitRename } = renderRenaming();
+    await fireEvent.keyDown(input!, { key: "Enter", isComposing: true });
+    await fireEvent.keyDown(input!, { key: "Enter", keyCode: 229 });
+    expect(onCommitRename).not.toHaveBeenCalled();
+  });
+
+  it("keeps the input open without committing when it loses focus", async () => {
+    const { container, input, onCommitRename, onCancelRename } = renderRenaming();
+    await fireEvent.blur(input!);
+    expect(container.querySelector("input.column-name-input")).toBe(input);
+    expect(onCommitRename).not.toHaveBeenCalled();
+    expect(onCancelRename).not.toHaveBeenCalled();
+  });
+
+  it("does not restart the rename on double-clicks inside the input", async () => {
+    const { input, onRenameColumn } = renderRenaming();
+    await fireEvent.dblClick(input!);
+    expect(onRenameColumn).not.toHaveBeenCalled();
+  });
+});

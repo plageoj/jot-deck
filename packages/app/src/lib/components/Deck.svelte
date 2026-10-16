@@ -17,6 +17,11 @@
     streamingText?: Record<string, string>;
     onAddCard?: (columnId: string) => void;
     onRenameColumn?: (column: Column) => void;
+    /** The column being renamed in place, with its in-progress name. */
+    columnRename?: { columnId: string; draft: string; focusRequest: number } | null;
+    onRenameDraftChange?: (draft: string) => void;
+    onCommitRename?: () => void;
+    onCancelRename?: () => void;
     onSaveCard?: (
       session: EditSession,
       content: string,
@@ -49,6 +54,10 @@
     streamingText = {},
     onAddCard,
     onRenameColumn,
+    columnRename = null,
+    onRenameDraftChange,
+    onCommitRename,
+    onCancelRename,
     onSaveCard,
     onCancelEdit,
     onStartEdit,
@@ -89,6 +98,11 @@
         {streamingText}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
         onRenameColumn={onRenameColumn ? () => onRenameColumn(column) : undefined}
+        renameDraft={columnRename?.columnId === column.id ? columnRename.draft : null}
+        renameFocusRequest={columnRename?.columnId === column.id ? columnRename.focusRequest : 0}
+        {onRenameDraftChange}
+        {onCommitRename}
+        {onCancelRename}
         {onSaveCard}
         {onCancelEdit}
         {onStartEdit}

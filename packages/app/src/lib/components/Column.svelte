@@ -19,8 +19,16 @@
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
     onAddCard?: () => void;
-    /** Double-clicking the header opens the rename dialog. */
+    /** Double-clicking the header starts renaming the column. */
     onRenameColumn?: () => void;
+    /** In-progress name while the header is being renamed in place; `null`
+     * when not renaming. Like a card editor, it survives losing focus. */
+    renameDraft?: string | null;
+    /** Bumped on each rename request so the input takes focus again. */
+    renameFocusRequest?: number;
+    onRenameDraftChange?: (draft: string) => void;
+    onCommitRename?: () => void;
+    onCancelRename?: () => void;
     onSaveCard?: (
       session: EditSession,
       content: string,
@@ -54,6 +62,11 @@
     streamingText = {},
     onAddCard,
     onRenameColumn,
+    renameDraft = null,
+    renameFocusRequest = 0,
+    onRenameDraftChange,
+    onCommitRename,
+    onCancelRename,
     onSaveCard,
     onCancelEdit,
     onStartEdit,
@@ -74,8 +87,37 @@
 
   function handleColumnDblClick(e: MouseEvent) {
     const target = e.target as HTMLElement;
-    if (!target.closest(".column-header") || target.closest("button")) return;
+    if (!target.closest(".column-header") || target.closest("button, input")) return;
     onRenameColumn?.();
+  }
+
+  let renameInput = $state<HTMLInputElement | null>(null);
+  let selectedRenameInput: HTMLInputElement | null = null;
+
+  // Select the whole name when the input first appears; later requests (e.g.
+  // `r` after clicking away) only refocus, keeping the caret where it was.
+  $effect(() => {
+    void renameFocusRequest;
+    if (!renameInput) return;
+    renameInput.focus();
+    if (selectedRenameInput !== renameInput) {
+      renameInput.select();
+      selectedRenameInput = renameInput;
+    }
+  });
+
+  function handleRenameKeydown(e: KeyboardEvent) {
+    // Enter that confirms an IME composition must not commit the rename.
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCommitRename?.();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCancelRename?.();
+    }
   }
 
   let cardRefs: HTMLDivElement[] = [];
@@ -97,7 +139,21 @@
       {#if columnNumber !== undefined && columnNumber >= 1 && columnNumber <= 9}
         <kbd class="column-number" title="g {columnNumber}: Focus this column">{columnNumber}</kbd>
       {/if}
-      <span class="column-name">{column.name}</span>
+      {#if renameDraft !== null}
+        <input
+          bind:this={renameInput}
+          class="column-name-input"
+          type="text"
+          value={renameDraft}
+          aria-label="Column name"
+          spellcheck="false"
+          autocomplete="off"
+          oninput={(e) => onRenameDraftChange?.(e.currentTarget.value)}
+          onkeydown={handleRenameKeydown}
+        />
+      {:else}
+        <span class="column-name">{column.name}</span>
+      {/if}
     </span>
     {#if onAddCard}
       <button
@@ -170,6 +226,7 @@
   }
 
   .column-title {
+    flex: 1;
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
@@ -204,6 +261,25 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .column-name-input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 1.5rem;
+    margin-right: 0.5rem;
+    padding: 0 0.25rem;
+    border: 1px solid var(--accent, #e94560);
+    border-radius: 3px;
+    background-color: var(--bg-primary);
+    color: var(--text, #eee);
+    font: inherit;
+    font-size: 0.875rem;
+    outline: none;
+    /* The header disables selection; editing needs it back. */
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   .add-card {
