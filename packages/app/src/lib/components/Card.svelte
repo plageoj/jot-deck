@@ -102,6 +102,12 @@
   onclick={handleClick}
   onkeydown={() => {}}
 >
+  <!-- Badges come first so they float and the content wraps around them. -->
+  {#if streaming}
+    <span class="card-streaming" title="A Reporter is generating this card">◍ AI generating</span>
+  {:else if card.score !== 0}
+    <span class="card-score">{card.score}</span>
+  {/if}
   {#if editing && !streaming && editSession}
     {@const session = editSession}
     <CardEditor
@@ -131,11 +137,6 @@
         (empty)
       {/if}
     </div>
-  {/if}
-  {#if streaming}
-    <span class="card-streaming" title="A Reporter is generating this card">◍ AI generating</span>
-  {:else if card.score !== 0}
-    <span class="card-score">{card.score}</span>
   {/if}
 </div>
 
@@ -179,9 +180,8 @@
   }
 
   .card-streaming {
-    position: absolute;
-    top: 0.25rem;
-    right: 0.25rem;
+    float: right;
+    margin: -0.5rem -0.5rem 0 0.5rem;
     padding: 0.125rem 0.375rem;
     background-color: var(--card-streaming-badge, #2563eb);
     border-radius: 10px;
@@ -201,13 +201,22 @@
   }
 
   .card-score {
-    position: absolute;
-    top: 0.25rem;
-    right: 0.25rem;
+    float: right;
+    margin: -0.5rem -0.5rem 0 0.5rem;
     padding: 0.125rem 0.375rem;
     background-color: var(--accent, #e94560);
     border-radius: 10px;
     font-size: 0.875rem;
     font-weight: 500;
+  }
+
+  /* The editor is its own formatting context and would shrink beside a
+     float, so overlay the badge while editing instead. */
+  .card.editing .card-score {
+    position: absolute;
+    top: 0.25rem;
+    right: 0.25rem;
+    z-index: 1;
+    margin: 0;
   }
 </style>
