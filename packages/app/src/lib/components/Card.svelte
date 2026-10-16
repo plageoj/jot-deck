@@ -185,7 +185,7 @@
     padding: 0.125rem 0.375rem;
     background-color: var(--card-streaming-badge, #2563eb);
     border-radius: 10px;
-    font-size: 0.7rem;
+    font-size: 0.875rem;
     font-weight: 500;
     color: #fff;
     white-space: nowrap;
@@ -207,7 +207,7 @@
     padding: 0.125rem 0.375rem;
     background-color: var(--accent, #e94560);
     border-radius: 10px;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 500;
   }
 </style>
