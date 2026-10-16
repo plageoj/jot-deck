@@ -155,7 +155,6 @@
   .column-header.focused {
     background-color: var(--column-header-bg-focus, #1a4a7a);
     box-shadow: inset 4px 0 0 var(--accent, #e94560);
-    padding-left: 0.75rem;
   }
 
   .column-title {
