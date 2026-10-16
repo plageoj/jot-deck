@@ -1,5 +1,5 @@
 <script lang="ts" module>
-  import type { PaletteIconName } from "./PaletteIcon.svelte";
+  import type { IconName } from "./Icon.svelte";
 
   export interface PaletteItem {
     id: string;
@@ -11,13 +11,13 @@
     /** Destructive styling (e.g. delete). */
     danger?: boolean;
     /** Optional leading icon (e.g. for action items). */
-    icon?: PaletteIconName;
+    icon?: IconName;
   }
 </script>
 
 <script lang="ts" generics="T extends PaletteItem">
   import { onMount, type Snippet } from "svelte";
-  import PaletteIcon from "./PaletteIcon.svelte";
+  import Icon from "./Icon.svelte";
 
   interface Props {
     items: T[];
@@ -148,7 +148,7 @@
               {:else}
                 <span class="palette-label-group">
                   {#if item.icon}
-                    <PaletteIcon name={item.icon} />
+                    <Icon name={item.icon} class="palette-icon" />
                   {/if}
                   <span class="palette-label" class:current={item.current}
                     >{item.label}</span
@@ -277,6 +277,10 @@
 
   .palette-item-button.danger .palette-label {
     color: var(--accent);
+  }
+
+  .palette-item-button :global(.palette-icon) {
+    color: var(--text-muted);
   }
 
   .palette-item-button.danger :global(.palette-icon) {

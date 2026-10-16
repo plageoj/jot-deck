@@ -2,6 +2,7 @@
   import type { Column, Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import CardComponent from "./Card.svelte";
+  import Icon from "./Icon.svelte";
 
   interface Props {
     column: Column;
@@ -161,7 +162,7 @@
         onclick={onAddCard}
         aria-label="Add card to {column.name}"
       >
-        +
+        <Icon name="plus" />
       </button>
     {/if}
   </div>
@@ -290,7 +291,6 @@
     border-radius: 4px;
     background-color: var(--card-bg, #1a1a2e);
     color: var(--text, #eee);
-    font-size: 1rem;
     cursor: pointer;
     display: flex;
     align-items: center;
