@@ -19,6 +19,8 @@
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
     onAddCard?: () => void;
+    /** Double-clicking the header opens the rename dialog. */
+    onRenameColumn?: () => void;
     onSaveCard?: (
       session: EditSession,
       content: string,
@@ -51,6 +53,7 @@
     activeTag = null,
     streamingText = {},
     onAddCard,
+    onRenameColumn,
     onSaveCard,
     onCancelEdit,
     onStartEdit,
@@ -69,6 +72,12 @@
     onFocusColumn?.();
   }
 
+  function handleColumnDblClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest(".column-header") || target.closest("button")) return;
+    onRenameColumn?.();
+  }
+
   let cardRefs: HTMLDivElement[] = [];
 
   // Scroll to focused card when focusedCardIndex changes
@@ -82,7 +91,7 @@
   });
 </script>
 
-<div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} onkeydown={() => {}}>
+<div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} ondblclick={handleColumnDblClick} onkeydown={() => {}}>
   <div class="column-header" class:focused>
     <span class="column-title">
       {#if columnNumber !== undefined && columnNumber >= 1 && columnNumber <= 9}
@@ -149,6 +158,9 @@
     padding-left: calc(0.75rem + 4px);
     background-color: var(--column-header-bg, #0f3460);
     font-weight: 500;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
   }
 

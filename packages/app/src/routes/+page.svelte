@@ -356,6 +356,7 @@
           await startCardEdit(card.id);
         }
       }}
+      onRenameColumn={handleRenameColumn}
       onSaveCard={async (session, content, release, cursor) => {
         const saved = await data.saveCardEdit(session, content, release);
         if (saved && release) cursorMemory.remember(session.cardId, cursor, content);

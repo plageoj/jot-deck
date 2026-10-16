@@ -16,6 +16,7 @@
     /** card_id → in-progress streamed text (007 §6.2). */
     streamingText?: Record<string, string>;
     onAddCard?: (columnId: string) => void;
+    onRenameColumn?: (column: Column) => void;
     onSaveCard?: (
       session: EditSession,
       content: string,
@@ -47,6 +48,7 @@
     activeTag = null,
     streamingText = {},
     onAddCard,
+    onRenameColumn,
     onSaveCard,
     onCancelEdit,
     onStartEdit,
@@ -86,6 +88,7 @@
         {activeTag}
         {streamingText}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
+        onRenameColumn={onRenameColumn ? () => onRenameColumn(column) : undefined}
         {onSaveCard}
         {onCancelEdit}
         {onStartEdit}
