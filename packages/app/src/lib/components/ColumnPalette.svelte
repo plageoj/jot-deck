@@ -169,7 +169,7 @@
 
   .current-stats {
     margin-top: 0.25rem;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     display: flex;
     align-items: center;
@@ -177,7 +177,7 @@
   }
 
   .current-shortcut {
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     padding: 0.0625rem 0.375rem;
     border-radius: 3px;
     background-color: var(--bg-tertiary);
@@ -207,7 +207,7 @@
   }
 
   .col-meta {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     flex-shrink: 0;
     display: flex;
@@ -216,7 +216,7 @@
   }
 
   .shortcut-hint {
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     padding: 0.0625rem 0.375rem;
     border-radius: 3px;
     background-color: var(--bg-tertiary);

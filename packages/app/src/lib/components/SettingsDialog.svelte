@@ -377,7 +377,7 @@
   }
 
   .settings-section h3 {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--accent);
     text-transform: uppercase;
@@ -393,7 +393,7 @@
   }
 
   .row-label {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
     display: flex;
     justify-content: space-between;
@@ -402,7 +402,7 @@
 
   .row-label .value {
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-variant-numeric: tabular-nums;
   }
 
@@ -415,7 +415,7 @@
   }
 
   .hint {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
@@ -425,7 +425,7 @@
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--accent);
   }
 
@@ -441,7 +441,7 @@
     border-radius: 999px;
     background-color: var(--accent);
     color: #fff;
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
   }
 
   .segmented {
@@ -457,7 +457,7 @@
     border: none;
     background-color: var(--input-bg);
     color: var(--text-muted);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     cursor: pointer;
     transition:
       background-color 0.15s ease,
@@ -484,7 +484,7 @@
     border-radius: 4px;
     background-color: var(--input-bg);
     color: var(--text);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-family: inherit;
   }
 
@@ -499,7 +499,7 @@
     border-radius: 4px;
     background-color: var(--input-bg);
     color: var(--text);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-family: inherit;
   }
 
@@ -537,7 +537,7 @@
     padding: 0.375rem 0.75rem;
     border: 1px solid var(--input-border);
     border-radius: 4px;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     cursor: pointer;
     background-color: var(--input-bg);
     color: var(--text);

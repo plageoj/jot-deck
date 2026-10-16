@@ -74,7 +74,7 @@
     background-color: var(--bg-primary);
     border: 1px solid var(--bg-tertiary);
     color: var(--text-muted);
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     font-family: monospace;
     text-transform: uppercase;
   }
@@ -100,7 +100,7 @@
     align-items: center;
     gap: 0.5rem;
     flex-shrink: 0;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
