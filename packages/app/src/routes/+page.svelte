@@ -193,7 +193,11 @@
 
   let renamingDeck = $state<Deck | null>(null);
   let deletingDeck = $state<Deck | null>(null);
-  let renamingColumn = $state<Column | null>(null);
+  // In-place column rename. The draft lives here so starting another edit can
+  // commit it, the way a card editor saves before another one opens.
+  let columnRename = $state<{ columnId: string; draft: string; focusRequest: number } | null>(
+    null,
+  );
   let deletingColumn = $state<Column | null>(null);
   let trashItems = $state<TrashItem[]>([]);
   let trashRequestId = 0;
@@ -219,6 +223,7 @@
   }
 
   function startCardEdit(cardId: string, entry: EditEntry = "start") {
+    commitColumnRename();
     const transition = editTransition.then(() => startCardEditImpl(cardId, entry));
     editTransition = transition.catch(() => {});
     return transition;
@@ -266,7 +271,22 @@
   }
 
   function handleRenameColumn(column: Column) {
-    renamingColumn = column;
+    const current = columnRename;
+    if (current?.columnId === column.id) {
+      columnRename = { ...current, focusRequest: current.focusRequest + 1 };
+      return;
+    }
+    commitColumnRename();
+    columnRename = { columnId: column.id, draft: column.name, focusRequest: 1 };
+  }
+
+  function commitColumnRename() {
+    const rename = columnRename;
+    if (!rename) return;
+    columnRename = null;
+    const column = data.columns.find((c) => c.id === rename.columnId);
+    const name = rename.draft.trim();
+    if (column && name && name !== column.name) void data.renameColumn(column.id, name);
   }
 
   function handleDeleteColumn(column: Column) {
@@ -356,6 +376,13 @@
           await startCardEdit(card.id);
         }
       }}
+      onRenameColumn={handleRenameColumn}
+      {columnRename}
+      onRenameDraftChange={(draft) => {
+        if (columnRename) columnRename = { ...columnRename, draft };
+      }}
+      onCommitRename={commitColumnRename}
+      onCancelRename={() => (columnRename = null)}
       onSaveCard={async (session, content, release, cursor) => {
         const saved = await data.saveCardEdit(session, content, release);
         if (saved && release) cursorMemory.remember(session.cardId, cursor, content);
@@ -441,6 +468,8 @@
     onRename={(column) => {
       focus.closePalette();
       handleRenameColumn(column);
+      const index = data.columns.findIndex((c) => c.id === column.id);
+      if (index !== -1) deckComponent?.scrollToColumn(index);
     }}
     onDelete={(column) => {
       focus.closePalette();
@@ -464,18 +493,6 @@
       renamingDeck = null;
     }}
     onClose={() => (renamingDeck = null)}
-  />
-{/if}
-
-{#if renamingColumn}
-  <RenameDialog
-    title="Rename Column"
-    value={renamingColumn.name}
-    onConfirm={(newName) => {
-      data.renameColumn(renamingColumn!.id, newName);
-      renamingColumn = null;
-    }}
-    onClose={() => (renamingColumn = null)}
   />
 {/if}
 

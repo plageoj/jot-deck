@@ -8,6 +8,7 @@ export { default as ConfirmDialog } from "./ConfirmDialog.svelte";
 export { default as Deck } from "./Deck.svelte";
 export { default as DeckSwitcher } from "./DeckSwitcher.svelte";
 export { default as ErrorBanner } from "./ErrorBanner.svelte";
+export { default as Icon } from "./Icon.svelte";
 export { default as KeybindingCheatsheet } from "./KeybindingCheatsheet.svelte";
 export { default as KeybindingsDialog } from "./KeybindingsDialog.svelte";
 export { default as MarkdownContent } from "./MarkdownContent.svelte";

@@ -95,7 +95,7 @@
         id: "__rename",
         label: "Rename deck",
         section: "Actions",
-        icon: "rename",
+        icon: "pencil",
         action: { kind: "rename", deck: currentDeck },
       });
       if (decks.length > 1) {
@@ -104,7 +104,7 @@
           label: "Delete deck",
           section: "Actions",
           danger: true,
-          icon: "delete",
+          icon: "trash",
           action: { kind: "delete", deck: currentDeck },
         });
       }
@@ -114,7 +114,7 @@
       id: "__new",
       label: "New deck",
       section: "Actions",
-      icon: "new",
+      icon: "plus",
       action: { kind: "new" },
     });
 
