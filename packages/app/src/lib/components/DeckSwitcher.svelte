@@ -258,7 +258,7 @@
 
   .current-stats {
     margin-top: 0.25rem;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
@@ -286,7 +286,7 @@
   }
 
   .deck-id-label {
-    font-size: 0.625rem;
+    font-size: 0.875rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -295,7 +295,7 @@
 
   .deck-id-value {
     font-family: var(--font-mono, monospace);
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -303,7 +303,7 @@
   }
 
   .deck-id-hint {
-    font-size: 0.625rem;
+    font-size: 0.875rem;
     flex-shrink: 0;
   }
 </style>

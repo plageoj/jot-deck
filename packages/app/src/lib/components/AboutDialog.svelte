@@ -277,13 +277,13 @@
   }
 
   .info dt {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
   .info dd {
     margin: 0;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
     font-variant-numeric: tabular-nums;
   }
@@ -304,7 +304,7 @@
 
   .status-line {
     margin: 0;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
   }
 
@@ -329,7 +329,7 @@
   }
 
   .hint {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
@@ -342,7 +342,7 @@
   }
 
   .about-links a {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--accent);
     text-decoration: none;
   }
@@ -362,7 +362,7 @@
     padding: 0.375rem 0.75rem;
     border: 1px solid var(--input-border);
     border-radius: 4px;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     cursor: pointer;
     background-color: var(--input-bg);
     color: var(--text);

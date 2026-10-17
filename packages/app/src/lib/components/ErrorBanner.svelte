@@ -26,7 +26,7 @@
     padding: 0.5rem 1rem;
     background-color: #b91c1c;
     color: #fff;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     flex-shrink: 0;
   }
 
@@ -42,7 +42,7 @@
     border-radius: 4px;
     background-color: transparent;
     color: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     cursor: pointer;
   }
 

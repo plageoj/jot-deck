@@ -24,7 +24,7 @@
     padding: 0.4rem 1rem;
     background-color: var(--bg-secondary, #16213e);
     border-bottom: 1px solid var(--header-border, #0f3460);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     flex-shrink: 0;
   }
 
@@ -58,7 +58,7 @@
   .filter-hint {
     color: var(--text-muted, #8892b0);
     opacity: 0.6;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     margin-left: auto;
   }
 </style>

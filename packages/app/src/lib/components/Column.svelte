@@ -131,8 +131,8 @@
   .column {
     display: flex;
     flex-direction: column;
-    min-width: 280px;
-    max-width: 280px;
+    min-width: 20rem;
+    max-width: 20rem;
     height: 100%;
     background-color: var(--column-bg, #16213e);
     border-radius: 4px;

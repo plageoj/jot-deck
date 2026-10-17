@@ -145,7 +145,7 @@
     padding: 0.375rem 0.75rem;
     border: 1px solid var(--input-border);
     border-radius: 4px;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     cursor: pointer;
     transition:
       background-color 0.15s ease,

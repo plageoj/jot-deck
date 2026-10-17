@@ -126,7 +126,7 @@
   }
 
   .cheatsheet-hint {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
@@ -136,7 +136,7 @@
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
   }
 
   .cheatsheet-body {
@@ -170,7 +170,7 @@
   }
 
   .cheatsheet-item dd {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
     white-space: nowrap;
     overflow: hidden;
@@ -185,13 +185,13 @@
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     text-align: center;
     color: var(--accent);
   }
 
   .separator {
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
   }
 </style>

@@ -687,7 +687,7 @@
   }
 
   .hint {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     line-height: 1.5;
   }
@@ -697,7 +697,7 @@
   }
 
   .error-text {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--accent);
     overflow-wrap: break-word;
   }
@@ -735,7 +735,7 @@
   }
 
   .reporter-name {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--text);
     overflow: hidden;
@@ -747,7 +747,7 @@
     flex-shrink: 0;
     padding: 0 0.375rem;
     border-radius: 999px;
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     background-color: var(--bg-tertiary);
     color: var(--text-muted);
   }
@@ -759,7 +759,7 @@
 
   .reporter-command {
     font-family: var(--font-mono, monospace);
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -792,7 +792,7 @@
   }
 
   .reporter-form h3 {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--accent);
     text-transform: uppercase;
@@ -806,12 +806,12 @@
   }
 
   .field label {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
   }
 
   .reporter-scope {
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -825,7 +825,7 @@
   }
 
   .scope-group legend {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
     margin-bottom: 0.25rem;
   }
@@ -859,7 +859,7 @@
     border-radius: 4px;
     background-color: var(--input-bg);
     color: var(--text);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-family: inherit;
   }
 
@@ -885,7 +885,7 @@
     padding: 0.3125rem 0.625rem;
     border: 1px solid var(--input-border);
     border-radius: 4px;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     cursor: pointer;
     background-color: var(--input-bg);
     color: var(--text);

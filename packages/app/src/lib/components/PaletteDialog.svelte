@@ -225,7 +225,7 @@
 
   .palette-section {
     padding: 0.5rem 1rem 0.25rem;
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -285,7 +285,7 @@
 
   .palette-shortcut {
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-family: inherit;
     padding: 0.125rem 0.5rem;
     background-color: var(--bg-primary);

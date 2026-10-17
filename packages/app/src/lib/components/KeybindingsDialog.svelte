@@ -602,7 +602,7 @@
     border: none;
     background: transparent;
     color: var(--accent);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     cursor: pointer;
     padding: 0;
   }
@@ -636,7 +636,7 @@
   }
 
   .kb-section h3 {
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--accent);
     text-transform: uppercase;
@@ -657,7 +657,7 @@
   }
 
   .hint {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text-muted);
   }
 
@@ -667,7 +667,7 @@
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--accent);
   }
 
@@ -677,7 +677,7 @@
     border-radius: 4px;
     background-color: var(--input-bg);
     color: var(--text);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-family: inherit;
   }
 
@@ -692,7 +692,7 @@
     border-radius: 4px;
     background-color: var(--input-bg);
     color: var(--text);
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     font-family: inherit;
   }
 
@@ -711,7 +711,7 @@
   }
 
   .kb-scope-title {
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 600;
     color: var(--text-muted);
     margin-bottom: 0.25rem;
@@ -723,7 +723,7 @@
     border-radius: 999px;
     background-color: var(--bg-tertiary);
     color: var(--text-muted);
-    font-size: 0.625rem;
+    font-size: 0.875rem;
     text-transform: uppercase;
     letter-spacing: 0.03em;
   }
@@ -747,7 +747,7 @@
     align-items: center;
     gap: 0.375rem;
     min-width: 0;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     color: var(--text);
   }
 
@@ -779,7 +779,7 @@
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--accent);
     cursor: pointer;
   }
@@ -811,7 +811,7 @@
     border: 1px solid var(--accent);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     color: var(--text);
     text-align: center;
     cursor: text;
@@ -835,7 +835,7 @@
     border-radius: 3px;
     background-color: var(--input-bg);
     color: var(--text-muted);
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     line-height: 1;
     cursor: pointer;
   }
@@ -863,7 +863,7 @@
     padding: 0.375rem 0.75rem;
     border: 1px solid var(--input-border);
     border-radius: 4px;
-    font-size: 0.8125rem;
+    font-size: 0.875rem;
     cursor: pointer;
     background-color: var(--input-bg);
     color: var(--text);
@@ -886,7 +886,7 @@
   }
 
   .kb-conflict {
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
   }
 
   .kb-conflict.error {
@@ -903,6 +903,6 @@
     border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
     font-family: inherit;
-    font-size: 0.6875rem;
+    font-size: 0.875rem;
   }
 </style>

@@ -188,7 +188,7 @@
         backgroundColor: "var(--bg-tertiary)",
         color: "var(--text)",
         padding: "2px 8px",
-        fontSize: "0.75rem",
+        fontSize: "0.875rem",
         fontFamily: "monospace",
       },
       ".cm-vim-panel input": {
@@ -197,7 +197,7 @@
         border: "none",
         outline: "none",
         fontFamily: "monospace",
-        fontSize: "0.75rem",
+        fontSize: "0.875rem",
       },
       ".cm-fat-cursor": {
         backgroundColor: "var(--accent) !important",
