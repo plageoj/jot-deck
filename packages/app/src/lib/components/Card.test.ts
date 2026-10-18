@@ -5,6 +5,11 @@ import Card from "./Card.svelte";
 import { makeCard } from "#lib/__fixtures__/models.ts";
 import type { EditSession } from "#lib/deckData.svelte.ts";
 
+const openExternalUrl = vi.fn(async (_url: string) => {});
+vi.mock("#lib/externalLinks.ts", () => ({
+  openExternalUrl: (url: string) => openExternalUrl(url),
+}));
+
 const CONTENT = "hello world";
 const session: EditSession = {
   cardId: "card-1",
@@ -36,5 +41,27 @@ describe("Card editing", () => {
     await fireEvent.keyDown(view.contentDOM, { key: "Enter", ctrlKey: true });
 
     expect(onSave).toHaveBeenCalledWith(session, CONTENT, true, CONTENT.length);
+  });
+});
+
+describe("Card link hints", () => {
+  it("clicking a hint opens it and re-focuses the card without starting an edit", async () => {
+    const onFocusCard = vi.fn();
+    const onStartEdit = vi.fn();
+    const { getByText } = render(Card, {
+      props: {
+        card: makeCard("card-1", "col-1", { content: "https://a.example https://b.example" }),
+        focused: true,
+        linkHints: ["https://a.example", "https://b.example"],
+        onFocusCard,
+        onStartEdit,
+      },
+    });
+
+    await fireEvent.click(getByText("2"));
+
+    expect(openExternalUrl).toHaveBeenCalledWith("https://b.example");
+    expect(onFocusCard).toHaveBeenCalledOnce();
+    expect(onStartEdit).not.toHaveBeenCalled();
   });
 });

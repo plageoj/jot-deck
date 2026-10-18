@@ -83,6 +83,8 @@
 
   function handleHintClick(e: MouseEvent, url: string) {
     e.stopPropagation();
+    // Re-focusing the card dismisses the hints, as picking one by key does.
+    onFocusCard?.();
     void openExternalUrl(url).catch(() => {});
   }
 

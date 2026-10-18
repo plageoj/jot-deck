@@ -174,6 +174,7 @@ export class FocusManager {
   }
 
   handleFocusColumn(columnIndex: number) {
+    this.linkHints = null;
     if (this.newCard) this.newCard.restore = null;
     if (this.focusedColumnIndex !== columnIndex) {
       this.saveCurrentCardIndex();
@@ -183,6 +184,7 @@ export class FocusManager {
   }
 
   handleFocusCard(columnIndex: number, cardIndex: number) {
+    this.linkHints = null;
     if (this.newCard) this.newCard.restore = null;
     if (this.focusedColumnIndex !== columnIndex) {
       this.saveCurrentCardIndex();

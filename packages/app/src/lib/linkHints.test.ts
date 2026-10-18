@@ -24,8 +24,12 @@ async function flushPromises() {
   for (let i = 0; i < 4; i++) await Promise.resolve();
 }
 
-function press(dispatcher: InstanceType<typeof ActionDispatcher>, key: string) {
-  const event = new KeyboardEvent("keydown", { key, cancelable: true });
+function press(
+  dispatcher: InstanceType<typeof ActionDispatcher>,
+  key: string,
+  modifiers: { ctrlKey?: boolean; altKey?: boolean; metaKey?: boolean } = {},
+) {
+  const event = new KeyboardEvent("keydown", { key, cancelable: true, ...modifiers });
   Object.defineProperty(event, "target", { value: document.body });
   dispatcher.handleKeydown(event);
   return event;
@@ -110,6 +114,26 @@ describe("opening card links", () => {
     await flushPromises();
     expect(focus.linkHints).toBeNull();
     expect(openExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("a digit with a modifier dismisses instead of opening", async () => {
+    for (const modifiers of [{ ctrlKey: true }, { altKey: true }, { metaKey: true }]) {
+      await showHintsOnManyCard();
+      press(dispatcher, "1", modifiers);
+      await flushPromises();
+      expect(focus.linkHints).toBeNull();
+    }
+    expect(openExternalUrl).not.toHaveBeenCalled();
+  });
+
+  it("focusing a card or column with the mouse clears the hints", async () => {
+    await showHintsOnManyCard();
+    focus.handleFocusCard(0, 0);
+    expect(focus.linkHints).toBeNull();
+
+    await showHintsOnManyCard();
+    focus.handleFocusColumn(0);
+    expect(focus.linkHints).toBeNull();
   });
 
   it("stale hints from another card are dropped and the key runs normally", async () => {

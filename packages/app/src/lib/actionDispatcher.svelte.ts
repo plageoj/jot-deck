@@ -184,7 +184,9 @@ export class ActionDispatcher {
       return true;
     }
     event.preventDefault();
-    const index = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
+    const plainDigit =
+      /^[1-9]$/.test(event.key) && !event.ctrlKey && !event.altKey && !event.metaKey;
+    const index = plainDigit ? Number(event.key) - 1 : -1;
     const url = hints.links[index];
     if (url) this.runTask(openExternalUrl(url));
     return true;
