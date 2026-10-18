@@ -20,6 +20,7 @@
   } from "#lib/components/index.ts";
   import { DeckData, type EditSession } from "#lib/deckData.svelte.ts";
   import { CursorMemory } from "#lib/cursorMemory.ts";
+  import { columnRenameToCommit, type ColumnRename } from "#lib/columnRename.ts";
   import { FocusManager } from "#lib/focusManager.svelte.ts";
   import { ActionDispatcher } from "#lib/actionDispatcher.svelte.ts";
   import {
@@ -195,9 +196,7 @@
   let deletingDeck = $state<Deck | null>(null);
   // In-place column rename. The draft lives here so starting another edit can
   // commit it, the way a card editor saves before another one opens.
-  let columnRename = $state<{ columnId: string; draft: string; focusRequest: number } | null>(
-    null,
-  );
+  let columnRename = $state<ColumnRename | null>(null);
   let deletingColumn = $state<Column | null>(null);
   let trashItems = $state<TrashItem[]>([]);
   let trashRequestId = 0;
@@ -277,17 +276,30 @@
       return;
     }
     commitColumnRename();
-    columnRename = { columnId: column.id, draft: column.name, focusRequest: 1 };
+    const deckId = data.currentDeck?.id;
+    if (!deckId) return;
+    columnRename = {
+      deckId,
+      columnId: column.id,
+      originalName: column.name,
+      draft: column.name,
+      focusRequest: 1,
+    };
   }
 
   function commitColumnRename() {
     const rename = columnRename;
     if (!rename) return;
     columnRename = null;
-    const column = data.columns.find((c) => c.id === rename.columnId);
-    const name = rename.draft.trim();
-    if (column && name && name !== column.name) void data.renameColumn(column.id, name);
+    const name = columnRenameToCommit(rename, data.currentDeck?.id ?? null, data.columns);
+    if (name) void data.renameColumn(rename.columnId, name);
   }
+
+  // A deck switch unmounts the rename input; save its draft the way a card
+  // editor unmounted by the switch saves its document.
+  $effect(() => {
+    if (columnRename && columnRename.deckId !== data.currentDeck?.id) commitColumnRename();
+  });
 
   function handleDeleteColumn(column: Column) {
     deletingColumn = column;
