@@ -38,6 +38,9 @@ export class FocusManager {
 
   // Clipboard
   clipboardCard = $state<Card | null>(null);
+  /** Link hint mode: the card whose numbered links are on screen, waiting
+   * for a digit key to pick one. `null` when no hints are shown. */
+  linkHints = $state<{ cardId: string; links: string[] } | null>(null);
 
   // Scroll callback — set by the page component after mount
   onScrollToColumn: ((index: number) => void) | null = null;
@@ -109,6 +112,7 @@ export class FocusManager {
   }
 
   startEdit(cardId: string) {
+    this.linkHints = null;
     this.editingCardId = cardId;
     this.focusMode = "edit";
   }
@@ -158,6 +162,7 @@ export class FocusManager {
   openPalette(type: PaletteType) {
     if (this.focusMode === "command") return;
     this.showCheatsheet = false;
+    this.linkHints = null;
     this.previousFocusMode = this.focusMode;
     this.activePalette = type;
     this.focusMode = "command";

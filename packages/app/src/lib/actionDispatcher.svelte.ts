@@ -6,6 +6,7 @@ import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
 import { executeGlobalAction } from "./actionDispatchHelpers";
 import { BoardActionExecutors } from "./boardActionExecutors";
+import { openExternalUrl } from "./externalLinks";
 
 /** Actions that stay available while the selected deck is not loaded (switch
  * in progress or failed). Everything else would act on an empty board. */
@@ -102,6 +103,8 @@ export class ActionDispatcher {
     // Skip if focus is on input fields
     if (this.isEditableTarget(event.target as HTMLElement)) return;
 
+    if (focus.linkHints && this.handleLinkHintKey(event)) return;
+
     // Cheatsheet trigger: ? or Ctrl+/
     if (this.toggleCheatsheetIfTrigger(event)) return;
 
@@ -157,6 +160,34 @@ export class ActionDispatcher {
       event.preventDefault();
       this.focus.showCheatsheet = false;
     }
+  }
+
+  /**
+   * Link hint mode: a digit opens that link; any other key dismisses the
+   * hints and is swallowed, so Escape (or a stray key) never acts on the
+   * board. Hints left behind by a focus change are dropped and the key is
+   * processed normally. Returns whether the key was consumed.
+   */
+  private handleLinkHintKey(event: KeyboardEvent): boolean {
+    const hints = this.focus.linkHints;
+    this.focus.linkHints = null;
+    if (
+      !hints ||
+      this.focus.focusMode !== "card" ||
+      this.focusedCard?.id !== hints.cardId
+    ) {
+      return false;
+    }
+    if (normalizeKey(event) === null) {
+      // Modifier-only press: keep the hints up.
+      this.focus.linkHints = hints;
+      return true;
+    }
+    event.preventDefault();
+    const index = /^[1-9]$/.test(event.key) ? Number(event.key) - 1 : -1;
+    const url = hints.links[index];
+    if (url) this.runTask(openExternalUrl(url));
+    return true;
   }
 
   private isEditableTarget(target: HTMLElement): boolean {

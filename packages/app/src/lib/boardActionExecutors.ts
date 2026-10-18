@@ -1,6 +1,7 @@
 import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
 import type { Card, Column, EditEntry } from "./types";
+import { extractLinks, MAX_LINK_HINTS, openExternalUrl } from "./externalLinks";
 
 const HALF_PAGE_SIZE = 5;
 
@@ -134,6 +135,21 @@ export class BoardActionExecutors {
       case "scoreDown":
         await this.cardScore(-1);
         break;
+      case "openLink":
+        await this.cardOpenLink();
+        break;
+    }
+  }
+
+  /** One link opens at once; several show numbered hints to pick from. */
+  private async cardOpenLink(): Promise<void> {
+    const { focus, focusedCard } = this.context();
+    if (!focusedCard) return;
+    const links = extractLinks(focusedCard.content).slice(0, MAX_LINK_HINTS);
+    if (links.length === 1) {
+      await openExternalUrl(links[0]);
+    } else if (links.length > 1) {
+      focus.linkHints = { cardId: focusedCard.id, links };
     }
   }
 

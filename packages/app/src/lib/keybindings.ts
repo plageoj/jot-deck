@@ -88,6 +88,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "F", action: "scoreDown", modes: ["card"], description: "Score -1" },
   { sequence: "-", action: "scoreDown", modes: ["card"], description: "Score -1" },
 
+  // Card focus - Links
+  { sequence: "x", action: "openLink", modes: ["card"], description: "Open link" },
+
   // Common - Jump to column (g prefix)
   { sequence: "g1", action: "jumpToColumn:0", modes: ["column", "card"], description: "Jump to column 1" },
   { sequence: "g2", action: "jumpToColumn:1", modes: ["column", "card"], description: "Jump to column 2" },

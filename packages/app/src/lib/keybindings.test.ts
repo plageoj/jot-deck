@@ -334,15 +334,15 @@ describe("findKeybindingConflicts", () => {
   });
 
   it("excludes an already-remapped default from self-conflict", () => {
-    // moveDown was remapped j -> x. Re-opening its remap and pressing "x"
+    // moveDown was remapped j -> q. Re-opening its remap and pressing "q"
     // again must not report a conflict against itself — the exclude key is the
     // stable (default-sequence) signature, not the remapped one.
     const moveDown = DEFAULT_KEYBINDINGS.find(
       (b) => b.action === "moveDown" && b.sequence === "j",
     )!;
     const sig = signatureOf(moveDown);
-    const conflicts = findKeybindingConflicts("x", ["card"], sig, {
-      [sig]: "x",
+    const conflicts = findKeybindingConflicts("q", ["card"], sig, {
+      [sig]: "q",
     });
     expect(conflicts.some((c) => c.severity === "error")).toBe(false);
   });

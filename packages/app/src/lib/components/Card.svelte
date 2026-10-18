@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
+  import { openExternalUrl } from "#lib/externalLinks.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
   import CardEditor from "./CardEditor.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
@@ -18,6 +19,8 @@
      * card is read-only and shows an "AI generating" affordance; the streamed
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
+    /** Numbered links offered by link hint mode; `null` when not picking. */
+    linkHints?: string[] | null;
     onSave?: (
       session: EditSession,
       content: string,
@@ -45,6 +48,7 @@
     dimmed = false,
     activeTag = null,
     streamingText = null,
+    linkHints = null,
     onSave,
     onCancelEdit,
     onStartEdit,
@@ -75,6 +79,11 @@
 
   function handleExit(session: EditSession) {
     onExitEdit?.(session);
+  }
+
+  function handleHintClick(e: MouseEvent, url: string) {
+    e.stopPropagation();
+    void openExternalUrl(url).catch(() => {});
   }
 
   function handleClick() {
@@ -137,6 +146,17 @@
         (empty)
       {/if}
     </div>
+    {#if linkHints && linkHints.length > 0}
+      <ol class="link-hints" aria-label="Press a number to open a link">
+        {#each linkHints as url, i (url)}
+          <li>
+            <button type="button" onclick={(e) => handleHintClick(e, url)}>
+              <kbd>{i + 1}</kbd><span class="link-hint-url">{url}</span>
+            </button>
+          </li>
+        {/each}
+      </ol>
+    {/if}
   {/if}
 </div>
 
@@ -198,6 +218,48 @@
   .card-content {
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .link-hints {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0 0;
+    border-top: 1px solid var(--card-border, #0f3460);
+    font-size: 0.875rem;
+  }
+
+  .link-hints button {
+    all: unset;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.125rem 0;
+    cursor: pointer;
+    color: var(--accent);
+  }
+
+  .link-hints button:hover .link-hint-url {
+    text-decoration: underline;
+  }
+
+  .link-hints kbd {
+    flex: none;
+    min-width: 1.25em;
+    padding: 0 0.25em;
+    border-radius: 3px;
+    background-color: var(--accent, #e94560);
+    color: #fff;
+    font-family: "Cascadia Code", "Consolas", "Menlo", monospace;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .link-hint-url {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card-score {

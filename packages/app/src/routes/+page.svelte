@@ -376,6 +376,7 @@
       {editSession}
       {editEntry}
       streamingText={data.streamingText}
+      linkHints={focus.focusMode === "card" ? focus.linkHints : null}
       onAddCard={async (columnId) => {
         const card = await data.createNewCard(columnId);
         if (card) {

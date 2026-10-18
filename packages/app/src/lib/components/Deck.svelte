@@ -15,6 +15,8 @@
     activeTag?: string | null;
     /** card_id → in-progress streamed text (007 §6.2). */
     streamingText?: Record<string, string>;
+    /** Numbered link hints shown on one card while picking a link to open. */
+    linkHints?: { cardId: string; links: string[] } | null;
     onAddCard?: (columnId: string) => void;
     onRenameColumn?: (column: Column) => void;
     /** The column being renamed in place, with its in-progress name. */
@@ -52,6 +54,7 @@
     filteredCardIds = null,
     activeTag = null,
     streamingText = {},
+    linkHints = null,
     onAddCard,
     onRenameColumn,
     columnRename = null,
@@ -96,6 +99,7 @@
         {filteredCardIds}
         {activeTag}
         {streamingText}
+        {linkHints}
         onAddCard={onAddCard ? () => onAddCard(column.id) : undefined}
         onRenameColumn={onRenameColumn ? () => onRenameColumn(column) : undefined}
         renameDraft={columnRename?.columnId === column.id ? columnRename.draft : null}

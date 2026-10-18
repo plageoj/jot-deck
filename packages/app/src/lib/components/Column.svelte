@@ -19,6 +19,8 @@
     /** card_id → in-progress streamed text for cards receiving a Reporter
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
+    /** Numbered link hints shown on one card while picking a link to open. */
+    linkHints?: { cardId: string; links: string[] } | null;
     onAddCard?: () => void;
     /** Double-clicking the header starts renaming the column. */
     onRenameColumn?: () => void;
@@ -61,6 +63,7 @@
     filteredCardIds = null,
     activeTag = null,
     streamingText = {},
+    linkHints = null,
     onAddCard,
     onRenameColumn,
     renameDraft = null,
@@ -178,6 +181,7 @@
           {editEntry}
           dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
           streamingText={streamingText[card.id] ?? null}
+          linkHints={linkHints?.cardId === card.id ? linkHints.links : null}
           {activeTag}
           onSave={onSaveCard}
           {onCancelEdit}
