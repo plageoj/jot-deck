@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Column, Card } from "#lib/types.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
-  import PaletteIcon from "./PaletteIcon.svelte";
+  import Icon from "./Icon.svelte";
 
   interface Props {
     columns: Column[];
@@ -63,7 +63,7 @@
         id: "__rename",
         label: "Rename column",
         section: "Actions",
-        icon: "rename",
+        icon: "pencil",
         action: { kind: "rename", column: currentColumn },
       });
       if (columns.length > 1) {
@@ -72,7 +72,7 @@
           label: "Delete column",
           section: "Actions",
           danger: true,
-          icon: "delete",
+          icon: "trash",
           action: { kind: "delete", column: currentColumn },
         });
       }
@@ -82,7 +82,7 @@
       id: "__new",
       label: "New column",
       section: "Actions",
-      icon: "new",
+      icon: "plus",
       action: { kind: "new" },
     });
 
@@ -136,7 +136,7 @@
 {#snippet renderItem(item: ColumnPaletteItem)}
   <span class="col-name-group">
     {#if item.icon}
-      <PaletteIcon name={item.icon} />
+      <Icon name={item.icon} class="palette-icon" />
     {/if}
     <span class="col-name" class:danger={item.danger}>{item.label}</span>
   </span>

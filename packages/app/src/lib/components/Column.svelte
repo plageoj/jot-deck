@@ -2,6 +2,7 @@
   import type { Column, Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import CardComponent from "./Card.svelte";
+  import Icon from "./Icon.svelte";
 
   interface Props {
     column: Column;
@@ -19,6 +20,16 @@
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
     onAddCard?: () => void;
+    /** Double-clicking the header starts renaming the column. */
+    onRenameColumn?: () => void;
+    /** In-progress name while the header is being renamed in place; `null`
+     * when not renaming. Like a card editor, it survives losing focus. */
+    renameDraft?: string | null;
+    /** Bumped on each rename request so the input takes focus again. */
+    renameFocusRequest?: number;
+    onRenameDraftChange?: (draft: string) => void;
+    onCommitRename?: () => void;
+    onCancelRename?: () => void;
     onSaveCard?: (
       session: EditSession,
       content: string,
@@ -51,6 +62,12 @@
     activeTag = null,
     streamingText = {},
     onAddCard,
+    onRenameColumn,
+    renameDraft = null,
+    renameFocusRequest = 0,
+    onRenameDraftChange,
+    onCommitRename,
+    onCancelRename,
     onSaveCard,
     onCancelEdit,
     onStartEdit,
@@ -69,6 +86,41 @@
     onFocusColumn?.();
   }
 
+  function handleColumnDblClick(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest(".column-header") || target.closest("button, input")) return;
+    onRenameColumn?.();
+  }
+
+  let renameInput = $state<HTMLInputElement | null>(null);
+  let selectedRenameInput: HTMLInputElement | null = null;
+
+  // Select the whole name when the input first appears; later requests (e.g.
+  // `r` after clicking away) only refocus, keeping the caret where it was.
+  $effect(() => {
+    void renameFocusRequest;
+    if (!renameInput) return;
+    renameInput.focus();
+    if (selectedRenameInput !== renameInput) {
+      renameInput.select();
+      selectedRenameInput = renameInput;
+    }
+  });
+
+  function handleRenameKeydown(e: KeyboardEvent) {
+    // Enter that confirms an IME composition must not commit the rename.
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCommitRename?.();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onCancelRename?.();
+    }
+  }
+
   let cardRefs: HTMLDivElement[] = [];
 
   // Scroll to focused card when focusedCardIndex changes
@@ -82,13 +134,27 @@
   });
 </script>
 
-<div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} onkeydown={() => {}}>
+<div class="column" class:focused role="button" tabindex="-1" onclick={handleColumnClick} ondblclick={handleColumnDblClick} onkeydown={() => {}}>
   <div class="column-header" class:focused>
     <span class="column-title">
       {#if columnNumber !== undefined && columnNumber >= 1 && columnNumber <= 9}
         <kbd class="column-number" title="g {columnNumber}: Focus this column">{columnNumber}</kbd>
       {/if}
-      <span class="column-name">{column.name}</span>
+      {#if renameDraft !== null}
+        <input
+          bind:this={renameInput}
+          class="column-name-input"
+          type="text"
+          value={renameDraft}
+          aria-label="Column name"
+          spellcheck="false"
+          autocomplete="off"
+          oninput={(e) => onRenameDraftChange?.(e.currentTarget.value)}
+          onkeydown={handleRenameKeydown}
+        />
+      {:else}
+        <span class="column-name">{column.name}</span>
+      {/if}
     </span>
     {#if onAddCard}
       <button
@@ -96,7 +162,7 @@
         onclick={onAddCard}
         aria-label="Add card to {column.name}"
       >
-        +
+        <Icon name="plus" />
       </button>
     {/if}
   </div>
@@ -149,16 +215,19 @@
     padding-left: calc(0.75rem + 4px);
     background-color: var(--column-header-bg, #0f3460);
     font-weight: 500;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
     transition: background-color 0.15s ease, box-shadow 0.15s ease;
   }
 
   .column-header.focused {
     background-color: var(--column-header-bg-focus, #1a4a7a);
     box-shadow: inset 4px 0 0 var(--accent, #e94560);
-    padding-left: 0.75rem;
   }
 
   .column-title {
+    flex: 1;
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
@@ -195,6 +264,25 @@
     white-space: nowrap;
   }
 
+  .column-name-input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    height: 1.5rem;
+    margin-right: 0.5rem;
+    padding: 0 0.25rem;
+    border: 1px solid var(--accent, #e94560);
+    border-radius: 3px;
+    background-color: var(--bg-primary);
+    color: var(--text, #eee);
+    font: inherit;
+    font-size: 0.875rem;
+    outline: none;
+    /* The header disables selection; editing needs it back. */
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
   .add-card {
     width: 24px;
     height: 24px;
@@ -203,7 +291,6 @@
     border-radius: 4px;
     background-color: var(--card-bg, #1a1a2e);
     color: var(--text, #eee);
-    font-size: 1rem;
     cursor: pointer;
     display: flex;
     align-items: center;
