@@ -3,10 +3,17 @@ import { parseInlineMarkdown, type MarkdownSegment } from "#lib/markdown.ts";
 /** Link hints are labelled with at most two digits, so up to 99 are offered. */
 export const MAX_LINK_HINTS = 99;
 
+/** A link found in a card. `label` is its display text, or `null` when the
+ * text is just the URL itself (a bare URL). */
+export interface CardLink {
+  url: string;
+  label: string | null;
+}
+
 /** Link hint mode state: the card's numbered links and the digits typed so far. */
 export interface LinkHints {
   cardId: string;
-  links: string[];
+  links: CardLink[];
   typed: string;
 }
 
@@ -20,17 +27,34 @@ export function linkHintLabels(count: number): string[] {
   return Array.from({ length: count }, (_, i) => String(i + 1).padStart(width, "0"));
 }
 
+function textOf(segments: MarkdownSegment[]): string {
+  return segments
+    .map((segment) => ("children" in segment ? textOf(segment.children) : segment.text))
+    .join("");
+}
+
+/** The display text of a link, or `null` when it only repeats the URL
+ * (bare URLs, including `www.` autolinks that gain an `http://` prefix). */
+function linkLabel(url: string, children: MarkdownSegment[]): string | null {
+  const label = textOf(children).trim();
+  if (!label || url === label || url.replace(/^https?:\/\//i, "") === label) return null;
+  return label;
+}
+
 /**
- * The http(s) URLs in a card, in reading order with duplicates dropped.
- * Covers `[label](url)` links and bare URLs alike, and is independent of the
- * "Render Markdown" setting so plain-text cards can open their links too.
+ * The http(s) links in a card, in reading order with duplicate URLs dropped
+ * (the first occurrence's label wins). Covers `[label](url)` links and bare
+ * URLs alike, and is independent of the "Render Markdown" setting so
+ * plain-text cards can open their links too.
  */
-export function extractLinks(content: string): string[] {
-  const links: string[] = [];
+export function extractLinks(content: string): CardLink[] {
+  const links: CardLink[] = [];
   const visit = (segments: MarkdownSegment[]) => {
     for (const segment of segments) {
       if (segment.kind === "link") {
-        if (!links.includes(segment.href)) links.push(segment.href);
+        if (!links.some((link) => link.url === segment.href)) {
+          links.push({ url: segment.href, label: linkLabel(segment.href, segment.children) });
+        }
       } else if (segment.kind === "bold" || segment.kind === "italic") {
         visit(segment.children);
       }

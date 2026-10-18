@@ -193,7 +193,7 @@ export class ActionDispatcher {
     const labels = linkHintLabels(hints.links.length);
     const index = labels.indexOf(typed);
     if (index !== -1) {
-      this.runTask(openExternalUrl(hints.links[index]));
+      this.runTask(openExternalUrl(hints.links[index].url));
     } else if (labels.some((label) => label.startsWith(typed))) {
       this.focus.linkHints = { ...hints, typed };
     }

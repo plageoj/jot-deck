@@ -55,7 +55,10 @@ describe("Card link hints", () => {
         focused: true,
         linkHints: {
           cardId: "card-1",
-          links: ["https://a.example", "https://b.example"],
+          links: [
+            { url: "https://a.example", label: null },
+            { url: "https://b.example", label: "Docs" },
+          ],
           typed: "",
         },
         onFocusCard,
@@ -68,5 +71,27 @@ describe("Card link hints", () => {
     expect(openExternalUrl).toHaveBeenCalledWith("https://b.example");
     expect(onFocusCard).toHaveBeenCalledOnce();
     expect(onStartEdit).not.toHaveBeenCalled();
+  });
+
+  it("shows a labelled link's display text next to its URL", () => {
+    const { container } = render(Card, {
+      props: {
+        card: makeCard("card-1", "col-1", { content: "[Docs](https://b.example) https://a.example" }),
+        focused: true,
+        linkHints: {
+          cardId: "card-1",
+          links: [
+            { url: "https://b.example", label: "Docs" },
+            { url: "https://a.example", label: null },
+          ],
+          typed: "",
+        },
+      },
+    });
+
+    const hints = [...container.querySelectorAll(".link-hints button")].map(
+      (hint) => hint.textContent,
+    );
+    expect(hints).toEqual(["1Docshttps://b.example", "2https://a.example"]);
   });
 });

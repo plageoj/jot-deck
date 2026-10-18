@@ -153,15 +153,17 @@
     {#if linkHints && linkHints.links.length > 0}
       {@const typed = linkHints.typed}
       <ol class="link-hints" aria-label="Type a number to open a link">
-        {#each linkHints.links as url, i (url)}
-          {@const label = hintLabels[i]}
-          {@const matches = label.startsWith(typed)}
+        {#each linkHints.links as { url, label }, i (url)}
+          {@const hintLabel = hintLabels[i]}
+          {@const matches = hintLabel.startsWith(typed)}
           <li class:link-hint-excluded={!matches}>
             <button type="button" onclick={(e) => handleHintClick(e, url)}>
               <kbd
                 >{#if typed && matches}<span class="link-hint-typed">{typed}</span
-                  >{label.slice(typed.length)}{:else}{label}{/if}</kbd
-              ><span class="link-hint-url">{url}</span>
+                  >{hintLabel.slice(typed.length)}{:else}{hintLabel}{/if}</kbd
+              >{#if label}<span class="link-hint-label">{label}</span>{/if}<span
+                class="link-hint-url">{url}</span
+              >
             </button>
           </li>
         {/each}
@@ -258,11 +260,11 @@
     flex: none;
     min-width: 1.25em;
     padding: 0 0.25em;
+    border: 1px solid var(--bg-tertiary);
     border-radius: 3px;
-    background-color: var(--accent, #e94560);
-    color: #fff;
+    background-color: var(--bg-primary);
+    color: var(--text);
     font-family: "Cascadia Code", "Consolas", "Menlo", monospace;
-    font-weight: 600;
     text-align: center;
   }
 
@@ -274,7 +276,20 @@
     opacity: 0.35;
   }
 
+  /* Keep the URL visible next to a long label. */
+  .link-hint-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
   .link-hint-url {
+    flex: 1 1 0;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

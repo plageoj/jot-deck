@@ -1,24 +1,30 @@
 import { describe, it, expect } from "vitest";
 import { extractLinks, linkHintLabels, MAX_LINK_HINTS } from "./externalLinks";
 
+const urls = (content: string) => extractLinks(content).map((link) => link.url);
+
 describe("extractLinks", () => {
   it("returns markdown links and bare URLs in reading order", () => {
-    expect(
-      extractLinks("See [docs](https://a.example/docs) then https://b.example/x"),
-    ).toEqual(["https://a.example/docs", "https://b.example/x"]);
+    expect(urls("See [docs](https://a.example/docs) then https://b.example/x")).toEqual([
+      "https://a.example/docs",
+      "https://b.example/x",
+    ]);
   });
 
   it("finds links nested in bold and italic", () => {
-    expect(extractLinks("**[a](https://a.example)** *https://b.example*")).toEqual([
+    expect(urls("**[a](https://a.example)** *https://b.example*")).toEqual([
       "https://a.example",
       "https://b.example",
     ]);
   });
 
-  it("drops duplicates, keeping the first occurrence", () => {
+  it("drops duplicate URLs, keeping the first occurrence and its label", () => {
     expect(
       extractLinks("https://a.example [again](https://a.example) https://b.example"),
-    ).toEqual(["https://a.example", "https://b.example"]);
+    ).toEqual([
+      { url: "https://a.example", label: null },
+      { url: "https://b.example", label: null },
+    ]);
   });
 
   it("ignores non-http(s) links and URLs inside code spans", () => {
@@ -28,6 +34,22 @@ describe("extractLinks", () => {
   it("returns nothing for a card without links", () => {
     expect(extractLinks("just a note #tag")).toEqual([]);
     expect(extractLinks("")).toEqual([]);
+  });
+
+  it("keeps the display text of a labelled link, including formatting inside it", () => {
+    expect(extractLinks("[Release **notes**](https://a.example/notes)")).toEqual([
+      { url: "https://a.example/notes", label: "Release notes" },
+    ]);
+  });
+
+  it("has no label when the text only repeats the URL", () => {
+    expect(
+      extractLinks("https://a.example www.b.example [https://c.example](https://c.example)"),
+    ).toEqual([
+      { url: "https://a.example", label: null },
+      { url: "http://www.b.example", label: null },
+      { url: "https://c.example", label: null },
+    ]);
   });
 });
 

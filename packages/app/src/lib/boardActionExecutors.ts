@@ -147,7 +147,7 @@ export class BoardActionExecutors {
     if (!focusedCard) return;
     const links = extractLinks(focusedCard.content).slice(0, MAX_LINK_HINTS);
     if (links.length === 1) {
-      await openExternalUrl(links[0]);
+      await openExternalUrl(links[0].url);
     } else if (links.length > 1) {
       focus.linkHints = { cardId: focusedCard.id, links, typed: "" };
     }

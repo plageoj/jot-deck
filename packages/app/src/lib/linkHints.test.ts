@@ -89,7 +89,10 @@ describe("opening card links", () => {
     expect(openExternalUrl).not.toHaveBeenCalled();
     expect(focus.linkHints).toEqual({
       cardId: "many",
-      links: ["https://a.example", "https://b.example"],
+      links: [
+        { url: "https://a.example", label: "a" },
+        { url: "https://b.example", label: null },
+      ],
       typed: "",
     });
   });
