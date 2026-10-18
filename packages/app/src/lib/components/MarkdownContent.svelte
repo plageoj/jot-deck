@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openExternalUrl } from "#lib/externalLinks.ts";
   import { parseInlineMarkdown, type MarkdownSegment } from "#lib/markdown.ts";
 
   interface Props {
@@ -16,8 +17,12 @@
     onTagClick?.(tagName);
   }
 
-  function handleLinkClick(e: MouseEvent) {
+  // Clicking a link opens it in the system browser instead of starting an
+  // edit; the rest of the card still enters edit mode on click.
+  function handleLinkClick(e: MouseEvent, href: string) {
     e.stopPropagation();
+    e.preventDefault();
+    void openExternalUrl(href).catch(() => {});
   }
 </script>
 
@@ -33,7 +38,7 @@
         href={segment.href}
         target="_blank"
         rel="noopener noreferrer"
-        onclick={handleLinkClick}
+        onclick={(e) => handleLinkClick(e, segment.href)}
         >{@render renderSegments(segment.children)}</a
       >{:else if segment.kind === "tag"}<button
         type="button"
