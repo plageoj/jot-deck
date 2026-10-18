@@ -35,6 +35,8 @@ function press(
   return event;
 }
 
+const TWELVE_LINKS = Array.from({ length: 12 }, (_, i) => `https://l${i + 1}.example`).join(" ");
+
 describe("opening card links", () => {
   let data: DeckData;
   let focus: FocusManager;
@@ -51,6 +53,7 @@ describe("opening card links", () => {
             content: "[a](https://a.example) and https://b.example",
           }),
           makeCard("none", "col-0", { content: "no links here" }),
+          makeCard("twelve", "col-0", { content: TWELVE_LINKS }),
         ],
       },
     }));
@@ -87,6 +90,7 @@ describe("opening card links", () => {
     expect(focus.linkHints).toEqual({
       cardId: "many",
       links: ["https://a.example", "https://b.example"],
+      typed: "",
     });
   });
 
@@ -149,5 +153,73 @@ describe("opening card links", () => {
     await showHintsOnManyCard();
     focus.startEdit("many");
     expect(focus.linkHints).toBeNull();
+  });
+
+  describe("with ten or more links", () => {
+    async function showHintsOnTwelveCard() {
+      focus.focusedCardIndex = 3;
+      press(dispatcher, "x");
+      await flushPromises();
+    }
+
+    it("offers every link, not just the first nine", async () => {
+      await showHintsOnTwelveCard();
+      expect(focus.linkHints?.links).toHaveLength(12);
+    });
+
+    it("the first digit narrows the hints and the second opens the link", async () => {
+      await showHintsOnTwelveCard();
+      press(dispatcher, "1");
+      await flushPromises();
+      expect(focus.linkHints?.typed).toBe("1");
+      expect(openExternalUrl).not.toHaveBeenCalled();
+
+      press(dispatcher, "2");
+      await flushPromises();
+      expect(openExternalUrl).toHaveBeenCalledWith("https://l12.example");
+      expect(focus.linkHints).toBeNull();
+    });
+
+    it("single-digit positions are typed with a leading zero", async () => {
+      await showHintsOnTwelveCard();
+      press(dispatcher, "0");
+      press(dispatcher, "3");
+      await flushPromises();
+      expect(openExternalUrl).toHaveBeenCalledWith("https://l3.example");
+    });
+
+    it("a second digit past the last label dismisses", async () => {
+      await showHintsOnTwelveCard();
+      press(dispatcher, "1");
+      press(dispatcher, "5");
+      await flushPromises();
+      expect(focus.linkHints).toBeNull();
+      expect(openExternalUrl).not.toHaveBeenCalled();
+    });
+
+    it("a first digit no label starts with dismisses", async () => {
+      await showHintsOnTwelveCard();
+      press(dispatcher, "2");
+      await flushPromises();
+      expect(focus.linkHints).toBeNull();
+      expect(openExternalUrl).not.toHaveBeenCalled();
+    });
+
+    it("a non-digit after the first digit dismisses", async () => {
+      await showHintsOnTwelveCard();
+      press(dispatcher, "1");
+      press(dispatcher, "Escape");
+      await flushPromises();
+      expect(focus.linkHints).toBeNull();
+      expect(openExternalUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  it("0 dismisses when there are fewer than ten links", async () => {
+    await showHintsOnManyCard();
+    press(dispatcher, "0");
+    await flushPromises();
+    expect(focus.linkHints).toBeNull();
+    expect(openExternalUrl).not.toHaveBeenCalled();
   });
 });

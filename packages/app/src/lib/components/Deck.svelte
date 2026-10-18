@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { LinkHints } from "#lib/externalLinks.ts";
   import type { Column, Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import ColumnComponent from "./Column.svelte";
@@ -16,7 +17,7 @@
     /** card_id → in-progress streamed text (007 §6.2). */
     streamingText?: Record<string, string>;
     /** Numbered link hints shown on one card while picking a link to open. */
-    linkHints?: { cardId: string; links: string[] } | null;
+    linkHints?: LinkHints | null;
     onAddCard?: (columnId: string) => void;
     onRenameColumn?: (column: Column) => void;
     /** The column being renamed in place, with its in-progress name. */

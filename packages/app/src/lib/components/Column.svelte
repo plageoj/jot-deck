@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { LinkHints } from "#lib/externalLinks.ts";
   import type { Column, Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import CardComponent from "./Card.svelte";
@@ -20,7 +21,7 @@
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
     /** Numbered link hints shown on one card while picking a link to open. */
-    linkHints?: { cardId: string; links: string[] } | null;
+    linkHints?: LinkHints | null;
     onAddCard?: () => void;
     /** Double-clicking the header starts renaming the column. */
     onRenameColumn?: () => void;
@@ -181,7 +182,7 @@
           {editEntry}
           dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
           streamingText={streamingText[card.id] ?? null}
-          linkHints={linkHints?.cardId === card.id ? linkHints.links : null}
+          linkHints={linkHints?.cardId === card.id ? linkHints : null}
           {activeTag}
           onSave={onSaveCard}
           {onCancelEdit}

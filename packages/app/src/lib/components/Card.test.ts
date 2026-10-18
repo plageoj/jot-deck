@@ -6,7 +6,8 @@ import { makeCard } from "#lib/__fixtures__/models.ts";
 import type { EditSession } from "#lib/deckData.svelte.ts";
 
 const openExternalUrl = vi.fn(async (_url: string) => {});
-vi.mock("#lib/externalLinks.ts", () => ({
+vi.mock("#lib/externalLinks.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/externalLinks.ts")>()),
   openExternalUrl: (url: string) => openExternalUrl(url),
 }));
 
@@ -52,7 +53,11 @@ describe("Card link hints", () => {
       props: {
         card: makeCard("card-1", "col-1", { content: "https://a.example https://b.example" }),
         focused: true,
-        linkHints: ["https://a.example", "https://b.example"],
+        linkHints: {
+          cardId: "card-1",
+          links: ["https://a.example", "https://b.example"],
+          typed: "",
+        },
         onFocusCard,
         onStartEdit,
       },

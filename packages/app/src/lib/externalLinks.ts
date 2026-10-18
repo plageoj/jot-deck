@@ -1,7 +1,24 @@
 import { parseInlineMarkdown, type MarkdownSegment } from "#lib/markdown.ts";
 
-/** Link hints are picked with a single digit key, so at most nine are offered. */
-export const MAX_LINK_HINTS = 9;
+/** Link hints are labelled with at most two digits, so up to 99 are offered. */
+export const MAX_LINK_HINTS = 99;
+
+/** Link hint mode state: the card's numbered links and the digits typed so far. */
+export interface LinkHints {
+  cardId: string;
+  links: string[];
+  typed: string;
+}
+
+/**
+ * Hint labels for `count` links: `1`–`9` up to nine links, otherwise every
+ * label is padded to two digits (`01`–`99`). Equal-width labels mean no label
+ * is a prefix of another, so a label opens as soon as it is fully typed.
+ */
+export function linkHintLabels(count: number): string[] {
+  const width = count >= 10 ? 2 : 1;
+  return Array.from({ length: count }, (_, i) => String(i + 1).padStart(width, "0"));
+}
 
 /**
  * The http(s) URLs in a card, in reading order with duplicates dropped.

@@ -1,3 +1,4 @@
+import type { LinkHints } from "./externalLinks";
 import type { FocusMode } from "#lib/keybindings.ts";
 import type { Card } from "#lib/types.ts";
 import type { DeckData } from "./deckData.svelte";
@@ -40,7 +41,7 @@ export class FocusManager {
   clipboardCard = $state<Card | null>(null);
   /** Link hint mode: the card whose numbered links are on screen, waiting
    * for a digit key to pick one. `null` when no hints are shown. */
-  linkHints = $state<{ cardId: string; links: string[] } | null>(null);
+  linkHints = $state<LinkHints | null>(null);
 
   // Scroll callback — set by the page component after mount
   onScrollToColumn: ((index: number) => void) | null = null;

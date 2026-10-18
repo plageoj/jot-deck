@@ -149,7 +149,7 @@ export class BoardActionExecutors {
     if (links.length === 1) {
       await openExternalUrl(links[0]);
     } else if (links.length > 1) {
-      focus.linkHints = { cardId: focusedCard.id, links };
+      focus.linkHints = { cardId: focusedCard.id, links, typed: "" };
     }
   }
 

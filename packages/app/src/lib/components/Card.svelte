@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
-  import { openExternalUrl } from "#lib/externalLinks.ts";
+  import { linkHintLabels, openExternalUrl, type LinkHints } from "#lib/externalLinks.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
   import CardEditor from "./CardEditor.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
@@ -20,7 +20,7 @@
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
     /** Numbered links offered by link hint mode; `null` when not picking. */
-    linkHints?: string[] | null;
+    linkHints?: LinkHints | null;
     onSave?: (
       session: EditSession,
       content: string,
@@ -80,6 +80,8 @@
   function handleExit(session: EditSession) {
     onExitEdit?.(session);
   }
+
+  let hintLabels = $derived(linkHints ? linkHintLabels(linkHints.links.length) : []);
 
   function handleHintClick(e: MouseEvent, url: string) {
     e.stopPropagation();
@@ -148,12 +150,18 @@
         (empty)
       {/if}
     </div>
-    {#if linkHints && linkHints.length > 0}
-      <ol class="link-hints" aria-label="Press a number to open a link">
-        {#each linkHints as url, i (url)}
-          <li>
+    {#if linkHints && linkHints.links.length > 0}
+      {@const typed = linkHints.typed}
+      <ol class="link-hints" aria-label="Type a number to open a link">
+        {#each linkHints.links as url, i (url)}
+          {@const label = hintLabels[i]}
+          {@const matches = label.startsWith(typed)}
+          <li class:link-hint-excluded={!matches}>
             <button type="button" onclick={(e) => handleHintClick(e, url)}>
-              <kbd>{i + 1}</kbd><span class="link-hint-url">{url}</span>
+              <kbd
+                >{#if typed && matches}<span class="link-hint-typed">{typed}</span
+                  >{label.slice(typed.length)}{:else}{label}{/if}</kbd
+              ><span class="link-hint-url">{url}</span>
             </button>
           </li>
         {/each}
@@ -256,6 +264,14 @@
     font-family: "Cascadia Code", "Consolas", "Menlo", monospace;
     font-weight: 600;
     text-align: center;
+  }
+
+  .link-hint-typed {
+    opacity: 0.55;
+  }
+
+  .link-hint-excluded {
+    opacity: 0.35;
   }
 
   .link-hint-url {
