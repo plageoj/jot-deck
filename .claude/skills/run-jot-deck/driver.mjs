@@ -24,6 +24,7 @@
  *   BASE_URL   dev server URL         (default http://localhost:1420)
  *   SHOT       screenshot output path (default ./jot-deck-shot.png)
  *   HEADFUL    set to "1" to show the browser (needs a display)
+ *   VIM        set to "1" to turn on Vim mode via the Settings dialog first
  */
 
 import { createRequire } from "node:module";
@@ -43,6 +44,7 @@ const { chromium } = appRequire("@playwright/test");
 const BASE_URL = process.env.BASE_URL || "http://localhost:1420";
 const SHOT = process.env.SHOT || resolve(process.cwd(), "jot-deck-shot.png");
 const HEADFUL = process.env.HEADFUL === "1";
+const VIM = process.env.VIM === "1";
 const flow = process.argv[2] || "smoke";
 
 const VIEWPORT = { width: 1280, height: 800 };
@@ -69,7 +71,7 @@ async function shoot(page, path) {
 async function typeInEditor(page, text) {
   // A new card opens with the CodeMirror editor focused and ready for input, so
   // type straight in. With Vim OFF (the default, settings.vimEnabled=false) it's
-  // a plain editor; with Vim ON a new card starts in INSERT mode. Either way,
+  // a plain editor; with Vim ON the editor opens in INSERT mode. Either way,
   // do NOT press `i` first — that would insert a literal "i".
   await page.keyboard.type(text, { delay: 25 });
   await sleep(120);
@@ -100,6 +102,20 @@ async function createFreshDeckWithColumn(page) {
   await page.keyboard.press("Escape"); // leave any palette -> column focus
 }
 
+// Settings live in the (in-memory) DB, not localStorage, so they can't be
+// seeded before load — flip the checkbox in the Settings dialog instead. The
+// change applies to editors opened afterwards. Open/close it with the keyboard
+// (Ctrl+, / Escape): closing via the × button leaves focus on the header's
+// Settings button, and the app's keybindings (`o`, `j`, ...) then stop firing.
+async function enableVim(page) {
+  await page.keyboard.press("Control+,");
+  const box = page.locator("#settings-vim");
+  if (!(await box.isChecked())) await box.check();
+  await page.keyboard.press("Escape");
+  await box.waitFor({ state: "hidden", timeout: 5000 });
+  console.log("[driver] Vim mode enabled via Settings");
+}
+
 async function main() {
   console.log(`[driver] flow=${flow} base=${BASE_URL} headful=${HEADFUL}`);
   const browser = await chromium.launch({ headless: !HEADFUL });
@@ -118,6 +134,8 @@ async function main() {
     // rather than a blind delay, so this is robust across warm/cold WASM starts.
     await page.locator(".column").first().waitFor({ state: "visible", timeout: 20000 });
     console.log(`[driver] app loaded, deck heading = "${(await page.locator("h1").first().innerText()).trim()}"`);
+
+    if (VIM) await enableVim(page);
 
     if (flow === "smoke") {
       await createFreshDeckWithColumn(page);
@@ -147,19 +165,27 @@ async function main() {
 
       // Vim is setting-gated: CardEditor loads the @replit/codemirror-vim
       // `vim()` extension only when settings.vimEnabled is true (default false,
-      // see packages/app/src/lib/settings.svelte.ts). When it's on, the editor
-      // renders a fat block cursor and (in command mode) a .cm-vim-panel.
-      // NOTE: don't use Escape to probe normal mode here — the app intercepts
-      // Escape to close the card, so it can't be used as a vim-mode signal.
-      const dom = await page.evaluate(() => ({
-        hasEditor: !!document.querySelector(".cm-editor"),
-        fatCursor: document.querySelectorAll(".cm-fat-cursor").length,
-        vimPanel: document.querySelectorAll(".cm-vim-panel").length,
-      }));
-      const vimActive = dom.fatCursor > 0 || dom.vimPanel > 0;
-      console.log(`[driver] editor present : ${dom.hasEditor}`);
-      console.log(`[driver] vim DOM markers: fatCursor=${dom.fatCursor} vimPanel=${dom.vimPanel}`);
-      console.log(`[driver] VIM MODE = ${vimActive ? "ON" : "OFF (plain CodeMirror; enable in Settings)"}`);
+      // see packages/app/src/lib/settings.svelte.ts). The editor opens in
+      // INSERT mode (thin cursor, no .cm-fat-cursor), so the reliable marker
+      // is the vim cursor layer, which the extension always renders.
+      const vimMarkers = () =>
+        page.evaluate(() => ({
+          cursorLayer: document.querySelectorAll(".cm-vimCursorLayer").length,
+          fatCursor: document.querySelectorAll(".cm-fat-cursor").length,
+        }));
+      const dom = await vimMarkers();
+      const vimActive = dom.cursorLayer > 0;
+      console.log(`[driver] vim DOM markers: vimCursorLayer=${dom.cursorLayer} fatCursor=${dom.fatCursor}`);
+      console.log(`[driver] VIM MODE = ${vimActive ? "ON (Insert)" : "OFF (plain CodeMirror; rerun with VIM=1)"}`);
+
+      if (vimActive) {
+        // With Vim ON, Escape drops to Normal mode (fat cursor) and keeps the
+        // editor open. With Vim OFF, Escape closes the card instead — and an
+        // empty new card is discarded.
+        await page.keyboard.press("Escape");
+        await page.locator(".cm-fat-cursor").first().waitFor({ state: "attached", timeout: 3000 });
+        console.log("[driver] Escape -> Vim NORMAL mode (fat cursor), editor still open");
+      }
     }
 
     await shoot(page, SHOT);
