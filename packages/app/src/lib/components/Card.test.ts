@@ -5,6 +5,12 @@ import Card from "./Card.svelte";
 import { makeCard } from "#lib/__fixtures__/models.ts";
 import type { EditSession } from "#lib/deckData.svelte.ts";
 
+const openExternalUrl = vi.fn(async (_url: string) => {});
+vi.mock("#lib/externalLinks.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#lib/externalLinks.ts")>()),
+  openExternalUrl: (url: string) => openExternalUrl(url),
+}));
+
 const CONTENT = "hello world";
 const session: EditSession = {
   cardId: "card-1",
@@ -36,5 +42,56 @@ describe("Card editing", () => {
     await fireEvent.keyDown(view.contentDOM, { key: "Enter", ctrlKey: true });
 
     expect(onSave).toHaveBeenCalledWith(session, CONTENT, true, CONTENT.length);
+  });
+});
+
+describe("Card link hints", () => {
+  it("clicking a hint opens it and re-focuses the card without starting an edit", async () => {
+    const onFocusCard = vi.fn();
+    const onStartEdit = vi.fn();
+    const { getByText } = render(Card, {
+      props: {
+        card: makeCard("card-1", "col-1", { content: "https://a.example https://b.example" }),
+        focused: true,
+        linkHints: {
+          cardId: "card-1",
+          links: [
+            { url: "https://a.example", label: null },
+            { url: "https://b.example", label: "Docs" },
+          ],
+          typed: "",
+        },
+        onFocusCard,
+        onStartEdit,
+      },
+    });
+
+    await fireEvent.click(getByText("2"));
+
+    expect(openExternalUrl).toHaveBeenCalledWith("https://b.example");
+    expect(onFocusCard).toHaveBeenCalledOnce();
+    expect(onStartEdit).not.toHaveBeenCalled();
+  });
+
+  it("shows a labelled link's display text next to its URL", () => {
+    const { container } = render(Card, {
+      props: {
+        card: makeCard("card-1", "col-1", { content: "[Docs](https://b.example) https://a.example" }),
+        focused: true,
+        linkHints: {
+          cardId: "card-1",
+          links: [
+            { url: "https://b.example", label: "Docs" },
+            { url: "https://a.example", label: null },
+          ],
+          typed: "",
+        },
+      },
+    });
+
+    const hints = [...container.querySelectorAll(".link-hints button")].map(
+      (hint) => hint.textContent,
+    );
+    expect(hints).toEqual(["1Docshttps://b.example", "2https://a.example"]);
   });
 });

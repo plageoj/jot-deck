@@ -6,6 +6,7 @@ import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
 import { executeGlobalAction } from "./actionDispatchHelpers";
 import { BoardActionExecutors } from "./boardActionExecutors";
+import { linkHintLabels, openExternalUrl } from "./externalLinks";
 
 /** Actions that stay available while the selected deck is not loaded (switch
  * in progress or failed). Everything else would act on an empty board. */
@@ -102,6 +103,8 @@ export class ActionDispatcher {
     // Skip if focus is on input fields
     if (this.isEditableTarget(event.target as HTMLElement)) return;
 
+    if (focus.linkHints && this.handleLinkHintKey(event)) return;
+
     // Cheatsheet trigger: ? or Ctrl+/
     if (this.toggleCheatsheetIfTrigger(event)) return;
 
@@ -157,6 +160,44 @@ export class ActionDispatcher {
       event.preventDefault();
       this.focus.showCheatsheet = false;
     }
+  }
+
+  /**
+   * Link hint mode: typing a hint's label (one digit, or two once there are
+   * ten or more links) opens that link; a digit that starts a longer label
+   * narrows the hints. Any other key dismisses the hints and is swallowed, so
+   * Escape (or a stray key) never acts on the board. Hints left behind by a
+   * focus change are dropped and the key is processed normally. Returns
+   * whether the key was consumed.
+   */
+  private handleLinkHintKey(event: KeyboardEvent): boolean {
+    const hints = this.focus.linkHints;
+    this.focus.linkHints = null;
+    if (
+      !hints ||
+      this.focus.focusMode !== "card" ||
+      this.focusedCard?.id !== hints.cardId
+    ) {
+      return false;
+    }
+    if (normalizeKey(event) === null) {
+      // Modifier-only press: keep the hints up.
+      this.focus.linkHints = hints;
+      return true;
+    }
+    event.preventDefault();
+    const plainDigit =
+      /^\d$/.test(event.key) && !event.ctrlKey && !event.altKey && !event.metaKey;
+    if (!plainDigit) return true;
+    const typed = hints.typed + event.key;
+    const labels = linkHintLabels(hints.links.length);
+    const index = labels.indexOf(typed);
+    if (index !== -1) {
+      this.runTask(openExternalUrl(hints.links[index].url));
+    } else if (labels.some((label) => label.startsWith(typed))) {
+      this.focus.linkHints = { ...hints, typed };
+    }
+    return true;
   }
 
   private isEditableTarget(target: HTMLElement): boolean {

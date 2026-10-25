@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { LinkHints } from "#lib/externalLinks.ts";
   import type { Column, Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import CardComponent from "./Card.svelte";
@@ -19,6 +20,8 @@
     /** card_id → in-progress streamed text for cards receiving a Reporter
      * stream (007 §6.2). Absent keys render normally. */
     streamingText?: Record<string, string>;
+    /** Numbered link hints shown on one card while picking a link to open. */
+    linkHints?: LinkHints | null;
     onAddCard?: () => void;
     /** Double-clicking the header starts renaming the column. */
     onRenameColumn?: () => void;
@@ -61,6 +64,7 @@
     filteredCardIds = null,
     activeTag = null,
     streamingText = {},
+    linkHints = null,
     onAddCard,
     onRenameColumn,
     renameDraft = null,
@@ -178,6 +182,7 @@
           {editEntry}
           dimmed={filteredCardIds !== null && !filteredCardIds.has(card.id)}
           streamingText={streamingText[card.id] ?? null}
+          linkHints={linkHints?.cardId === card.id ? linkHints : null}
           {activeTag}
           onSave={onSaveCard}
           {onCancelEdit}

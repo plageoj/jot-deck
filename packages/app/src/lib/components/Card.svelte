@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Card, EditEntry } from "#lib/types.ts";
   import type { EditSession } from "#lib/deckData.svelte.ts";
+  import { linkHintLabels, openExternalUrl, type LinkHints } from "#lib/externalLinks.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
   import CardEditor from "./CardEditor.svelte";
   import MarkdownContent from "./MarkdownContent.svelte";
@@ -18,6 +19,8 @@
      * card is read-only and shows an "AI generating" affordance; the streamed
      * text is displayed instead of the committed content. */
     streamingText?: string | null;
+    /** Numbered links offered by link hint mode; `null` when not picking. */
+    linkHints?: LinkHints | null;
     onSave?: (
       session: EditSession,
       content: string,
@@ -45,6 +48,7 @@
     dimmed = false,
     activeTag = null,
     streamingText = null,
+    linkHints = null,
     onSave,
     onCancelEdit,
     onStartEdit,
@@ -75,6 +79,15 @@
 
   function handleExit(session: EditSession) {
     onExitEdit?.(session);
+  }
+
+  let hintLabels = $derived(linkHints ? linkHintLabels(linkHints.links.length) : []);
+
+  function handleHintClick(e: MouseEvent, url: string) {
+    e.stopPropagation();
+    // Re-focusing the card dismisses the hints, as picking one by key does.
+    onFocusCard?.();
+    void openExternalUrl(url).catch(() => {});
   }
 
   function handleClick() {
@@ -137,6 +150,25 @@
         (empty)
       {/if}
     </div>
+    {#if linkHints && linkHints.links.length > 0}
+      {@const typed = linkHints.typed}
+      <ol class="link-hints" aria-label="Type a number to open a link">
+        {#each linkHints.links as { url, label }, i (url)}
+          {@const hintLabel = hintLabels[i]}
+          {@const matches = hintLabel.startsWith(typed)}
+          <li class:link-hint-excluded={!matches}>
+            <button type="button" onclick={(e) => handleHintClick(e, url)}>
+              <kbd
+                >{#if typed && matches}<span class="link-hint-typed">{typed}</span
+                  >{hintLabel.slice(typed.length)}{:else}{hintLabel}{/if}</kbd
+              >{#if label}<span class="link-hint-label">{label}</span>{/if}<span
+                class="link-hint-url">{url}</span
+              >
+            </button>
+          </li>
+        {/each}
+      </ol>
+    {/if}
   {/if}
 </div>
 
@@ -198,6 +230,69 @@
   .card-content {
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .link-hints {
+    list-style: none;
+    margin: 0.5rem 0 0;
+    padding: 0.5rem 0 0;
+    border-top: 1px solid var(--card-border, #0f3460);
+    font-size: 0.875rem;
+  }
+
+  .link-hints button {
+    all: unset;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.125rem 0;
+    cursor: pointer;
+    color: var(--accent);
+  }
+
+  .link-hints button:hover .link-hint-url {
+    text-decoration: underline;
+  }
+
+  .link-hints kbd {
+    flex: none;
+    min-width: 1.25em;
+    padding: 0 0.25em;
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 3px;
+    background-color: var(--bg-primary);
+    color: var(--text);
+    font-family: "Cascadia Code", "Consolas", "Menlo", monospace;
+    text-align: center;
+  }
+
+  .link-hint-typed {
+    opacity: 0.55;
+  }
+
+  .link-hint-excluded {
+    opacity: 0.35;
+  }
+
+  /* Keep the URL visible next to a long label. */
+  .link-hint-label {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+
+  .link-hint-url {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .card-score {
