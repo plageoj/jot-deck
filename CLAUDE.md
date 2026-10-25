@@ -11,7 +11,8 @@ Jot Deck is a keyboard-centric, local-first note-taking app with a TweetDeck-sty
 ### Development
 ```bash
 pnpm install          # Install dependencies
-pnpm dev              # Start Tauri dev server (main app)
+pnpm tauri dev        # Start the desktop app (Tauri + Vite dev server)
+pnpm dev              # Start only the Vite dev server (frontend on :1420, WASM SQLite backend in the browser)
 pnpm web:dev          # Start landing page dev server
 ```
 
@@ -25,7 +26,8 @@ pnpm --filter app test:run    # Run frontend tests once
 
 ### Building
 ```bash
-pnpm build            # Build Tauri app
+pnpm tauri build      # Build the Tauri desktop app
+pnpm build            # Build only the frontend (Vite)
 pnpm web:build        # Build landing page
 ```
 
@@ -53,13 +55,13 @@ snippet ("Copy MCP server config") and can also copy just the deck id ("Deck id"
 The sidecar is staged by `scripts/build-mcp-sidecar.mjs` (run via `pnpm --filter app
 build:mcp-sidecar`, and automatically from `beforeBuildCommand`). **Run it once before
 `cargo check`/`cargo build` on `packages/app/src-tauri`** — `externalBin` fails the build
-if the staged binary is missing. `beforeDevCommand` passes `--debug` so `pnpm dev` builds
+if the staged binary is missing. `beforeDevCommand` passes `--debug` so `pnpm tauri dev` builds
 the sidecar with the debug profile and reuses the app's debug dependency artifacts; the
 script locates the output via `cargo metadata`, so `CARGO_TARGET_DIR` is honored.
 
 To share Rust compile artifacts across worktrees, install sccache
 (`cargo binstall sccache`) and set `RUSTC_WRAPPER=sccache` in your user environment.
-Each worktree keeps its own `target/`, so parallel `pnpm dev` runs do not collide.
+Each worktree keeps its own `target/`, so parallel `pnpm tauri dev` runs do not collide.
 
 ## Architecture
 
