@@ -1,12 +1,9 @@
 import { expect, Page } from "@playwright/test";
 
-// Helper to type into CodeMirror Vim editor
-// The editor starts in Vim normal mode, so we need to press 'i' to enter insert mode
+// Helper to type into the focused CodeMirror editor.
+// The editor opens ready for input (Insert mode when Vim is enabled), so type
+// directly — pressing 'i' first would insert a literal "i".
 export async function typeInEditor(page: Page, text: string) {
-  // Editor should be focused, press 'i' to enter insert mode
-  await page.keyboard.press("i");
-  await page.waitForTimeout(100);
-  // Type the text
   await page.keyboard.type(text, { delay: 30 });
   await page.waitForTimeout(100);
 }

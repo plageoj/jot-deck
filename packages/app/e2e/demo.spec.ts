@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   typeInEditor,
   saveAndExitEditor,
@@ -15,6 +15,12 @@ import {
  *
  * The video will be saved to test-results/
  */
+
+const columns = (page: Page) => page.locator(".column");
+const cardTexts = (page: Page, column: number) =>
+  columns(page).nth(column).locator(".card").allInnerTexts();
+const columnNames = (page: Page) => page.locator(".column-name").allInnerTexts();
+const focusedCard = (page: Page) => page.locator(".card.focused");
 
 test.describe("Jot Deck Demo", () => {
   test.beforeEach(async ({ page }) => {
@@ -70,7 +76,7 @@ test.describe("Jot Deck Demo", () => {
     await page.keyboard.press("o");
     await page.waitForTimeout(500);
 
-    // Type content (editor is in Vim mode, starts in insert mode for new cards)
+    // Type content (the editor opens ready for input)
     await typeInEditor(page, "Welcome to Jot Deck! #demo");
     await saveAndExitEditor(page);
 
@@ -109,9 +115,12 @@ test.describe("Jot Deck Demo", () => {
     await page.keyboard.press("g");
     await page.waitForTimeout(300);
 
+    await expect(focusedCard(page)).toContainText("Welcome to Jot Deck!");
+
     // Jump to last with 'G'
-    await page.keyboard.press("Shift+g");
+    await page.keyboard.press("Shift+G");
     await page.waitForTimeout(300);
+    await expect(focusedCard(page)).toContainText("Vim-style navigation");
 
     // ========================================
     // Scene 7: Move to another column and add cards
@@ -149,6 +158,7 @@ test.describe("Jot Deck Demo", () => {
     // Paste below with 'p'
     await page.keyboard.press("p");
     await page.waitForTimeout(500);
+    await expect(columns(page).nth(1).locator(".card")).toHaveCount(3);
 
     // ========================================
     // Scene 9: Delete and undo
@@ -158,31 +168,47 @@ test.describe("Jot Deck Demo", () => {
     await page.keyboard.press("d");
     await page.waitForTimeout(500);
 
+    await expect(columns(page).nth(1).locator(".card")).toHaveCount(2);
+
     // Undo with 'u'
     await page.keyboard.press("u");
     await page.waitForTimeout(500);
+    await expect(columns(page).nth(1).locator(".card")).toHaveCount(3);
 
     // ========================================
     // Scene 10: Reorder cards
     // ========================================
+    const orderBeforeReorder = await cardTexts(page, 1);
+    const reordered = (await focusedCard(page).innerText()).trim();
+    const reorderedIndex = orderBeforeReorder.findIndex((t) => t.trim() === reordered);
+    expect(reorderedIndex).toBeGreaterThan(0);
+
     // Move card up with 'K'
-    await page.keyboard.press("Shift+k");
+    await page.keyboard.press("Shift+K");
     await page.waitForTimeout(400);
+    await expect
+      .poll(async () => (await cardTexts(page, 1)).findIndex((t) => t.trim() === reordered))
+      .toBe(reorderedIndex - 1);
 
     // Move card down with 'J'
-    await page.keyboard.press("Shift+j");
+    await page.keyboard.press("Shift+J");
     await page.waitForTimeout(400);
+    await expect.poll(() => cardTexts(page, 1)).toEqual(orderBeforeReorder);
 
     // ========================================
     // Scene 11: Move cards between columns
     // ========================================
     // Move card left with 'H'
-    await page.keyboard.press("Shift+h");
+    await page.keyboard.press("Shift+H");
     await page.waitForTimeout(500);
+    await expect(columns(page).nth(0).locator(".card")).toHaveCount(4);
+    await expect(columns(page).nth(1).locator(".card")).toHaveCount(2);
 
     // Move card right with 'L'
-    await page.keyboard.press("Shift+l");
+    await page.keyboard.press("Shift+L");
     await page.waitForTimeout(500);
+    await expect(columns(page).nth(0).locator(".card")).toHaveCount(3);
+    await expect(columns(page).nth(1).locator(".card")).toHaveCount(3);
 
     // ========================================
     // Scene 12: Score/favorite cards
@@ -191,6 +217,7 @@ test.describe("Jot Deck Demo", () => {
     await page.waitForTimeout(300);
     await page.keyboard.press("f");
     await page.waitForTimeout(300);
+    await expect(focusedCard(page).locator(".card-score")).toHaveText("2");
 
     // ========================================
     // Scene 13: Jump to columns by number
@@ -209,11 +236,16 @@ test.describe("Jot Deck Demo", () => {
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
 
-    // Reorder with Shift+L and Shift+H
-    await page.keyboard.press("Shift+l");
+    // Column 3 is focused: move it left with 'H', then back with 'L'
+    const namesBefore = await columnNames(page);
+    await page.keyboard.press("Shift+H");
     await page.waitForTimeout(400);
-    await page.keyboard.press("Shift+h");
+    await expect
+      .poll(() => columnNames(page))
+      .toEqual([namesBefore[0], namesBefore[2], namesBefore[1]]);
+    await page.keyboard.press("Shift+L");
     await page.waitForTimeout(400);
+    await expect.poll(() => columnNames(page)).toEqual(namesBefore);
 
     // ========================================
     // Scene 15: Final overview

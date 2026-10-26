@@ -142,8 +142,10 @@ pnpm --filter app check       # svelte-check — 0 errors, 0 warnings expected
 ## Gotchas
 
 - **New cards open ready to type — do NOT press `i` first.** Sending `i` inserts a
-  literal "i" at the start of the card. (The e2e helper's `typeInEditor` presses
-  `i`; that's tolerated only because its assertions use substring matches.)
+  literal "i" at the start of the card.
+- **Shifted letter keys must be written uppercase in Playwright.** The app
+  matches `event.key`, and `press("Shift+g")` sends `g` (not `G`), so it runs
+  the lowercase binding. Use `press("Shift+G")` / `press("Control+Shift+P")`.
 - **`Escape` means different things depending on Vim mode.** Vim off: it closes
   the editor, and a brand-new card that is still empty is *discarded* (no card
   is left behind). Vim on: the first `Escape` only drops Insert → Normal and

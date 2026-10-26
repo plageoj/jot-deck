@@ -216,7 +216,7 @@ test.describe("Deck Management", () => {
 
   test("rename deck via command palette", async ({ page }) => {
     // Open command palette and search for rename
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
     await page.keyboard.type("rename", { delay: 50 });
     await page.waitForTimeout(200);
@@ -336,7 +336,7 @@ test.describe("Deck Management", () => {
   });
 
   test("Switch Deck command in command palette opens deck switcher", async ({ page }) => {
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
 
     await page.keyboard.type("switch deck", { delay: 50 });

@@ -179,7 +179,7 @@ test.describe("Tag Features", () => {
     await page.waitForTimeout(200);
 
     // Open command palette and search for "filter"
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
     await page.keyboard.type("filter by", { delay: 50 });
     await page.waitForTimeout(200);
