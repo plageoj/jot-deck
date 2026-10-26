@@ -247,3 +247,4 @@ Jot Deck は自前のクラウド AI 機能を持たず、**Deck を MCP サー�
 * `006-tutorial.md` - チュートリアル機能（初回起動・任意呼び出し）
 * `007-reporter-protocol.md` - Reporter プロトコル（ローカルストリーミング入力アダプタ）
 * `008-mcp-server.md` - Deck を MCP サーバとして汎用エージェントに開く設計
+* `009-web-demo.md` - Web デモ（保存しないブラウザ版サンドボックス）
