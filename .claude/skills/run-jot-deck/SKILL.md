@@ -185,5 +185,9 @@ pnpm --filter app check       # svelte-check — 0 errors, 0 warnings expected
 - `VIM=1` run fails with `strict mode violation: getByRole('button', { name:
   'Settings' }) resolved to 4 elements` → a local edit reintroduced the
   name-based selector; use `Ctrl+,` (see Gotchas).
+- `FAILED: VIM=1 was set but the editor has no .cm-vimCursorLayer` (exit 1) →
+  the Settings toggle didn't reach the editor: check the `#settings-vim`
+  checkbox and that `CardEditor.svelte` still loads `vim()` when
+  `settings.vimEnabled` is true.
 - `locator.waitFor: … waiting for locator('.cm-editor')` right after a dialog
   was closed → focus is stuck on a header button; close dialogs with `Escape`.

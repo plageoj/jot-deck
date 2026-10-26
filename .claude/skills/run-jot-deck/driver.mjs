@@ -177,6 +177,9 @@ async function main() {
       const vimActive = dom.cursorLayer > 0;
       console.log(`[driver] vim DOM markers: vimCursorLayer=${dom.cursorLayer} fatCursor=${dom.fatCursor}`);
       console.log(`[driver] VIM MODE = ${vimActive ? "ON (Insert)" : "OFF (plain CodeMirror; rerun with VIM=1)"}`);
+      if (VIM && !vimActive) {
+        throw new Error("VIM=1 was set but the editor has no .cm-vimCursorLayer — Vim mode did not activate");
+      }
 
       if (vimActive) {
         // With Vim ON, Escape drops to Normal mode (fat cursor) and keeps the

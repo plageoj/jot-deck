@@ -76,7 +76,9 @@ script locates the output via `cargo metadata`, so `CARGO_TARGET_DIR` is honored
 
 To share Rust compile artifacts across worktrees, install sccache
 (`cargo binstall sccache`) and set `RUSTC_WRAPPER=sccache` in your user environment.
-Each worktree keeps its own `target/`, so parallel `pnpm tauri dev` runs do not collide.
+Each worktree keeps its own `target/`, so Rust build artifacts do not collide. Parallel
+`pnpm tauri dev` runs still clash on the fixed dev port 1420 (`devUrl` in `tauri.conf.json`,
+`strictPort` in Vite), so run only one at a time.
 
 ## Architecture
 
