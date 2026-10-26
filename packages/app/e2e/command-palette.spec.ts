@@ -5,6 +5,7 @@ import {
   waitForAppLoad,
   ensureDeckAndColumn,
 } from "./e2e-helpers";
+import { COMMANDS } from "../src/lib/commands";
 
 test.describe("Command Palette & Keybinding Cheatsheet", () => {
   test.beforeEach(async ({ page }) => {
@@ -16,7 +17,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
 
   test("command palette opens with Ctrl+Shift+P and closes with Escape", async ({ page }) => {
     // Open command palette
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
 
     // Verify palette is visible
@@ -25,7 +26,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
     await expect(page.locator(".palette-input")).toBeFocused();
 
     // Verify all commands are listed
-    await expect(page.locator(".palette-item")).toHaveCount(10);
+    await expect(page.locator(".palette-item")).toHaveCount(COMMANDS.length);
 
     // Close with Escape
     await page.keyboard.press("Escape");
@@ -43,7 +44,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
   });
 
   test("command palette filters commands by text input", async ({ page }) => {
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
 
     // Type to filter
@@ -67,7 +68,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
   });
 
   test("command palette navigates with arrow keys and executes with Enter", async ({ page }) => {
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
 
     // Filter to "new" — matches "New Deck" and "New Column" (multiple results)
@@ -105,7 +106,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
   });
 
   test("command palette closes when clicking backdrop", async ({ page }) => {
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
     await expect(page.locator("dialog.palette-dialog")).toBeVisible();
 
@@ -176,7 +177,7 @@ test.describe("Command Palette & Keybinding Cheatsheet", () => {
   });
 
   test("command palette 'Keyboard Shortcuts' command opens cheatsheet", async ({ page }) => {
-    await page.keyboard.press("Control+Shift+p");
+    await page.keyboard.press("Control+Shift+P");
     await page.waitForTimeout(300);
 
     // Filter to shortcuts command
