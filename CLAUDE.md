@@ -137,6 +137,7 @@ Read the `docs/` folder first to understand the specification:
 - `docs/006-tutorial.md` - Interactive onboarding tutorial (spotlight/coachmark overlay, hands-on steps)
 - `docs/007-reporter-protocol.md` - Reporter protocol (local-first streaming input adapters that append cards via stdio/JSON-RPC)
 - `docs/008-mcp-server.md` - Jot Deck as an MCP server (exposing Deck write/read to general agents like Claude via a stdio bridge)
+- `docs/009-web-demo.md` - Web demo (non-persistent browser sandbox served from the WASM SQLite backend)
 
 ### Before Creating a PR
 1. Run type checks: `pnpm --filter app check`
