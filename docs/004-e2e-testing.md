@@ -230,6 +230,8 @@ Vitest（jsdom）ではアセットパスを fetch できないため、`wasm-ba
 
 ### Web 版への展開
 
+`app.jot-deck.com` で Web デモとして配信し、Web 版に置き換えていく計画は `009-web-demo.md` を参照。
+
 WASM SQLite バックエンドを使用することで、以下の展開が可能：
 
 * **PWA 版**: IndexedDB と組み合わせてデータ永続化

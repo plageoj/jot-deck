@@ -89,7 +89,7 @@ impl Default for Constraints {
 /// 検索パラメータ（`search_cards`）。
 #[derive(Debug, Default, Clone)]
 pub struct SearchParams {
-    /// 本文の部分一致クエリ。FTS5 全文検索は Phase 9 で導入予定のため、当面は
+    /// 本文の部分一致クエリ。FTS5 全文検索は全文検索フェーズ（docs/003-roadmap.md）で導入予定のため、当面は
     /// LIKE ベース。空/None なら本文条件なし。
     pub query: Option<String>,
     /// カラム絞り込み。可視範囲外を指定すると Unauthorized。
@@ -212,7 +212,7 @@ pub fn read_card(conn: &Connection, deck_id: &str, card_id: &str) -> Result<Card
 
 /// FTS + タグ/スコア/カラムでカードを検索する（008-mcp-server.md §4.2）。
 ///
-/// 全文検索（Phase 9）が入るまでは本文の LIKE 部分一致。可視範囲外カラムを
+/// 全文検索（docs/003-roadmap.md）が入るまでは本文の LIKE 部分一致。可視範囲外カラムを
 /// `column_id` で明示指定した場合は空ではなく Unauthorized を返す。
 pub fn search_cards(
     conn: &Connection,
