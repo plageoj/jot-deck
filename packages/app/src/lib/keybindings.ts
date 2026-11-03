@@ -299,6 +299,17 @@ export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
   return activeBindings.filter((b) => b.modes.includes(mode));
 }
 
+/**
+ * Keys a browser keeps for itself — no `preventDefault` reaches them — so they
+ * only work in the desktop app (docs/009-web-demo.md §6). Every action they
+ * trigger by default also has a binding that works in the browser.
+ */
+const BROWSER_RESERVED_SEQUENCES = new Set(["Ctrl+t", "Ctrl+Shift+P"]);
+
+export function isBrowserReserved(sequence: string): boolean {
+  return BROWSER_RESERVED_SEQUENCES.has(sequence);
+}
+
 export interface KeybindingConflict {
   severity: "error" | "warn";
   /** The conflicting binding's key sequence. */

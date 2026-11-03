@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { type FocusMode, getKeybindingsForMode } from "#lib/keybindings.ts";
+  import { isTauri } from "#lib/db/index.ts";
+  import {
+    type FocusMode,
+    getKeybindingsForMode,
+    isBrowserReserved,
+  } from "#lib/keybindings.ts";
 
   interface Props {
     mode: FocusMode;
@@ -9,6 +14,11 @@
 
   let { mode, onClose }: Props = $props();
   let dialogRef = $state<HTMLDialogElement | null>(null);
+
+  // In a browser, keys the browser keeps for itself are flagged and listed
+  // after the alternatives that do work there.
+  const browser = !isTauri();
+  const desktopOnly = (seq: string) => browser && isBrowserReserved(seq);
 
   let groupedBindings = $derived.by(() => {
     const bindings = getKeybindingsForMode(mode);
@@ -22,6 +32,13 @@
       } else {
         actionIndex.set(b.action, groups.length);
         groups.push({ sequences: [b.sequence], description: b.description });
+      }
+    }
+    if (browser) {
+      for (const group of groups) {
+        group.sequences.sort(
+          (a, b) => Number(desktopOnly(a)) - Number(desktopOnly(b)),
+        );
       }
     }
     return groups;
@@ -67,6 +84,9 @@
               {#each group.sequences as seq, i}
                 {#if i > 0}<span class="separator"> / </span>{/if}
                 <kbd>{seq}</kbd>
+                {#if desktopOnly(seq)}
+                  <span class="desktop-only">Desktop only</span>
+                {/if}
               {/each}
             </dt>
             <dd>{group.description}</dd>
@@ -142,6 +162,12 @@
   .cheatsheet-body {
     overflow-y: auto;
     padding: 0.5rem 1rem;
+  }
+
+  .desktop-only {
+    font-size: 0.875rem;
+    color: var(--text-muted);
+    font-style: italic;
   }
 
   .cheatsheet-list {

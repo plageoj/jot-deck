@@ -33,6 +33,16 @@ Web デモは **Web 版（データを永続化してブラウザで常用でき
 * 配信先: `app.jot-deck.com`（Cloudflare Pages の独立プロジェクト）。Web 版も同じ URL で配信するため、デモ段階から「アプリ本体の URL」として案内してよい。ランディングページ（`jot-deck.com`、`packages/web`）とは別プロジェクトにし、SvelteKit の `paths.base` を変えずにルート配信する。
 * ビルド: `packages/app` を `VITE_JOT_DECK_DEMO=1` 付きで `vite build` し、`adapter-static` の出力（SPA fallback `index.html`）を配信する。Tauri や Rust のビルドは不要。
 * 公開タイミング: `main` へのマージごとに自動デプロイする。デスクトップ版の Production / Preview チャンネル（`005-release.md`）とは連動させない。
+* Cloudflare Pages の Git 連携で次のように設定する（リポジトリにデプロイ用ワークフローは置かない）:
+
+| 項目 | 値 |
+|:---|:---|
+| Production branch | `main` |
+| Root directory | `/`（pnpm workspace のルート） |
+| Build command | `pnpm --filter app build` |
+| Build output directory | `packages/app/build` |
+| 環境変数 | `VITE_JOT_DECK_DEMO=1`、`NODE_VERSION=24` |
+| カスタムドメイン | `app.jot-deck.com` |
 * ランディングページのヒーローと CTA 付近に「Try in browser」リンクを置く。
 
 ---

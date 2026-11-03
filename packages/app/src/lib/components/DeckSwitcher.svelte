@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { isTauri } from "#lib/db/index.ts";
   import type { Deck } from "#lib/types.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
 
@@ -11,8 +12,7 @@
     onNew: () => void;
     onRename: (deck: Deck) => void;
     onDelete: (deck: Deck) => void;
-    /** Build a paste-ready mcpServers config snippet; null when unavailable
-     * (e.g. browser backend). */
+    /** Build a paste-ready mcpServers config snippet; null when unavailable. */
     getMcpConfig?: () => Promise<string | null>;
     onClose: () => void;
   }
@@ -29,6 +29,10 @@
     getMcpConfig,
     onClose,
   }: Props = $props();
+
+  // A deck in the browser's in-memory DB is out of reach of the external MCP
+  // bridge, so neither copy action means anything there (docs/009 §5).
+  const desktop = isTauri();
 
   let idCopied = $state(false);
   let configCopied = $state(false);
@@ -59,8 +63,7 @@
   /** Copy a full, paste-ready mcpServers config snippet. The desktop app fills
    * in the bundled bridge path; the DB path is derived by the bridge itself, and
    * the snippet reaches every deck (no deck pin → docs/008-mcp-server.md §4.5).
-   * Falls back to copying just the deck id when the full snippet is unavailable
-   * (browser backend). */
+   * Falls back to copying just the deck id when generating the snippet fails. */
   async function copyConfig() {
     if (!currentDeck) return;
     const snippet = getMcpConfig ? await getMcpConfig() : null;
@@ -154,41 +157,43 @@
     <div class="current-section">
       <div class="current-header">
         <span class="current-name">{currentDeck.name}</span>
-        <button
-          class="icon-btn"
-          title={configCopied ? "Copied!" : "Copy MCP server config"}
-          aria-label="Copy MCP server config"
-          onclick={copyConfig}
-        >
-          {#if configCopied}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          {:else}
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-          {/if}
-        </button>
+        {#if desktop}
+          <button
+            class="icon-btn"
+            title={configCopied ? "Copied!" : "Copy MCP server config"}
+            aria-label="Copy MCP server config"
+            onclick={copyConfig}
+          >
+            {#if configCopied}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            {:else}
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+            {/if}
+          </button>
+        {/if}
       </div>
       <div class="current-stats">
         {columnCount}
@@ -196,16 +201,18 @@
         {cardCount}
         {cardCount === 1 ? "card" : "cards"}
       </div>
-      <button
-        type="button"
-        class="deck-id-row"
-        title="Copy deck id"
-        onclick={copyDeckId}
-      >
-        <span class="deck-id-label">Deck id</span>
-        <code class="deck-id-value">{currentDeck.id}</code>
-        <span class="deck-id-hint">{idCopied ? "Copied!" : "Copy"}</span>
-      </button>
+      {#if desktop}
+        <button
+          type="button"
+          class="deck-id-row"
+          title="Copy deck id"
+          onclick={copyDeckId}
+        >
+          <span class="deck-id-label">Deck id</span>
+          <code class="deck-id-value">{currentDeck.id}</code>
+          <span class="deck-id-hint">{idCopied ? "Copied!" : "Copy"}</span>
+        </button>
+      {/if}
     </div>
   {/if}
 {/snippet}

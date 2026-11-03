@@ -1,5 +1,5 @@
 import { render, screen, fireEvent } from "@testing-library/svelte";
-import { beforeAll, afterEach, describe, it, expect, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import AboutDialog from "./AboutDialog.svelte";
 import { updaterStore } from "#lib/updater.svelte.ts";
 
@@ -19,6 +19,7 @@ afterEach(() => {
   // updaterStore is a shared singleton — reset it between cases.
   updaterStore.status = { kind: "idle" };
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -57,13 +58,20 @@ describe("AboutDialog outside Tauri", () => {
     expect(github.isConnected).toBe(true);
   });
 
-  it("disables the update check and shows a desktop-only hint", () => {
+  it("has no update check and links to the desktop app instead", () => {
     render(AboutDialog, { props: { onClose: vi.fn() } });
-    const button = screen.getByRole("button", { name: "Check for Updates" });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(
-      screen.getByText("Updates are available in the desktop app."),
-    ).toBeTruthy();
+      screen.queryByRole("button", { name: "Check for Updates" }),
+    ).toBeNull();
+    const link = screen.getByRole("link", { name: "desktop app" });
+    expect(link.getAttribute("href")).toBe("https://jot-deck.com/#download");
+  });
+
+  it("labels the version as the web demo in the demo build", () => {
+    vi.stubEnv("VITE_JOT_DECK_DEMO", "1");
+    render(AboutDialog, { props: { onClose: vi.fn() } });
+    expect(screen.getByText("Web demo")).toBeTruthy();
+    expect(screen.queryByText("dev build")).toBeNull();
   });
 
   it("calls onClose when the close button is clicked", async () => {
@@ -106,6 +114,12 @@ describe("AboutDialog in Tauri", () => {
 });
 
 describe("AboutDialog update status rendering", () => {
+  beforeEach(() => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    // Keep the status each case sets instead of starting a real check.
+    vi.spyOn(updaterStore, "check").mockResolvedValue();
+  });
+
   it("renders the up-to-date message", () => {
     updaterStore.status = { kind: "up-to-date" };
     render(AboutDialog, { props: { onClose: vi.fn() } });

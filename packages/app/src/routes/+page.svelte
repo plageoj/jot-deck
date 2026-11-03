@@ -7,6 +7,7 @@
     CommandPalette,
     ConfirmDialog,
     DeckSwitcher,
+    DemoBanner,
     ErrorBanner,
     KeybindingCheatsheet,
     KeybindingsDialog,
@@ -15,6 +16,7 @@
     SettingsDialog,
     TagFilterBar,
     TagPalette,
+    TouchNotice,
     TrashPalette,
     UpdateBanner,
   } from "#lib/components/index.ts";
@@ -28,6 +30,7 @@
     settingsStore,
   } from "#lib/settings.svelte.ts";
   import { updaterStore } from "#lib/updater.svelte.ts";
+  import { isWebDemo } from "#lib/webDemo.ts";
   import type { Column, Deck, EditEntry, TrashItem } from "#lib/types.ts";
   import "#lib/styles/theme.css";
 
@@ -40,7 +43,14 @@
   // getName() resolves so setTitle never clobbers the config title with the
   // Production name.
   const isTauri = "__TAURI_INTERNALS__" in window;
-  let appName = $state<string | null>(isTauri ? null : "Jot Deck");
+  const browserAppName = isWebDemo() ? "Jot Deck — Web demo" : "Jot Deck";
+  let appName = $state<string | null>(isTauri ? null : browserAppName);
+
+  // A phone or tablet has no keyboard to drive the board with; say so once
+  // (docs/009-web-demo.md §4.2). Dismissing it leaves the board usable.
+  let showTouchNotice = $state(
+    !isTauri && window.matchMedia("(pointer: coarse) and (max-width: 768px)").matches,
+  );
 
   if (isTauri) {
     import("@tauri-apps/api/app")
@@ -311,6 +321,9 @@
 </script>
 
 <main class="app">
+  {#if isWebDemo()}
+    <DemoBanner />
+  {/if}
   <UpdateBanner />
   <header class="header">
     <h1>{data.currentDeck?.name ?? "Jot Deck"}</h1>
@@ -587,6 +600,10 @@
     onStop={(reporterId) => data.stopReporter(reporterId)}
     onClose={() => (focus.showReporters = false)}
   />
+{/if}
+
+{#if showTouchNotice}
+  <TouchNotice onClose={() => (showTouchNotice = false)} />
 {/if}
 
 <style>

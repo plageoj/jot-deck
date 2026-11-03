@@ -8,6 +8,7 @@ import {
   signatureOf,
   findKeybindingConflicts,
   getKnownActions,
+  isBrowserReserved,
   DEFAULT_KEYBINDINGS,
   type KeyBinding,
 } from "./keybindings";
@@ -126,6 +127,29 @@ describe("getKeybindingsForMode", () => {
     // "u" (undo) should be in both
     expect(columnBindings.some((b) => b.action === "undo")).toBe(true);
     expect(cardBindings.some((b) => b.action === "undo")).toBe(true);
+  });
+});
+
+describe("isBrowserReserved", () => {
+  it("flags the keys a browser keeps for itself", () => {
+    expect(isBrowserReserved("Ctrl+t")).toBe(true);
+    expect(isBrowserReserved("Ctrl+Shift+P")).toBe(true);
+    expect(isBrowserReserved("Ctrl+p")).toBe(false);
+    expect(isBrowserReserved("F1")).toBe(false);
+  });
+
+  it("leaves every default action reachable in a browser", () => {
+    for (const reserved of DEFAULT_KEYBINDINGS.filter((b) => isBrowserReserved(b.sequence))) {
+      for (const mode of reserved.modes) {
+        const alternative = DEFAULT_KEYBINDINGS.find(
+          (b) =>
+            b.action === reserved.action &&
+            b.modes.includes(mode) &&
+            !isBrowserReserved(b.sequence),
+        );
+        expect(alternative, `${reserved.sequence} in ${mode} mode`).toBeDefined();
+      }
+    }
   });
 });
 

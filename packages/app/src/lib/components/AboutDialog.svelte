@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { updaterStore } from "#lib/updater.svelte.ts";
+  import { DESKTOP_DOWNLOAD_URL, isWebDemo } from "#lib/webDemo.ts";
 
   interface Props {
     onClose: () => void;
@@ -10,8 +11,8 @@
 
   let dialogRef = $state<HTMLDialogElement | null>(null);
 
-  // Runtime app info. Only available inside the Tauri shell; the web/dev
-  // build has no native version, so we show a placeholder there.
+  // Runtime app info. Only available inside the Tauri shell; a browser build
+  // has no native version, so it shows a label instead.
   let appName = $state("Jot Deck");
   let appVersion = $state<string | null>(null);
   let tauriVersion = $state<string | null>(null);
@@ -103,70 +104,76 @@
     <div class="about-body">
       <dl class="info">
         <dt>Version</dt>
-        <dd>{appVersion ?? (isTauri ? "…" : "dev build")}</dd>
+        <dd>{appVersion ?? (isTauri ? "…" : isWebDemo() ? "Web demo" : "dev build")}</dd>
         {#if tauriVersion}
           <dt>Tauri</dt>
           <dd>{tauriVersion}</dd>
         {/if}
       </dl>
 
-      <section class="updates">
-        <div class="updates-row">
-          <button
-            type="button"
-            class="btn primary"
-            disabled={!isTauri || checkBusy}
-            onclick={() => updaterStore.check()}
-          >
-            {status.kind === "checking" ? "Checking…" : "Check for Updates"}
-          </button>
-          {#if !isTauri}
-            <span class="hint">Updates are available in the desktop app.</span>
-          {/if}
-        </div>
-
-        {#if status.kind === "up-to-date"}
-          <p class="status-line ok" role="status">
-            You're on the latest version.
-          </p>
-        {:else if status.kind === "available"}
-          <div class="status-line available" role="status">
-            <span>
-              <strong>Update available:</strong> v{status.info.version}
-              <span class="muted">(current v{status.info.currentVersion})</span>
-            </span>
+      {#if isTauri}
+        <section class="updates">
+          <div class="updates-row">
             <button
               type="button"
               class="btn primary"
-              onclick={() => updaterStore.installAndRelaunch()}
+              disabled={checkBusy}
+              onclick={() => updaterStore.check()}
             >
-              Install &amp; restart
+              {status.kind === "checking" ? "Checking…" : "Check for Updates"}
             </button>
           </div>
-        {:else if status.kind === "downloading"}
-          <p class="status-line" role="status">
-            Downloading update…
-            {#if status.contentLength}
-              <span class="muted"
-                >{formatBytes(status.downloaded)} / {formatBytes(
-                  status.contentLength,
-                )}</span
+
+          {#if status.kind === "up-to-date"}
+            <p class="status-line ok" role="status">
+              You're on the latest version.
+            </p>
+          {:else if status.kind === "available"}
+            <div class="status-line available" role="status">
+              <span>
+                <strong>Update available:</strong> v{status.info.version}
+                <span class="muted">(current v{status.info.currentVersion})</span>
+              </span>
+              <button
+                type="button"
+                class="btn primary"
+                onclick={() => updaterStore.installAndRelaunch()}
               >
-            {:else}
-              <span class="muted">{formatBytes(status.downloaded)}</span>
-            {/if}
-          </p>
-        {:else if status.kind === "installing"}
-          <p class="status-line" role="status">
-            Installing update — app will restart…
-          </p>
-        {:else if status.kind === "error"}
-          <p class="status-line error" role="alert">
-            <strong>Update check failed:</strong>
-            {status.message}
-          </p>
-        {/if}
-      </section>
+                Install &amp; restart
+              </button>
+            </div>
+          {:else if status.kind === "downloading"}
+            <p class="status-line" role="status">
+              Downloading update…
+              {#if status.contentLength}
+                <span class="muted"
+                  >{formatBytes(status.downloaded)} / {formatBytes(
+                    status.contentLength,
+                  )}</span
+                >
+              {:else}
+                <span class="muted">{formatBytes(status.downloaded)}</span>
+              {/if}
+            </p>
+          {:else if status.kind === "installing"}
+            <p class="status-line" role="status">
+              Installing update — app will restart…
+            </p>
+          {:else if status.kind === "error"}
+            <p class="status-line error" role="alert">
+              <strong>Update check failed:</strong>
+              {status.message}
+            </p>
+          {/if}
+        </section>
+      {:else}
+        <p class="desktop-note hint">
+          Reporters, MCP access, and automatic updates come with the
+          <a href={DESKTOP_DOWNLOAD_URL} target="_blank" rel="noopener"
+            >desktop app</a
+          >.
+        </p>
+      {/if}
 
       <footer class="about-links">
         <a
@@ -333,6 +340,13 @@
     color: var(--text-muted);
   }
 
+  .desktop-note {
+    margin: 0;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--bg-tertiary);
+    line-height: 1.5;
+  }
+
   .about-links {
     display: flex;
     flex-wrap: wrap;
@@ -341,12 +355,14 @@
     border-top: 1px solid var(--bg-tertiary);
   }
 
+  .hint a,
   .about-links a {
     font-size: 0.875rem;
     color: var(--accent);
     text-decoration: none;
   }
 
+  .hint a:hover,
   .about-links a:hover {
     color: var(--accent-hover);
     text-decoration: underline;
