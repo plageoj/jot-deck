@@ -8,8 +8,12 @@ import {
   signatureOf,
   findKeybindingConflicts,
   getKnownActions,
+  formatSequence,
+  isBrowserReserved,
+  DEFAULT_KEY_LABELS,
   DEFAULT_KEYBINDINGS,
   type KeyBinding,
+  type KeyLabels,
 } from "./keybindings";
 
 describe("findAction", () => {
@@ -134,6 +138,64 @@ describe("getKeybindingsForMode", () => {
     // "u" (undo) should be in both
     expect(columnBindings.some((b) => b.action === "undo")).toBe(true);
     expect(cardBindings.some((b) => b.action === "undo")).toBe(true);
+  });
+});
+
+describe("formatSequence", () => {
+  it("shows arrows and Enter as symbols", () => {
+    expect(formatSequence("ArrowLeft")).toBe("←");
+    expect(formatSequence("ArrowRight")).toBe("→");
+    expect(formatSequence("ArrowUp")).toBe("↑");
+    expect(formatSequence("ArrowDown")).toBe("↓");
+    expect(formatSequence("Enter")).toBe("⏎");
+  });
+
+  it("keeps modifiers and other keys as written", () => {
+    expect(formatSequence("Shift+ArrowLeft")).toBe("Shift+←");
+    expect(formatSequence("Ctrl+Enter")).toBe("Ctrl+⏎");
+    expect(formatSequence("gn")).toBe("gn");
+    expect(formatSequence("Ctrl+Shift+P")).toBe("Ctrl+Shift+P");
+  });
+
+  it("keeps literal + and single-character keys intact", () => {
+    expect(formatSequence("+")).toBe("+");
+    expect(formatSequence("Ctrl+,")).toBe("Ctrl+,");
+    expect(formatSequence("dd")).toBe("dd");
+    expect(formatSequence("F1")).toBe("F1");
+  });
+
+  it("renders through another label set without touching the stored sequence", () => {
+    const mac: KeyLabels = {
+      modifiers: { Ctrl: "⌃", Shift: "⇧", Alt: "⌥", Meta: "⌘" },
+      modifierJoiner: "",
+      keys: { ...DEFAULT_KEY_LABELS.keys },
+    };
+    expect(formatSequence("Ctrl+Shift+P", mac)).toBe("⌃⇧P");
+    expect(formatSequence("Meta+Enter", mac)).toBe("⌘⏎");
+    expect(formatSequence("gn", mac)).toBe("gn");
+  });
+});
+
+describe("isBrowserReserved", () => {
+  it("flags the keys a browser keeps for itself", () => {
+    expect(isBrowserReserved("Ctrl+t")).toBe(true);
+    expect(isBrowserReserved("Ctrl+Shift+P")).toBe(true);
+    expect(isBrowserReserved("Ctrl+p")).toBe(false);
+    expect(isBrowserReserved("F1")).toBe(false);
+  });
+
+  it("leaves every default action reachable in a browser", () => {
+    for (const reserved of DEFAULT_KEYBINDINGS.filter((b) => isBrowserReserved(b.sequence))) {
+      for (const mode of reserved.modes) {
+        const alternative = DEFAULT_KEYBINDINGS.find(
+          (b) =>
+            b.action === reserved.action &&
+            b.modes.includes(mode) &&
+            !isBrowserReserved(b.sequence),
+        );
+        expect(alternative, `${reserved.sequence} in ${mode} mode`).toBeDefined();
+      }
+    }
   });
 });
 

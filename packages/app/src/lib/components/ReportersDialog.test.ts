@@ -17,7 +17,7 @@ beforeAll(() => {
 
 // Toggle the simulated Tauri environment per test (name prefixed `mock` so the
 // hoisted vi.mock factory may reference it).
-const mockEnv = { tauri: false };
+const mockEnv = { tauri: true };
 const mockListen = vi.fn(async (_event: string, _handler: unknown) => () => {});
 
 vi.mock("#lib/db/index.ts", () => ({ isTauri: () => mockEnv.tauri }));
@@ -96,7 +96,7 @@ async function fillForm(name: string, command: string) {
 }
 
 beforeEach(() => {
-  mockEnv.tauri = false;
+  mockEnv.tauri = true;
   // Reset the implementation too, not just the calls: the Tauri case installs a
   // persistent one, which would otherwise leak into later tests.
   mockListen.mockReset();
@@ -698,7 +698,6 @@ describe("ReportersDialog dialog shell", () => {
 
 describe("ReportersDialog under Tauri", () => {
   it("drops the Running badge when the child process exits on its own", async () => {
-    mockEnv.tauri = true;
     let emitExit: ((e: { payload: { reporter_id: string } }) => void) | undefined;
     mockListen.mockImplementation(async (_event: string, handler: unknown) => {
       emitExit = handler as (e: { payload: { reporter_id: string } }) => void;
@@ -717,13 +716,8 @@ describe("ReportersDialog under Tauri", () => {
     expect(await screen.findByText("Stopped")).toBeTruthy();
   });
 
-  it("does not subscribe to reporter-exit outside Tauri", async () => {
-    await renderDialog();
-    expect(mockListen).not.toHaveBeenCalled();
-  });
 
   it("drops a subscription that resolves after the dialog is closed", async () => {
-    mockEnv.tauri = true;
     const unlisten = vi.fn();
     let resolveListen: (fn: () => void) => void = () => {};
     mockListen.mockImplementation(
@@ -738,5 +732,29 @@ describe("ReportersDialog under Tauri", () => {
 
     // Nothing is left listening for a component that is already gone.
     await waitFor(() => expect(unlisten).toHaveBeenCalled());
+  });
+});
+
+describe("ReportersDialog outside Tauri", () => {
+  beforeEach(() => {
+    mockEnv.tauri = false;
+  });
+
+  it("points to the desktop app instead of the registration UI", async () => {
+    const props = makeProps();
+    render(ReportersDialog, { props });
+
+    expect(screen.getByText(/Available in the desktop app/)).toBeTruthy();
+    const link = screen.getByRole("link", { name: "Download the desktop app" });
+    expect(link.getAttribute("href")).toBe("https://jot-deck.com/#download");
+    expect(screen.queryByRole("button", { name: /Add reporter/ })).toBeNull();
+    expect(props.listReporters).not.toHaveBeenCalled();
+    expect(props.listRunning).not.toHaveBeenCalled();
+  });
+
+  it("does not subscribe to reporter-exit", async () => {
+    render(ReportersDialog, { props: makeProps() });
+    await Promise.resolve();
+    expect(mockListen).not.toHaveBeenCalled();
   });
 });

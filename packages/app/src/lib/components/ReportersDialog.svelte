@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { isTauri } from "#lib/db/index.ts";
+  import { DESKTOP_DOWNLOAD_URL } from "#lib/webDemo.ts";
   import type { Column, ReporterConfig } from "#lib/types.ts";
 
   interface Props {
@@ -35,6 +36,10 @@
   }: Props = $props();
 
   let dialogRef = $state<HTMLDialogElement | null>(null);
+
+  // Reporters are child processes of the desktop app; a browser can only point
+  // there (docs/009-web-demo.md §5).
+  const desktop = isTauri();
 
   let configs = $state<ReporterConfig[]>([]);
   // Ids of Reporters currently running. Plain array (not Set) so reassignment
@@ -106,21 +111,20 @@
 
   onMount(async () => {
     dialogRef?.showModal();
+    if (!desktop) return;
     await load();
     // A child process ending on its own emits `reporter-exit`; drop its badge.
-    if (isTauri()) {
-      const { listen } = await import("@tauri-apps/api/event");
-      const unlisten = await listen<{ reporter_id: string }>(
-        "reporter-exit",
-        ({ payload }) => {
-          running = running.filter((id) => id !== payload.reporter_id);
-        },
-      );
-      // Closed while we were subscribing: drop it immediately instead of
-      // handing it to a component that will never run onDestroy again.
-      if (destroyed) unlisten();
-      else reporterExitUnlisten = unlisten;
-    }
+    const { listen } = await import("@tauri-apps/api/event");
+    const unlisten = await listen<{ reporter_id: string }>(
+      "reporter-exit",
+      ({ payload }) => {
+        running = running.filter((id) => id !== payload.reporter_id);
+      },
+    );
+    // Closed while we were subscribing: drop it immediately instead of
+    // handing it to a component that will never run onDestroy again.
+    if (destroyed) unlisten();
+    else reporterExitUnlisten = unlisten;
   });
 
   onDestroy(() => {
@@ -370,241 +374,254 @@
     </header>
 
     <div class="reporters-body">
-      <p class="hint intro">
-        Reporters are local input adapters this deck spawns as child processes
-        and streams cards from (transcription, LLM classification, webhooks).
-        They never touch the network — only this local deck.
-      </p>
-
-      {#if loadError}
-        <p class="error-text">{loadError}</p>
-      {:else if loading}
-        <p class="hint">Loading…</p>
-      {:else if configs.length === 0}
-        <p class="hint empty">No reporters registered for this deck yet.</p>
+      {#if !desktop}
+        <p class="hint">
+          Reporters stream speech and other inputs into cards. Available in the
+          desktop app.
+        </p>
+        <a
+          class="btn btn-primary download-link"
+          href={DESKTOP_DOWNLOAD_URL}
+          target="_blank"
+          rel="noopener">Download the desktop app</a
+        >
       {:else}
-        <ul class="reporter-list">
-          {#each configs as r (r.reporter_id)}
-            <li class="reporter-row">
-              <div class="reporter-main">
-                <div class="reporter-name-line">
-                  <span class="reporter-name">{r.name}</span>
-                  <span
-                    class="badge"
-                    class:running={isRunning(r.reporter_id)}
-                    >{isRunning(r.reporter_id) ? "Running" : "Stopped"}</span
-                  >
-                </div>
-                <code class="reporter-command" title={r.command}>{r.command}</code
-                >
-                <span class="reporter-scope" title={scopeSummary(r)}
-                  >{scopeSummary(r)}</span
-                >
-                {#if rowError[r.reporter_id]}
-                  <span class="error-text">{rowError[r.reporter_id]}</span>
-                {/if}
-              </div>
+        <p class="hint intro">
+          Reporters are local input adapters this deck spawns as child processes
+          and streams cards from (transcription, LLM classification, webhooks).
+          They never touch the network — only this local deck.
+        </p>
 
-              {#if confirmRemoveId === r.reporter_id}
-                <div class="reporter-actions">
-                  <span class="hint confirm-text">Remove?</span>
-                  <button
-                    type="button"
-                    class="btn btn-danger"
-                    onclick={() => confirmRemove(r)}>Remove</button
+        {#if loadError}
+          <p class="error-text">{loadError}</p>
+        {:else if loading}
+          <p class="hint">Loading…</p>
+        {:else if configs.length === 0}
+          <p class="hint empty">No reporters registered for this deck yet.</p>
+        {:else}
+          <ul class="reporter-list">
+            {#each configs as r (r.reporter_id)}
+              <li class="reporter-row">
+                <div class="reporter-main">
+                  <div class="reporter-name-line">
+                    <span class="reporter-name">{r.name}</span>
+                    <span
+                      class="badge"
+                      class:running={isRunning(r.reporter_id)}
+                      >{isRunning(r.reporter_id) ? "Running" : "Stopped"}</span
+                    >
+                  </div>
+                  <code class="reporter-command" title={r.command}>{r.command}</code
                   >
-                  <button
-                    type="button"
-                    class="btn btn-ghost"
-                    onclick={() => (confirmRemoveId = null)}>Cancel</button
+                  <span class="reporter-scope" title={scopeSummary(r)}
+                    >{scopeSummary(r)}</span
                   >
+                  {#if rowError[r.reporter_id]}
+                    <span class="error-text">{rowError[r.reporter_id]}</span>
+                  {/if}
                 </div>
-              {:else}
-                <div class="reporter-actions">
-                  {#if isRunning(r.reporter_id)}
+
+                {#if confirmRemoveId === r.reporter_id}
+                  <div class="reporter-actions">
+                    <span class="hint confirm-text">Remove?</span>
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      onclick={() => confirmRemove(r)}>Remove</button
+                    >
+                    <button
+                      type="button"
+                      class="btn btn-ghost"
+                      onclick={() => (confirmRemoveId = null)}>Cancel</button
+                    >
+                  </div>
+                {:else}
+                  <div class="reporter-actions">
+                    {#if isRunning(r.reporter_id)}
+                      <button
+                        type="button"
+                        class="btn"
+                        disabled={busy.includes(r.reporter_id)}
+                        onclick={() => stop(r)}>Stop</button
+                      >
+                    {:else}
+                      <button
+                        type="button"
+                        class="btn btn-primary"
+                        disabled={busy.includes(r.reporter_id)}
+                        onclick={() => start(r)}>Start</button
+                      >
+                    {/if}
                     <button
                       type="button"
                       class="btn"
-                      disabled={busy.includes(r.reporter_id)}
-                      onclick={() => stop(r)}>Stop</button
+                      onclick={() => openEdit(r)}>Edit</button
                     >
-                  {:else}
                     <button
                       type="button"
-                      class="btn btn-primary"
-                      disabled={busy.includes(r.reporter_id)}
-                      onclick={() => start(r)}>Start</button
+                      class="btn btn-ghost"
+                      onclick={() => (confirmRemoveId = r.reporter_id)}
+                      >Remove</button
                     >
-                  {/if}
-                  <button
-                    type="button"
-                    class="btn"
-                    onclick={() => openEdit(r)}>Edit</button
-                  >
-                  <button
-                    type="button"
-                    class="btn btn-ghost"
-                    onclick={() => (confirmRemoveId = r.reporter_id)}
-                    >Remove</button
-                  >
-                </div>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      {/if}
+                  </div>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
 
-      {#if formMode === "closed"}
-        <button type="button" class="btn add-btn" onclick={openAdd}>
-          + Add reporter
-        </button>
-      {:else}
-        <section class="reporter-form">
-          <h3>{formMode === "edit" ? "Edit reporter" : "Add reporter"}</h3>
+        {#if formMode === "closed"}
+          <button type="button" class="btn add-btn" onclick={openAdd}>
+            + Add reporter
+          </button>
+        {:else}
+          <section class="reporter-form">
+            <h3>{formMode === "edit" ? "Edit reporter" : "Add reporter"}</h3>
 
-          <div class="field">
-            <label for="reporter-name">Name</label>
-            <input
-              id="reporter-name"
-              type="text"
-              class="text-input"
-              placeholder="e.g. Meeting minutes"
-              bind:value={draftName}
-            />
-          </div>
+            <div class="field">
+              <label for="reporter-name">Name</label>
+              <input
+                id="reporter-name"
+                type="text"
+                class="text-input"
+                placeholder="e.g. Meeting minutes"
+                bind:value={draftName}
+              />
+            </div>
 
-          <div class="field">
-            <label for="reporter-command">Command</label>
-            <input
-              id="reporter-command"
-              type="text"
-              class="text-input"
-              spellcheck="false"
-              autocomplete="off"
-              placeholder="Absolute path to the reporter binary"
-              bind:value={draftCommand}
-            />
-            <span class="hint">Full path to an executable this host will spawn.</span
-            >
-          </div>
+            <div class="field">
+              <label for="reporter-command">Command</label>
+              <input
+                id="reporter-command"
+                type="text"
+                class="text-input"
+                spellcheck="false"
+                autocomplete="off"
+                placeholder="Absolute path to the reporter binary"
+                bind:value={draftCommand}
+              />
+              <span class="hint">Full path to an executable this host will spawn.</span
+              >
+            </div>
 
-          <div class="field">
-            <label for="reporter-args">Arguments</label>
-            <textarea
-              id="reporter-args"
-              class="text-input textarea"
-              spellcheck="false"
-              autocomplete="off"
-              rows="2"
-              placeholder="One argument per line"
-              bind:value={draftArgs}
-            ></textarea>
-          </div>
+            <div class="field">
+              <label for="reporter-args">Arguments</label>
+              <textarea
+                id="reporter-args"
+                class="text-input textarea"
+                spellcheck="false"
+                autocomplete="off"
+                rows="2"
+                placeholder="One argument per line"
+                bind:value={draftArgs}
+              ></textarea>
+            </div>
 
-          <div class="field">
-            <label for="reporter-env">Environment</label>
-            <textarea
-              id="reporter-env"
-              class="text-input textarea"
-              spellcheck="false"
-              autocomplete="off"
-              rows="2"
-              placeholder="KEY=VALUE, one per line"
-              bind:value={draftEnv}
-            ></textarea>
-          </div>
+            <div class="field">
+              <label for="reporter-env">Environment</label>
+              <textarea
+                id="reporter-env"
+                class="text-input textarea"
+                spellcheck="false"
+                autocomplete="off"
+                rows="2"
+                placeholder="KEY=VALUE, one per line"
+                bind:value={draftEnv}
+              ></textarea>
+            </div>
 
-          <fieldset class="field scope-group">
-            <legend>Permissions</legend>
-            {#each CAPABILITIES as cap (cap.name)}
+            <fieldset class="field scope-group">
+              <legend>Permissions</legend>
+              {#each CAPABILITIES as cap (cap.name)}
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    checked={!draftDeny.includes(cap.name)}
+                    onchange={(e) => setAllowed(cap.name, e.currentTarget.checked)}
+                  />
+                  {cap.label}
+                </label>
+              {/each}
+            </fieldset>
+
+            <div class="field">
+              <label for="reporter-max-writes">Max writes per minute</label>
+              <input
+                id="reporter-max-writes"
+                type="text"
+                inputmode="numeric"
+                class="text-input narrow"
+                autocomplete="off"
+                placeholder={`Default (${DEFAULT_MAX_WRITES_PER_MIN})`}
+                bind:value={draftMaxWrites}
+              />
+            </div>
+
+            <fieldset class="field scope-group">
+              <legend>Writable columns</legend>
               <label class="check">
                 <input
-                  type="checkbox"
-                  checked={!draftDeny.includes(cap.name)}
-                  onchange={(e) => setAllowed(cap.name, e.currentTarget.checked)}
+                  type="radio"
+                  name="reporter-column-scope"
+                  checked={!draftRestrictColumns}
+                  onchange={() => (draftRestrictColumns = false)}
                 />
-                {cap.label}
+                All columns
               </label>
-            {/each}
-          </fieldset>
-
-          <div class="field">
-            <label for="reporter-max-writes">Max writes per minute</label>
-            <input
-              id="reporter-max-writes"
-              type="text"
-              inputmode="numeric"
-              class="text-input narrow"
-              autocomplete="off"
-              placeholder={`Default (${DEFAULT_MAX_WRITES_PER_MIN})`}
-              bind:value={draftMaxWrites}
-            />
-          </div>
-
-          <fieldset class="field scope-group">
-            <legend>Writable columns</legend>
-            <label class="check">
-              <input
-                type="radio"
-                name="reporter-column-scope"
-                checked={!draftRestrictColumns}
-                onchange={() => (draftRestrictColumns = false)}
-              />
-              All columns
-            </label>
-            <label class="check">
-              <input
-                type="radio"
-                name="reporter-column-scope"
-                checked={draftRestrictColumns}
-                onchange={() => (draftRestrictColumns = true)}
-              />
-              Only selected columns
-            </label>
-            {#if draftRestrictColumns}
-              <div class="column-picks">
-                {#each columns as col (col.id)}
-                  <label class="check" class:disabled={col.private}>
-                    <input
-                      type="checkbox"
-                      disabled={col.private}
-                      checked={!col.private && draftColumns.includes(col.id)}
-                      onchange={(e) =>
-                        setColumnSelected(col.id, e.currentTarget.checked)}
-                    />
-                    {col.name}{col.private ? " (private)" : ""}
-                  </label>
-                {:else}
-                  <span class="hint">This deck has no columns yet.</span>
-                {/each}
-              </div>
-              <span class="hint"
-                >A reporter limited to selected columns cannot create new
-                columns.</span
+              <label class="check">
+                <input
+                  type="radio"
+                  name="reporter-column-scope"
+                  checked={draftRestrictColumns}
+                  onchange={() => (draftRestrictColumns = true)}
+                />
+                Only selected columns
+              </label>
+              {#if draftRestrictColumns}
+                <div class="column-picks">
+                  {#each columns as col (col.id)}
+                    <label class="check" class:disabled={col.private}>
+                      <input
+                        type="checkbox"
+                        disabled={col.private}
+                        checked={!col.private && draftColumns.includes(col.id)}
+                        onchange={(e) =>
+                          setColumnSelected(col.id, e.currentTarget.checked)}
+                      />
+                      {col.name}{col.private ? " (private)" : ""}
+                    </label>
+                  {:else}
+                    <span class="hint">This deck has no columns yet.</span>
+                  {/each}
+                </div>
+                <span class="hint"
+                  >A reporter limited to selected columns cannot create new
+                  columns.</span
+                >
+              {/if}
+              <span class="hint">Private columns are never readable or writable.</span
               >
+            </fieldset>
+
+            {#if formError}
+              <p class="error-text">{formError}</p>
             {/if}
-            <span class="hint">Private columns are never readable or writable.</span
-            >
-          </fieldset>
+            {#if formMode === "edit"}
+              <p class="hint">
+                Changes apply the next time this reporter is started.
+              </p>
+            {/if}
 
-          {#if formError}
-            <p class="error-text">{formError}</p>
-          {/if}
-          {#if formMode === "edit"}
-            <p class="hint">
-              Changes apply the next time this reporter is started.
-            </p>
-          {/if}
-
-          <div class="form-actions">
-            <button type="button" class="btn btn-ghost" onclick={closeForm}
-              >Cancel</button
-            >
-            <button type="button" class="btn btn-primary" onclick={save}>
-              {formMode === "edit" ? "Save" : "Add"}
-            </button>
-          </div>
-        </section>
+            <div class="form-actions">
+              <button type="button" class="btn btn-ghost" onclick={closeForm}
+                >Cancel</button
+              >
+              <button type="button" class="btn btn-primary" onclick={save}>
+                {formMode === "edit" ? "Save" : "Add"}
+              </button>
+            </div>
+          </section>
+        {/if}
       {/if}
     </div>
   </div>
@@ -775,6 +792,11 @@
 
   .confirm-text {
     margin-right: 0.125rem;
+  }
+
+  .download-link {
+    align-self: flex-start;
+    text-decoration: none;
   }
 
   .add-btn {
