@@ -12,11 +12,13 @@
 //! Read surface: `list_decks`, `list_columns`, `read_card`, `search_cards`,
 //! `recent_cards`, `describe_deck`, plus the `deck://` resources.
 //!
-//! Write surface (card writes): `append_card`, `patch_card`, `move_card`,
-//! `delete_card`. On top of the core trust boundary the bridge applies
-//! connection policy — capability opt-out (append/edit/delete), a per-connection
-//! write rate limit, and write attribution logging (008 §5). Column-structure
-//! tools (`ensure_column` etc.) arrive in a follow-up.
+//! Write surface: card writes (`append_card`, `patch_card`, `move_card`,
+//! `delete_card`) and column-structure writes (`ensure_column`,
+//! `update_column`, `move_column`). On top of the core trust boundary the
+//! bridge applies connection policy — capability opt-out
+//! (append/edit/delete/structure), a per-connection write rate limit, a write
+//! column allowlist (`JOT_DECK_WRITE_COLUMNS`), and write attribution logging
+//! (008 §5).
 
 use std::collections::VecDeque;
 use std::path::PathBuf;

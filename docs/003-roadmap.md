@@ -24,6 +24,10 @@ Reporter（外部ストリーミング入力アダプタ）と汎用エージェ
 ### 残作業
 * **参照実装 Reporter ―― 別のプライベートリポジトリで開発中**（Python。例: 議事録、Whisper ベースの音声認識）。本リポジトリには配置しない。Reporter プロトコルを実際に話す唯一のクライアント実装であり、下記の配管パッケージはここから切り出す
 * **配管パッケージの切り出し ―― 本リポジトリへ配置予定**: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離する。一次実装は **Python**（`007` §9.5）。**Reporter プロトコルが固まってから**切り出す方針のため、それまでは本リポジトリに置かない。したがって現状、本リポジトリにあるプロトコル実装はホスト側（Rust、`crates/reporter-host`）のみで、パイプの反対側にあたるクライアント側の配管は存在しない
+* **変更履歴**: 外部からの書き込み（MCP / Reporter）の変更前後を `jot_deck_core::write` で記録し、上書き・改名・移動を GUI から復元できるようにする。監査ログを兼ねる（`008` §5.1）
+* **`JOT_DECK_DECK_ID` の複数指定**: カンマ区切りで対象 Deck を列挙し、列挙外の Deck を接続から見えなくする（`008` §4.5）
+* **ストリーム overlay の上限表示**: overlay を 4000 字で打ち切って表示する（`007` §5.1）
+* **MCP 書き込み面の整理**: `move_card` / `move_column` をアンカー対応の並べ替え 1 トランザクションにまとめる（途中で末尾位置が一瞬見える問題の解消）、capability と tool の対応をテーブル駆動にする、allowlist 入りの `mcpServers` 設定を生成する GUI のカラムピッカー
 
 詳細設計: `007-reporter-protocol.md` / `008-mcp-server.md`
 
@@ -78,7 +82,7 @@ Google OAuth + Stripe 連携。Cloudflare Workers で API を構築。音声認�
 ## Phase 9: クラウド同期
 
 ### 目標
-Automerge + PartyKit でリアルタイム同期。
+Automerge + PartyKit でリアルタイム同期。同期用のメタデータ（アクター ID・変更履歴）は Automerge のドキュメントが持ち、SQLite のカードには持たせない。既存のカードは ULID と `updated_at` を初期状態として取り込む。
 
 ### 成果物
 * リアルタイム同期が動作
@@ -93,6 +97,7 @@ Phase 5 で切り出す配管パッケージ（`007` §9.5）を、第三者が�
 ### 成果物
 * 配管パッケージの公開 SDK 化（publish ＋ API ドキュメント ＋ サンプル Reporter）
 * Reporter プロトコル仕様の外部向け文書化（`007` を実装リファレンスとして整備）
+* 公開の前提となる防御強化: 外部由来コンテンツの sanitization、破壊操作の host 確認 / dry-run（`008` §5）
 
 詳細設計: `007-reporter-protocol.md` §9.5 / §3.2
 
@@ -115,7 +120,7 @@ Phase 5 で切り出す配管パッケージ（`007` §9.5）を、第三者が�
 |:---|:---|:---|
 | **ローカル動作版** | Phase 1–3 | 完了 |
 | **AI KB 化（MCP 読み取り面）** | Phase 4 | 完了 |
-| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージの切り出し。参照実装 Reporter は別リポジトリで開発中） |
+| **Reporter 基盤** | Phase 5 | 一部完了（残: Python 配管パッケージの切り出し、変更履歴、MCP 書き込み面の整理。参照実装 Reporter は別リポジトリで開発中） |
 | **Web デモ公開** | Phase 6 | 未着手 |
 | **MVP リリース（Reporter 課金）** | Phase 7 | 未着手 |
 | **チュートリアル** | Phase 8 | 未着手 |
