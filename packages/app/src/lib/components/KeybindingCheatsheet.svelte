@@ -3,6 +3,7 @@
   import { isTauri } from "#lib/db/index.ts";
   import {
     type FocusMode,
+    formatSequence,
     getKeybindingsForMode,
     isBrowserReserved,
   } from "#lib/keybindings.ts";
@@ -83,7 +84,7 @@
             <dt>
               {#each group.sequences as seq, i}
                 {#if i > 0}<span class="separator"> / </span>{/if}
-                <kbd>{seq}</kbd>
+                <kbd title={seq}>{formatSequence(seq)}</kbd>
                 {#if desktopOnly(seq)}
                   <span class="desktop-only">Desktop only</span>
                 {/if}
@@ -164,8 +165,7 @@
     padding: 0.5rem 1rem;
   }
 
-  /* Its own line under the keys: the fixed-width key column has no room for
-     it beside them. */
+  /* Its own line under the keys, not wrapped in among them. */
   .desktop-only {
     display: block;
     font-size: 0.875rem;
@@ -187,13 +187,16 @@
     border-radius: 4px;
   }
 
-  .cheatsheet-item:hover {
-    background-color: var(--bg-tertiary);
+  /* Striped rows so each key list reads across to its description. */
+  .cheatsheet-item:nth-child(even) {
+    background-color: var(--bg-primary);
   }
 
+  /* The minimum width keeps descriptions aligned; a longer key list (e.g. a
+     custom binding) widens its own row instead of running into the text. */
   .cheatsheet-item dt {
     flex-shrink: 0;
-    width: 10rem;
+    min-width: 10rem;
     text-align: right;
     white-space: nowrap;
   }

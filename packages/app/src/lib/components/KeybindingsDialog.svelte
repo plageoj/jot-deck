@@ -4,6 +4,7 @@
   import {
     DEFAULT_KEYBINDINGS,
     findKeybindingConflicts,
+    formatSequence,
     getKnownActions,
     signatureOf,
     type FocusMode,
@@ -322,7 +323,7 @@
     use:autofocus
     onkeydown={handler}
   >
-    {sequence || "Press keys…"}
+    {sequence ? formatSequence(sequence) : "Press keys…"}
   </span>
 {/snippet}
 
@@ -350,9 +351,9 @@
       {#each list as conflict (conflict.severity + conflict.sequence)}
         <span class="kb-conflict {conflict.severity}">
           {#if conflict.severity === "error"}
-            <kbd>{sequence}</kbd> already bound to “{conflict.description}”
+            <kbd>{formatSequence(sequence)}</kbd> already bound to “{conflict.description}”
           {:else}
-            overlaps <kbd>{conflict.sequence}</kbd> (“{conflict.description}”)
+            overlaps <kbd>{formatSequence(conflict.sequence)}</kbd> (“{conflict.description}”)
           {/if}
         </span>
       {/each}
@@ -411,7 +412,7 @@
             >
           {:else}
             <button type="button" class="kb-key" onclick={startAddCapture}>
-              {addSequence || "Set key"}
+              {addSequence ? formatSequence(addSequence) : "Set key"}
             </button>
           {/if}
           <button
@@ -444,7 +445,7 @@
                     title="Click to remap"
                     onclick={() => startRemapCustom(index)}
                   >
-                    {cb.sequence}
+                    {formatSequence(cb.sequence)}
                   </button>
                   <button
                     type="button"
@@ -518,7 +519,7 @@
                           title="Click to remap"
                           onclick={() => startRemapDefault(row)}
                         >
-                          {row.current}
+                          {formatSequence(row.current)}
                         </button>
                         <button
                           type="button"

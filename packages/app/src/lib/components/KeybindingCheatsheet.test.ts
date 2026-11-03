@@ -49,6 +49,16 @@ describe("KeybindingCheatsheet in a browser", () => {
   });
 });
 
+describe("KeybindingCheatsheet key labels", () => {
+  it("shows arrows and Enter as symbols, with the key name on hover", () => {
+    mockEnv.tauri = true;
+    render(KeybindingCheatsheet, { props: { mode: "column", onClose: vi.fn() } });
+    expect(keysFor("Move to left column")).toEqual(["h", "←"]);
+    expect(keysFor("Focus first card")).toEqual(["j", "↓", "⏎"]);
+    expect(screen.getAllByTitle("ArrowLeft")[0].textContent).toBe("←");
+  });
+});
+
 describe("KeybindingCheatsheet in the desktop app", () => {
   beforeEach(() => {
     mockEnv.tauri = true;
