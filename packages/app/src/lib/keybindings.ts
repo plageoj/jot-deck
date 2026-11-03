@@ -299,6 +299,60 @@ export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
   return activeBindings.filter((b) => b.modes.includes(mode));
 }
 
+/**
+ * How key sequences read on screen. Stored sequences always keep the key names
+ * (`Ctrl+Shift+ArrowLeft`); only the display goes through a label set, so a
+ * platform-specific set (e.g. macOS: `⌘` / `⌥` / `⌃` / `⇧`, no joiner) can be
+ * added later without touching bindings or the key processor.
+ */
+export interface KeyLabels {
+  /** Label per modifier name (`Ctrl`, `Shift`, `Alt`, `Meta`); unlisted ones show as named. */
+  modifiers: Record<string, string>;
+  /** Text after each modifier label, e.g. "+" for `Ctrl+P`, "" for `⌘P`. */
+  modifierJoiner: string;
+  /** Label per named key (`ArrowLeft`, `Enter`, …); unlisted keys show as named. */
+  keys: Record<string, string>;
+}
+
+export const DEFAULT_KEY_LABELS: KeyLabels = {
+  modifiers: {},
+  modifierJoiner: "+",
+  keys: {
+    ArrowLeft: "←",
+    ArrowRight: "→",
+    ArrowUp: "↑",
+    ArrowDown: "↓",
+    Enter: "⏎",
+  },
+};
+
+/** One token of a stored sequence: a modifier prefix, a named key, or a single character. */
+const SEQUENCE_TOKEN =
+  /(Ctrl|Shift|Alt|Meta)\+|Arrow(?:Left|Right|Up|Down)|Escape|Enter|Delete|PageUp|PageDown|F\d{1,2}|./gu;
+
+/** Display form of a key sequence, e.g. "Shift+ArrowLeft" → "Shift+←". */
+export function formatSequence(
+  sequence: string,
+  labels: KeyLabels = DEFAULT_KEY_LABELS,
+): string {
+  return sequence.replace(SEQUENCE_TOKEN, (token, modifier?: string) =>
+    modifier
+      ? (labels.modifiers[modifier] ?? modifier) + labels.modifierJoiner
+      : (labels.keys[token] ?? token),
+  );
+}
+
+/**
+ * Keys a browser keeps for itself — no `preventDefault` reaches them — so they
+ * only work in the desktop app (docs/009-web-demo.md §6). Every action they
+ * trigger by default also has a binding that works in the browser.
+ */
+const BROWSER_RESERVED_SEQUENCES = new Set(["Ctrl+t", "Ctrl+Shift+P"]);
+
+export function isBrowserReserved(sequence: string): boolean {
+  return BROWSER_RESERVED_SEQUENCES.has(sequence);
+}
+
 export interface KeybindingConflict {
   severity: "error" | "warn";
   /** The conflicting binding's key sequence. */

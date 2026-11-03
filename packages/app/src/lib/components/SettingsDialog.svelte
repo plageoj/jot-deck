@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { isTauri } from "#lib/db/index.ts";
   import {
     DEFAULT_SETTINGS,
     FONT_FAMILY_PRESETS,
@@ -292,7 +293,7 @@
           Reset to defaults
         </button>
         <button type="button" class="btn btn-ghost" onclick={onOpenAbout}>
-          About &amp; updates…
+          {isTauri() ? "About & updates…" : "About…"}
         </button>
       </div>
       <span class="hint"

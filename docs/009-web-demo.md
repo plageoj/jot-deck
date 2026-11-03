@@ -33,6 +33,16 @@ Web デモは **Web 版（データを永続化してブラウザで常用でき
 * 配信先: `app.jot-deck.com`（Cloudflare Pages の独立プロジェクト）。Web 版も同じ URL で配信するため、デモ段階から「アプリ本体の URL」として案内してよい。ランディングページ（`jot-deck.com`、`packages/web`）とは別プロジェクトにし、SvelteKit の `paths.base` を変えずにルート配信する。
 * ビルド: `packages/app` を `VITE_JOT_DECK_DEMO=1` 付きで `vite build` し、`adapter-static` の出力（SPA fallback `index.html`）を配信する。Tauri や Rust のビルドは不要。
 * 公開タイミング: `main` へのマージごとに自動デプロイする。デスクトップ版の Production / Preview チャンネル（`005-release.md`）とは連動させない。
+* Cloudflare Pages の Git 連携で次のように設定する（リポジトリにデプロイ用ワークフローは置かない）:
+
+| 項目 | 値 |
+|:---|:---|
+| Production branch | `main` |
+| Root directory | `/`（pnpm workspace のルート） |
+| Build command | `pnpm --filter app build` |
+| Build output directory | `packages/app/build` |
+| 環境変数 | `VITE_JOT_DECK_DEMO=1`、`NODE_VERSION=24` |
+| カスタムドメイン | `app.jot-deck.com` |
 * ランディングページのヒーローと CTA 付近に「Try in browser」リンクを置く。
 
 ---
@@ -92,7 +102,7 @@ Web デモは **Web 版（データを永続化してブラウザで常用でき
 | `Ctrl+t`（カラム切り替え） | Chrome / Edge / Firefox で新しいタブ | `g n` / `g c` |
 | `Ctrl+Shift+P`（コマンドパレット） | Firefox でプライベートウィンドウ | `F1` |
 
-* ブラウザ実行時（`isTauri()` が偽）は、キーバインドチートシート（`?`）でこれらのキーに「Desktop only」の注記を付け、代替キーを先に表示する。チュートリアルのキーヒント（`006-tutorial.md`）も代替キーを表示する。
+* ブラウザ実行時（`isTauri()` が偽）は、キーバインドチートシート（`?`）でこれらのキーの keycap を薄く表示して代替キーの後ろに並べる。薄い keycap の意味はヘッダーの凡例（「Desktop only」）とマウスオーバー時の title で示す。チュートリアルのキーヒント（`006-tutorial.md`）も代替キーを表示する。
 * `Ctrl+p` / `Ctrl+r` / `Ctrl+d` / `Ctrl+z` / `Ctrl+,` / `F1` は `preventDefault` で取れるため、デスクトップ版と同じに動く。
 
 ---
@@ -143,7 +153,7 @@ Web デモは **Web 版（データを永続化してブラウザで常用でき
 * `app.jot-deck.com` を開くと、インストールなしで「Getting Started」Deck が表示され、キーボードだけでカードの作成・編集・移動・削除・復元ができる。
 * デモバナーが常に表示され、ダウンロード先へ遷移できる。
 * Reporters / MCP 設定コピー / Deck id コピー / アップデート確認が、押しても何も起きない状態で残っていない（デモビルドに限らずブラウザ実行全般で）。
-* チートシートで `Ctrl+t` / `Ctrl+Shift+P` に注記が付き、代替キーが先に表示される（同上）。
+* チートシートで `Ctrl+t` / `Ctrl+Shift+P` が薄く表示されて「Desktop only」の凡例が付き、代替キーが先に表示される（同上）。
 * デモバナーと「Web demo」の表記は、`pnpm dev` と E2E（`pnpm --filter app test:e2e`）には出ない。
 
 ---

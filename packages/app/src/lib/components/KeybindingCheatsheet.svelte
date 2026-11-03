@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { type FocusMode, getKeybindingsForMode } from "#lib/keybindings.ts";
+  import { isTauri } from "#lib/db/index.ts";
+  import {
+    type FocusMode,
+    formatSequence,
+    getKeybindingsForMode,
+    isBrowserReserved,
+  } from "#lib/keybindings.ts";
 
   interface Props {
     mode: FocusMode;
@@ -9,6 +15,11 @@
 
   let { mode, onClose }: Props = $props();
   let dialogRef = $state<HTMLDialogElement | null>(null);
+
+  // In a browser, keys the browser keeps for itself are dimmed and listed
+  // after the alternatives that do work there.
+  const browser = !isTauri();
+  const desktopOnly = (seq: string) => browser && isBrowserReserved(seq);
 
   let groupedBindings = $derived.by(() => {
     const bindings = getKeybindingsForMode(mode);
@@ -22,6 +33,13 @@
       } else {
         actionIndex.set(b.action, groups.length);
         groups.push({ sequences: [b.sequence], description: b.description });
+      }
+    }
+    if (browser) {
+      for (const group of groups) {
+        group.sequences.sort(
+          (a, b) => Number(desktopOnly(a)) - Number(desktopOnly(b)),
+        );
       }
     }
     return groups;
@@ -57,7 +75,14 @@
   <div class="cheatsheet-panel">
     <div class="cheatsheet-header">
       <h2>Keyboard Shortcuts — {modeLabel} Mode</h2>
-      <span class="cheatsheet-hint">Press <kbd>Esc</kbd> to close</span>
+      <div class="cheatsheet-hints">
+        {#if browser}
+          <span class="cheatsheet-hint"
+            ><kbd class="unavailable">Key</kbd> Desktop only</span
+          >
+        {/if}
+        <span class="cheatsheet-hint">Press <kbd>Esc</kbd> to close</span>
+      </div>
     </div>
     <div class="cheatsheet-body">
       <dl class="cheatsheet-list">
@@ -66,7 +91,13 @@
             <dt>
               {#each group.sequences as seq, i}
                 {#if i > 0}<span class="separator"> / </span>{/if}
-                <kbd>{seq}</kbd>
+                {#if desktopOnly(seq)}
+                  <kbd class="unavailable" title="{seq} — Desktop only"
+                    >{formatSequence(seq)}</kbd
+                  >
+                {:else}
+                  <kbd title={seq}>{formatSequence(seq)}</kbd>
+                {/if}
               {/each}
             </dt>
             <dd>{group.description}</dd>
@@ -144,9 +175,20 @@
     padding: 0.5rem 1rem;
   }
 
+  .cheatsheet-hints {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  /* Keys the browser keeps for itself (see the header legend). */
+  .unavailable {
+    opacity: 0.45;
+  }
+
   .cheatsheet-list {
     columns: 2 250px;
-    column-gap: 1.5rem;
+    column-gap: 0;
   }
 
   .cheatsheet-item {
@@ -155,16 +197,14 @@
     align-items: baseline;
     gap: 0.5rem;
     padding: 0.25rem 0.375rem;
-    border-radius: 4px;
+    border-bottom: 1px solid var(--bg-tertiary);
   }
 
-  .cheatsheet-item:hover {
-    background-color: var(--bg-tertiary);
-  }
-
+  /* The minimum width keeps descriptions aligned; a longer key list (e.g. a
+     custom binding) widens its own row instead of running into the text. */
   .cheatsheet-item dt {
     flex-shrink: 0;
-    width: 10rem;
+    min-width: 10rem;
     text-align: right;
     white-space: nowrap;
   }
