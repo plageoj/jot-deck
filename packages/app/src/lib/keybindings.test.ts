@@ -136,6 +136,27 @@ describe("getKeybindingsForMode", () => {
     expect(columnBindings.some((b) => b.action === "undo")).toBe(true);
     expect(cardBindings.some((b) => b.action === "undo")).toBe(true);
   });
+
+  it("keeps every default binding when nothing is customized", () => {
+    for (const mode of ["column", "card"] as const) {
+      const expected = DEFAULT_KEYBINDINGS.filter((b) => b.modes.includes(mode));
+      expect(getKeybindingsForMode(mode)).toHaveLength(expected.length);
+    }
+  });
+
+  it("leaves out a default whose key a customized binding claims", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "R", action: "redo", modes: ["column"], description: "Redo" },
+    ]);
+    try {
+      const column = getKeybindingsForMode("column");
+      expect(column.some((b) => b.action === "renameDeck")).toBe(false);
+      expect(column.some((b) => b.action === "redo" && b.sequence === "R")).toBe(true);
+      expect(getKeybindingsForMode("card").some((b) => b.action === "renameDeck")).toBe(true);
+    } finally {
+      setKeybindingOverrides({});
+    }
+  });
 });
 
 describe("formatSequence", () => {
@@ -359,7 +380,20 @@ describe("shortcutFor", () => {
     expect(shortcutFor("showShortcuts")).toBeNull();
   });
 
+  it("skips a key another customized binding claims", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "R", action: "redo", modes: ["column", "card"], description: "Redo" },
+    ]);
+    expect(shortcutFor("renameDeck")).toBeNull();
+    expect(shortcutFor("redo")).toBe("R");
+  });
+
   it("only considers bindings in the given modes", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "z", action: "renameDeck", modes: ["card"], description: "Rename deck" },
+    ]);
+    expect(shortcutFor("renameDeck")).toBe("z");
+    expect(shortcutFor("renameDeck", ["column"])).toBe("R");
     expect(shortcutFor("createCardAbove", ["column"])).toBeNull();
     expect(shortcutFor("createCardAbove", ["card"])).toBe("O");
   });

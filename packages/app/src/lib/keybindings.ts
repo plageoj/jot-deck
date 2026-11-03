@@ -297,23 +297,30 @@ export function isValidPrefix(sequence: string, mode: FocusMode): boolean {
 }
 
 /**
- * Get all keybindings for display (cheatsheet)
+ * Get all keybindings for display (cheatsheet). A binding whose key another
+ * binding claims in `mode` is left out, since pressing it runs the other one.
  */
 export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
-  return activeBindings.filter((b) => b.modes.includes(mode));
+  return activeBindings.filter(
+    (b) => b.modes.includes(mode) && findAction(b.sequence, mode) === b.action
+  );
 }
 
 /**
  * The key sequence shown as an action's shortcut in hints and the command
  * palette: the first effective binding in any of `modes`, with the user's
- * customizations first. `null` when every binding for the action is disabled.
+ * customizations first. A binding whose key another binding claims in that
+ * mode is skipped, since pressing it would run the other action. `null` when
+ * no key reaches the action.
  */
 export function shortcutFor(
   action: string,
   modes: FocusMode[] = ["column", "card"],
 ): string | null {
   const binding = lookupBindings.find(
-    (b) => b.action === action && b.modes.some((m) => modes.includes(m))
+    (b) =>
+      b.action === action &&
+      b.modes.some((m) => modes.includes(m) && findAction(b.sequence, m) === action)
   );
   return binding?.sequence ?? null;
 }

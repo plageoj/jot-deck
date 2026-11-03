@@ -254,7 +254,14 @@ export class ActionDispatcher {
   private handleNoColumnsKey(event: KeyboardEvent) {
     const key = normalizeKey(event);
     if (!key) return;
-    const action = findAction(key, "column");
+    // Run through the sequence processor so a multi-key remap (e.g. `zz` for
+    // renameDeck) still works; a pending prefix is held like on the board.
+    const result = this.keyProcessor.process(key, "column");
+    if (result.type === "prefix") {
+      event.preventDefault();
+      return;
+    }
+    const action = result.type === "action" ? result.action : null;
     if (
       action === "showDeckPalette" ||
       action === "showCommandPalette" ||

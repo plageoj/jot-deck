@@ -215,10 +215,10 @@ export class SettingsStore {
    * none. Reads the keybinding customization so a view showing it re-renders
    * when the user remaps the key.
    */
-  shortcutLabel(action: string): string | null {
+  shortcutLabel(action: string, modes?: FocusMode[]): string | null {
     void this.state.keybindingOverrides;
     void this.state.customKeybindings;
-    const sequence = shortcutFor(action);
+    const sequence = shortcutFor(action, modes);
     return sequence === null ? null : formatSequence(sequence);
   }
 

@@ -203,7 +203,8 @@
   });
 
   let renamingDeck = $state<Deck | null>(null);
-  const renameDeckShortcut = $derived(settingsStore.shortcutLabel("renameDeck"));
+  // An empty deck resolves keys in column focus only (see handleNoColumnsKey).
+  const renameDeckShortcut = $derived(settingsStore.shortcutLabel("renameDeck", ["column"]));
   let deletingDeck = $state<Deck | null>(null);
   // In-place column rename. The draft lives here so starting another edit can
   // commit it, the way a card editor saves before another one opens.

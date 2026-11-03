@@ -201,6 +201,22 @@ describe("SettingsStore (DB-backed)", () => {
     expect(store.shortcutLabel("showShortcuts")).toBeNull();
   });
 
+  it("shortcutLabel limits the lookup to the given modes", async () => {
+    await store.load();
+    store.addCustomKeybinding({
+      sequence: "z",
+      action: "renameDeck",
+      modes: ["card"],
+      description: "Rename deck",
+    });
+    try {
+      expect(store.shortcutLabel("renameDeck")).toBe("z");
+      expect(store.shortcutLabel("renameDeck", ["column"])).toBe("R");
+    } finally {
+      store.resetAllKeybindings();
+    }
+  });
+
   it("rehydrates state from the backend", async () => {
     stub.store.set(
       SETTINGS_DB_KEY,

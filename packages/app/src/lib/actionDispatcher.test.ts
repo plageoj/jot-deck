@@ -5,6 +5,7 @@ import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 import { boardState } from "./__fixtures__/boardBackend";
 import { setupBoard } from "./__fixtures__/boardHarness";
 import { updaterStore } from "./updater.svelte";
+import { setKeybindingOverrides } from "./keybindings";
 
 // ActionDispatcher owns key interpretation, mode-dependent routing, palette
 // command dispatch, and the public dispatch entry points. The semantic
@@ -101,6 +102,26 @@ describe("ActionDispatcher with no columns loaded", () => {
 
     expect(renameDeck).toHaveBeenCalledOnce();
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("runs a multi-key renameDeck remap when no columns exist", async () => {
+    setKeybindingOverrides({}, [
+      { sequence: "zz", action: "renameDeck", modes: ["column"], description: "Rename deck" },
+    ]);
+    try {
+      const renameDeck = vi.fn();
+      dispatcher.onRenameDeck = renameDeck;
+      const first = makeKeyEvent({ key: "z" });
+      dispatcher.handleKeydown(first);
+      expect(first.defaultPrevented).toBe(true);
+      expect(renameDeck).not.toHaveBeenCalled();
+
+      dispatcher.handleKeydown(makeKeyEvent({ key: "z" }));
+      await flushPromises();
+      expect(renameDeck).toHaveBeenCalledOnce();
+    } finally {
+      setKeybindingOverrides({});
+    }
   });
 
   it("creates a column with `c` when no columns exist", async () => {
