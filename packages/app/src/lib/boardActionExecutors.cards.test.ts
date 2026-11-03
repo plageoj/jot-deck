@@ -292,6 +292,17 @@ describe("card operations", () => {
       expect(boardState.deleteCardCalls).toContain("c-0-b");
     });
 
+    it("cutCardText deletes the copied card even if focus moves during the write", async () => {
+      let finishWrite!: () => void;
+      writeText.mockReturnValue(new Promise<void>((resolve) => (finishWrite = resolve)));
+      const cut = actions.executeCardAction("cutCardText");
+      focus.focusedCardIndex = 2;
+      finishWrite();
+      await cut;
+      expect(writeText).toHaveBeenCalledWith("c-0-b content");
+      expect(boardState.deleteCardCalls).toEqual(["c-0-b"]);
+    });
+
     it("cutCardText keeps the card when the clipboard write fails", async () => {
       writeText.mockRejectedValue(new Error("denied"));
       await actions.executeCardAction("cutCardText");

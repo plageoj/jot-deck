@@ -123,12 +123,20 @@ export class BoardActionExecutors {
       case "copyCard":
         this.cardCopy();
         break;
-      case "copyCardText":
-        await this.cardCopyText();
+      case "copyCardText": {
+        const { focusedCard } = this.context();
+        if (focusedCard) await this.cardCopyText(focusedCard);
         break;
-      case "cutCardText":
-        if (await this.cardCopyText()) await this.cardDelete();
+      }
+      case "cutCardText": {
+        // Capture the card before awaiting the clipboard write: focus may move
+        // meanwhile, and the card that was copied is the one to delete.
+        const { focusedCard } = this.context();
+        if (focusedCard && (await this.cardCopyText(focusedCard))) {
+          await this.cardDelete(focusedCard);
+        }
         break;
+      }
       case "pasteBelow":
         await this.cardPasteBelow();
         break;
@@ -340,9 +348,11 @@ export class BoardActionExecutors {
     else focus.startEdit(card.id);
   }
 
-  private async cardDelete(): Promise<void> {
-    const { data, focus, focusedColumn, focusedCard } = this.context();
-    if (!focusedCard || !(await data.deleteCard(focusedCard.id))) return;
+  private async cardDelete(card = this.context().focusedCard): Promise<void> {
+    const { data } = this.context();
+    if (!card || !(await data.deleteCard(card.id))) return;
+    // Clamp against the board as it is now, after the awaited delete.
+    const { focus, focusedColumn } = this.context();
     const updated = data.cardsByColumn[focusedColumn?.id ?? ""] ?? [];
     focus.focusedCardIndex = Math.min(
       focus.focusedCardIndex,
@@ -356,12 +366,10 @@ export class BoardActionExecutors {
     if (focusedCard) focus.clipboardCard = { ...focusedCard };
   }
 
-  /** Writes the focused card's text to the system clipboard; false if nothing was written. */
-  private async cardCopyText(): Promise<boolean> {
-    const { focusedCard } = this.context();
-    if (!focusedCard) return false;
+  /** Writes the card's text to the system clipboard; false if the write failed. */
+  private async cardCopyText(card: Card): Promise<boolean> {
     try {
-      await navigator.clipboard.writeText(focusedCard.content);
+      await navigator.clipboard.writeText(card.content);
       return true;
     } catch {
       // Clipboard unavailable (e.g. permissions): keep the card.
