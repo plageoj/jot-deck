@@ -52,7 +52,7 @@ cargo run -p jot-deck-core --bin jot-deck-cli -- <db-path>           # Interacti
 cargo run -p jot-deck-mcp
 ```
 Optional environment variables (all unset by default):
-- `JOT_DECK_DECK_ID` — pins the connection to one Deck; unset, any local Deck is addressed via a `deck_id` argument per call
+- `JOT_DECK_DECK_ID` — comma list of Deck ids the connection is limited to (with one, calls may omit `deck_id`); unset, any local Deck is addressed via a `deck_id` argument per call
 - `JOT_DECK_DB_PATH` — overrides the DB path
 - `JOT_DECK_DENY` — comma list of write capabilities to disable (`append`, `edit`, `delete`, `structure`)
 - `JOT_DECK_MAX_WRITES_PER_MIN` — per-connection write rate cap (default 120)

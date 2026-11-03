@@ -4,7 +4,8 @@
 //! SQLite file directly (the CLI's sibling — no IPC with the GUI), and maps MCP
 //! `tools/call` onto the deck-scoped queries in `jot_deck_core::query` (reads)
 //! and `jot_deck_core::write` (writes). The target Deck is a per-call `deck_id`
-//! argument unless the connection is pinned to one Deck (`JOT_DECK_DECK_ID`);
+//! argument (omissible only when `JOT_DECK_DECK_ID` pins the connection to a
+//! single Deck; a pin listing several Decks limits which ones it may name);
 //! `jot_deck_core::deck_scope` resolves it (008 §4.5). `private`/deleted
 //! filtering, deck-boundary enforcement and `deck_id` validation live in those
 //! core modules, which are the trust boundary.
@@ -75,7 +76,7 @@ const INSTRUCTIONS: &str = "\
 Jot Deck exposes local Decks as a read/write knowledge base. Hierarchy: Deck > Column > Card. \
 A Card is a tweet-sized atomic note. Start with `list_decks` to pick a Deck (`active` marks the \
 one last open in the Jot Deck app — use it when the user means \"this deck\") and pass its id as \
-`deck_id` on every deck-level call; only a connection pinned to one Deck may omit it. Card and \
+`deck_id` on every deck-level call; only a connection limited to a single Deck may omit it. Card and \
 column tools follow the id they name. Then `describe_deck` or `list_columns` to learn \
 the columns (each has a purpose) and what this connection may do, then `search_cards` \
 (full-text + tag/score/column filters), `recent_cards`, or `read_card` to read. To write: \
@@ -246,7 +247,8 @@ impl BridgeConfig {
 }
 
 /// The MCP bridge over one connection. Which Deck each call addresses is
-/// decided by `scope` (pinned to one Deck, or any Deck per call → 008 §4.5).
+/// decided by `scope` (limited to the pinned Decks, or any Deck per call →
+/// 008 §4.5).
 pub struct Bridge {
     conn: Connection,
     scope: DeckScope,
@@ -258,8 +260,9 @@ pub struct Bridge {
 
 impl Bridge {
     /// Build a bridge with the default policy (full write capabilities).
-    /// `pinned_deck_id` is `JOT_DECK_DECK_ID`: `Some` pins the connection to that
-    /// Deck, `None` lets each call address any local Deck.
+    /// `pinned_deck_id` is the raw `JOT_DECK_DECK_ID`: a comma list of Deck ids
+    /// limits the connection to those Decks, `None` (or no ids) lets each call
+    /// address any local Deck.
     pub fn new(conn: Connection, pinned_deck_id: Option<String>) -> Self {
         Self::with_config(conn, pinned_deck_id, BridgeConfig::default())
     }
@@ -457,9 +460,9 @@ impl Bridge {
             // null = every visible column is writable; a list = only these
             // column ULIDs (write allowlist → 008 §4.5). Reads are never restricted.
             "write_columns": self.write_scope.allowed_columns(),
-            // The Deck this connection is pinned to (JOT_DECK_DECK_ID), or null
-            // when any Deck may be addressed per call (008 §4.5).
-            "pinned_deck_id": self.scope.pinned(),
+            // The Decks this connection is limited to (JOT_DECK_DECK_ID), or
+            // null when any Deck may be addressed per call (008 §4.5).
+            "pinned_deck_ids": self.scope.pinned(),
         });
         if let Some(obj) = v.get_mut("constraints").and_then(Value::as_object_mut) {
             obj.insert(
@@ -662,8 +665,8 @@ impl Bridge {
     // ---- resources ----
 
     /// One `deck://{id}` per Deck this connection can address, plus
-    /// `deck://schema` (the pinned Deck's `describe_deck`) on a pinned connection
-    /// — unpinned, there is no single Deck it could describe.
+    /// `deck://schema` (the pinned Deck's `describe_deck`) on a connection pinned
+    /// to a single Deck — otherwise there is no single Deck it could describe.
     fn resource_defs(&self) -> Vec<Value> {
         let decks = self.scope.list_decks(&self.conn).unwrap_or_default();
         let mut defs: Vec<Value> = decks
@@ -677,7 +680,7 @@ impl Bridge {
                 })
             })
             .collect();
-        if self.scope.pinned().is_some() {
+        if self.scope.sole_pinned().is_some() {
             defs.push(json!({
                 "uri": SCHEMA_URI,
                 "name": "Deck schema",
@@ -777,7 +780,7 @@ impl Bridge {
 fn deck_id_prop() -> Value {
     json!({
         "type": "string",
-        "description": "Deck ULID from list_decks. Required unless this connection is pinned to one Deck."
+        "description": "Deck ULID from list_decks. Required unless this connection is limited to a single Deck."
     })
 }
 
@@ -1235,7 +1238,7 @@ mod tests {
     #[test]
     fn deck_resource_lists_cards_without_private() {
         let (bridge, _, _) = bridge_with_data();
-        let deck_id = bridge.scope.pinned().unwrap().to_string();
+        let deck_id = bridge.scope.sole_pinned().unwrap().to_string();
         let req = json!({ "jsonrpc": "2.0", "id": 4, "method": "resources/read",
             "params": { "uri": format!("deck://{}", deck_id) } })
         .to_string();
@@ -1589,6 +1592,13 @@ mod tests {
     /// Two decks with one public column and card each, served by an unpinned
     /// bridge. Returns (bridge, [(deck_id, column_id, card_id); 2]).
     fn unpinned_two_decks() -> (Bridge, Vec<(String, String, String)>) {
+        two_decks(|_| None)
+    }
+
+    /// Like `unpinned_two_decks`, with `JOT_DECK_DECK_ID` built from the deck ids.
+    fn two_decks(
+        pin: impl FnOnce(&[(String, String, String)]) -> Option<String>,
+    ) -> (Bridge, Vec<(String, String, String)>) {
         let conn = create_in_memory().unwrap();
         let mut decks = Vec::new();
         for name in ["Work", "Home"] {
@@ -1618,7 +1628,76 @@ mod tests {
             .unwrap();
             decks.push((d.id, col.id, c.id));
         }
-        (Bridge::new(conn, None), decks)
+        let pinned = pin(&decks);
+        (Bridge::new(conn, pinned), decks)
+    }
+
+    #[test]
+    fn multi_pin_lists_and_addresses_only_listed_decks() {
+        let (bridge, decks) = two_decks(|d| Some(format!("{}, {}", d[1].0, d[0].0)));
+        let (work, _, work_card) = &decks[0];
+        let (home, home_col, _) = &decks[1];
+
+        let listed = call(&bridge, 1, "list_decks", json!({}));
+        let ids: Vec<_> = structured(&listed)["decks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["deck_id"].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(ids, vec![home.clone(), work.clone()]);
+
+        // Several Decks: deck_id stays required.
+        let omitted = call(&bridge, 2, "list_columns", json!({}));
+        let msg = omitted["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(msg.contains("deck_id required"), "{msg}");
+
+        let cols = call(&bridge, 3, "list_columns", json!({ "deck_id": home }));
+        assert_eq!(structured(&cols)["columns"][0]["column_id"], *home_col);
+        let card = call(&bridge, 4, "read_card", json!({ "card_id": work_card }));
+        assert_eq!(structured(&card)["content"], "Work card");
+
+        let desc = call(&bridge, 5, "describe_deck", json!({ "deck_id": work }));
+        assert_eq!(
+            structured(&desc)["capabilities"]["pinned_deck_ids"],
+            json!([home, work])
+        );
+
+        // No single Deck for deck://schema to describe.
+        let req = json!({ "jsonrpc": "2.0", "id": 6, "method": "resources/list" }).to_string();
+        let resp: Value = serde_json::from_str(&bridge.handle_message(&req).unwrap()).unwrap();
+        let uris: Vec<&str> = resp["result"]["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["uri"].as_str().unwrap())
+            .collect();
+        assert_eq!(uris.len(), 2);
+        assert!(!uris.contains(&SCHEMA_URI));
+    }
+
+    #[test]
+    fn pin_hides_cards_and_columns_of_unlisted_decks() {
+        let (bridge, decks) = two_decks(|d| Some(d[1].0.clone()));
+        let (work, work_col, work_card) = &decks[0];
+
+        let listed = call(&bridge, 1, "list_decks", json!({}));
+        assert_eq!(structured(&listed)["decks"].as_array().unwrap().len(), 1);
+
+        for (id, tool, args) in [
+            (2, "list_columns", json!({ "deck_id": work })),
+            (3, "read_card", json!({ "card_id": work_card })),
+            (4, "patch_card", json!({ "card_id": work_card, "content": "x", "expected_updated_at": 0 })),
+            (5, "delete_card", json!({ "card_id": work_card })),
+            (6, "append_card", json!({ "column_id": work_col, "content": "x" })),
+            (7, "update_column", json!({ "column_id": work_col, "name": "x" })),
+        ] {
+            let resp = call(&bridge, id, tool, args);
+            assert_eq!(resp["result"]["isError"], true, "{tool}");
+        }
+        let card = call(&bridge, 8, "read_card", json!({ "card_id": work_card }));
+        let msg = card["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(msg.contains("not found"), "{msg}");
     }
 
     #[test]
@@ -1638,7 +1717,7 @@ mod tests {
         let resp = call(&bridge, 1, "list_decks", json!({}));
         let listed = structured(&resp)["decks"].as_array().unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0]["deck_id"], bridge.scope.pinned().unwrap());
+        assert_eq!(listed[0]["deck_id"], bridge.scope.sole_pinned().unwrap());
     }
 
     #[test]
@@ -1681,7 +1760,7 @@ mod tests {
 
         let resp = call(&bridge, 3, "describe_deck", json!({ "deck_id": work }));
         assert_eq!(structured(&resp)["deck_id"], *work);
-        assert!(structured(&resp)["capabilities"]["pinned_deck_id"].is_null());
+        assert!(structured(&resp)["capabilities"]["pinned_deck_ids"].is_null());
 
         let listed = call(&bridge, 2, "list_decks", json!({}));
         let active: Vec<_> = structured(&listed)["decks"]
