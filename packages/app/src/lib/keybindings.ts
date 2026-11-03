@@ -78,11 +78,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "dd", action: "deleteCard", modes: ["card"], description: "Delete card" },
   { sequence: "Delete", action: "deleteCard", modes: ["card"], description: "Delete card" },
   { sequence: "yy", action: "copyCard", modes: ["card"], description: "Copy card" },
-  { sequence: "Ctrl+c", action: "copyCard", modes: ["card"], description: "Copy card" },
-  { sequence: "Ctrl+x", action: "cutCard", modes: ["card"], description: "Cut card" },
   { sequence: "p", action: "pasteBelow", modes: ["card"], description: "Paste below" },
-  { sequence: "Ctrl+v", action: "pasteBelow", modes: ["card"], description: "Paste below" },
   { sequence: "P", action: "pasteAbove", modes: ["card"], description: "Paste above" },
+  { sequence: "Ctrl+c", action: "copyCardText", modes: ["card"], description: "Copy card text to system clipboard" },
+  { sequence: "Ctrl+x", action: "cutCardText", modes: ["card"], description: "Cut card text to system clipboard" },
 
   // Card focus - Score
   { sequence: "f", action: "scoreUp", modes: ["card"], description: "Score +1" },
@@ -132,6 +131,16 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Reporters
   { sequence: "gr", action: "showReporters", modes: ["column", "card"], description: "Manage reporters" },
+];
+
+/**
+ * Shortcuts driven by native browser events rather than keydown, so they are
+ * listed in the cheatsheet but cannot be remapped. Ctrl+v must stay unbound
+ * in DEFAULT_KEYBINDINGS: a keydown binding would preventDefault and suppress
+ * the `paste` event.
+ */
+export const NATIVE_SHORTCUTS: Omit<KeyBinding, "action">[] = [
+  { sequence: "Ctrl+v", modes: ["card"], description: "Paste system clipboard text below" },
 ];
 
 /**

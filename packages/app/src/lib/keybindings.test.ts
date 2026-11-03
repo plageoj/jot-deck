@@ -39,9 +39,10 @@ describe("findAction", () => {
   });
 
   it("should find Ctrl clipboard shortcuts in card focus", () => {
-    expect(findAction("Ctrl+c", "card")).toBe("copyCard");
-    expect(findAction("Ctrl+x", "card")).toBe("cutCard");
-    expect(findAction("Ctrl+v", "card")).toBe("pasteBelow");
+    expect(findAction("Ctrl+c", "card")).toBe("copyCardText");
+    expect(findAction("Ctrl+x", "card")).toBe("cutCardText");
+    // Left unbound so keydown does not suppress the native paste event.
+    expect(findAction("Ctrl+v", "card")).toBeNull();
     expect(findAction("Ctrl+c", "column")).toBeNull();
   });
 

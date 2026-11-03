@@ -123,9 +123,11 @@ export class BoardActionExecutors {
       case "copyCard":
         this.cardCopy();
         break;
-      case "cutCard":
-        this.cardCopy();
-        await this.cardDelete();
+      case "copyCardText":
+        await this.cardCopyText();
+        break;
+      case "cutCardText":
+        if (await this.cardCopyText()) await this.cardDelete();
         break;
       case "pasteBelow":
         await this.cardPasteBelow();
@@ -354,14 +356,34 @@ export class BoardActionExecutors {
     if (focusedCard) focus.clipboardCard = { ...focusedCard };
   }
 
+  /** Writes the focused card's text to the system clipboard; false if nothing was written. */
+  private async cardCopyText(): Promise<boolean> {
+    const { focusedCard } = this.context();
+    if (!focusedCard) return false;
+    try {
+      await navigator.clipboard.writeText(focusedCard.content);
+      return true;
+    } catch {
+      // Clipboard unavailable (e.g. permissions): keep the card.
+      return false;
+    }
+  }
+
   private async cardPasteBelow(): Promise<void> {
+    const { focus } = this.context();
+    if (focus.clipboardCard) await this.insertCardBelow(focus.clipboardCard.content);
+  }
+
+  /** Pastes system clipboard text as a single card below the focused card. */
+  async pasteTextBelow(text: string): Promise<void> {
+    const content = text.replace(/\r\n?/g, "\n").replace(/^\n+|\n+$/g, "");
+    if (content.trim()) await this.insertCardBelow(content);
+  }
+
+  private async insertCardBelow(content: string): Promise<void> {
     const { data, focus, focusedColumn } = this.context();
-    if (!focus.clipboardCard || !focusedColumn) return;
-    const pasted = await data.createCard(
-      focusedColumn.id,
-      focus.clipboardCard.content,
-      focus.focusedCardIndex + 1,
-    );
+    if (!focusedColumn) return;
+    const pasted = await data.createCard(focusedColumn.id, content, focus.focusedCardIndex + 1);
     if (pasted) focus.focusedCardIndex++;
   }
 

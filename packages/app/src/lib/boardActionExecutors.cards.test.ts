@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { DeckData } from "#lib/deckData.svelte.ts";
 import type { FocusManager } from "#lib/focusManager.svelte.ts";
 import type { BoardActionExecutors } from "#lib/boardActionExecutors.ts";
@@ -245,12 +245,6 @@ describe("card operations", () => {
       expect(focus.clipboardCard?.id).toBe("c-0-b");
     });
 
-    it("cutCard copies the focused card to the clipboard and deletes it", async () => {
-      await actions.executeCardAction("cutCard");
-      expect(focus.clipboardCard?.id).toBe("c-0-b");
-      expect(boardState.deleteCardCalls).toContain("c-0-b");
-    });
-
     it("pasteBelow creates a card after the focused card from clipboard", async () => {
       focus.clipboardCard = { ...makeCard("clip", "col-0"), content: "pasted" };
       await actions.executeCardAction("pasteBelow");
@@ -268,6 +262,52 @@ describe("card operations", () => {
       focus.clipboardCard = null;
       await actions.executeCardAction("pasteAbove");
       await actions.executeCardAction("pasteBelow");
+      expect(boardState.createCardCalls).toHaveLength(0);
+    });
+  });
+
+  describe("system clipboard", () => {
+    let writeText: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      writeText = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal("navigator", { clipboard: { writeText } });
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("copyCardText writes the focused card's content without touching the app clipboard", async () => {
+      focus.clipboardCard = null;
+      await actions.executeCardAction("copyCardText");
+      expect(writeText).toHaveBeenCalledWith(data.cardsByColumn["col-0"][1].content);
+      expect(focus.clipboardCard).toBeNull();
+      expect(boardState.deleteCardCalls).toHaveLength(0);
+    });
+
+    it("cutCardText writes the content and deletes the focused card", async () => {
+      await actions.executeCardAction("cutCardText");
+      expect(writeText).toHaveBeenCalledOnce();
+      expect(boardState.deleteCardCalls).toContain("c-0-b");
+    });
+
+    it("cutCardText keeps the card when the clipboard write fails", async () => {
+      writeText.mockRejectedValue(new Error("denied"));
+      await actions.executeCardAction("cutCardText");
+      expect(boardState.deleteCardCalls).toHaveLength(0);
+    });
+
+    it("pasteTextBelow creates one card below with normalized line endings", async () => {
+      await actions.pasteTextBelow("\r\nfirst line\r\nsecond line\r\n");
+      expect(boardState.createCardCalls).toHaveLength(1);
+      expect(boardState.createCardCalls[0]?.content).toBe("first line\nsecond line");
+      expect(boardState.createCardCalls[0]?.position).toBe(2);
+      expect(focus.focusedCardIndex).toBe(2);
+    });
+
+    it("pasteTextBelow ignores blank text", async () => {
+      await actions.pasteTextBelow("  \n\t ");
       expect(boardState.createCardCalls).toHaveLength(0);
     });
   });
