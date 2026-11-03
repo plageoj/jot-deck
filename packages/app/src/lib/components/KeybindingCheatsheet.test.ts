@@ -14,17 +14,15 @@ vi.mock("#lib/db/index.ts", () => ({ isTauri: () => mockEnv.tauri }));
 /** The key labels of the row describing `description`, in display order. */
 function keysFor(description: string): string[] {
   const row = screen.getAllByText(description)[0].closest(".cheatsheet-item");
-  return Array.from(row?.querySelectorAll("kbd") ?? []).map((k) => k.textContent ?? "");
+  return Array.from(row?.querySelectorAll("dt kbd") ?? []).map((k) => k.textContent ?? "");
 }
 
-/** The desktop-only note right after `key`'s keycap in that row, if any. */
-function noteAfter(description: string, key: string): string | null {
+/** The keys of that row shown dimmed as unavailable in the browser. */
+function unavailableKeys(description: string): string[] {
   const row = screen.getAllByText(description)[0].closest(".cheatsheet-item");
-  const kbd = Array.from(row?.querySelectorAll("kbd") ?? []).find(
-    (k) => k.textContent === key,
+  return Array.from(row?.querySelectorAll("dt kbd.unavailable") ?? []).map(
+    (k) => k.textContent ?? "",
   );
-  const next = kbd?.nextElementSibling;
-  return next?.classList.contains("desktop-only") ? next.textContent : null;
 }
 
 describe("KeybindingCheatsheet in a browser", () => {
@@ -38,14 +36,17 @@ describe("KeybindingCheatsheet in a browser", () => {
     expect(keysFor("Switch column")).toEqual(["gn", "gc", "Ctrl+t"]);
   });
 
-  it("marks browser-reserved keys as desktop only", () => {
+  it("dims browser-reserved keys and labels them desktop only", () => {
     render(KeybindingCheatsheet, { props: { mode: "column", onClose: vi.fn() } });
-    expect(noteAfter("Command palette", "Ctrl+Shift+P")).toBe("Desktop only");
-    expect(noteAfter("Command palette", "F1")).toBeNull();
-    expect(noteAfter("Switch column", "Ctrl+t")).toBe("Desktop only");
-    expect(noteAfter("Switch column", "gn")).toBeNull();
-    expect(noteAfter("Switch column", "gc")).toBeNull();
-    expect(noteAfter("Switch deck", "Ctrl+p")).toBeNull();
+    expect(unavailableKeys("Command palette")).toEqual(["Ctrl+Shift+P"]);
+    expect(unavailableKeys("Switch column")).toEqual(["Ctrl+t"]);
+    expect(unavailableKeys("Switch deck")).toEqual([]);
+    expect(screen.getByTitle("Ctrl+t — Desktop only").textContent).toBe("Ctrl+t");
+  });
+
+  it("explains dimmed keys in a legend", () => {
+    render(KeybindingCheatsheet, { props: { mode: "column", onClose: vi.fn() } });
+    expect(screen.getByText("Desktop only")).toBeTruthy();
   });
 });
 
@@ -67,6 +68,7 @@ describe("KeybindingCheatsheet in the desktop app", () => {
   it("keeps the declared order without notes", () => {
     render(KeybindingCheatsheet, { props: { mode: "column", onClose: vi.fn() } });
     expect(keysFor("Command palette")).toEqual(["Ctrl+Shift+P", "F1"]);
-    expect(noteAfter("Command palette", "Ctrl+Shift+P")).toBeNull();
+    expect(unavailableKeys("Command palette")).toEqual([]);
+    expect(screen.queryByText("Desktop only")).toBeNull();
   });
 });

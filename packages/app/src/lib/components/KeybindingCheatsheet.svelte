@@ -16,7 +16,7 @@
   let { mode, onClose }: Props = $props();
   let dialogRef = $state<HTMLDialogElement | null>(null);
 
-  // In a browser, keys the browser keeps for itself are flagged and listed
+  // In a browser, keys the browser keeps for itself are dimmed and listed
   // after the alternatives that do work there.
   const browser = !isTauri();
   const desktopOnly = (seq: string) => browser && isBrowserReserved(seq);
@@ -75,7 +75,14 @@
   <div class="cheatsheet-panel">
     <div class="cheatsheet-header">
       <h2>Keyboard Shortcuts — {modeLabel} Mode</h2>
-      <span class="cheatsheet-hint">Press <kbd>Esc</kbd> to close</span>
+      <div class="cheatsheet-hints">
+        {#if browser}
+          <span class="cheatsheet-hint"
+            ><kbd class="unavailable">Key</kbd> Desktop only</span
+          >
+        {/if}
+        <span class="cheatsheet-hint">Press <kbd>Esc</kbd> to close</span>
+      </div>
     </div>
     <div class="cheatsheet-body">
       <dl class="cheatsheet-list">
@@ -84,9 +91,12 @@
             <dt>
               {#each group.sequences as seq, i}
                 {#if i > 0}<span class="separator"> / </span>{/if}
-                <kbd title={seq}>{formatSequence(seq)}</kbd>
                 {#if desktopOnly(seq)}
-                  <span class="desktop-only">Desktop only</span>
+                  <kbd class="unavailable" title="{seq} — Desktop only"
+                    >{formatSequence(seq)}</kbd
+                  >
+                {:else}
+                  <kbd title={seq}>{formatSequence(seq)}</kbd>
                 {/if}
               {/each}
             </dt>
@@ -165,17 +175,20 @@
     padding: 0.5rem 1rem;
   }
 
-  /* Its own line under the keys, not wrapped in among them. */
-  .desktop-only {
-    display: block;
-    font-size: 0.875rem;
-    color: var(--text-muted);
-    font-style: italic;
+  .cheatsheet-hints {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  /* Keys the browser keeps for itself (see the header legend). */
+  .unavailable {
+    opacity: 0.45;
   }
 
   .cheatsheet-list {
     columns: 2 250px;
-    column-gap: 1.5rem;
+    column-gap: 0;
   }
 
   .cheatsheet-item {
@@ -184,12 +197,7 @@
     align-items: baseline;
     gap: 0.5rem;
     padding: 0.25rem 0.375rem;
-    border-radius: 4px;
-  }
-
-  /* Striped rows so each key list reads across to its description. */
-  .cheatsheet-item:nth-child(even) {
-    background-color: var(--bg-primary);
+    border-bottom: 1px solid var(--bg-tertiary);
   }
 
   /* The minimum width keeps descriptions aligned; a longer key list (e.g. a

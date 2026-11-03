@@ -42,12 +42,14 @@ test.describe("Browser runtime", () => {
     await expect(dialog.getByRole("link", { name: "desktop app" })).toBeVisible();
   });
 
-  test("cheatsheet flags browser-reserved keys and lists alternatives first", async ({ page }) => {
+  test("cheatsheet dims browser-reserved keys and lists alternatives first", async ({ page }) => {
     await page.keyboard.press("Shift+/");
 
     const palette = page.locator(".cheatsheet-item").filter({ hasText: "Command palette" });
     await expect(palette.locator("kbd")).toHaveText(["F1", "Ctrl+Shift+P"]);
-    await expect(palette.locator(".desktop-only")).toHaveText("Desktop only");
+    await expect(palette.locator("kbd.unavailable")).toHaveText(["Ctrl+Shift+P"]);
+    await expect(palette.locator("kbd.unavailable")).toHaveAttribute("title", "Ctrl+Shift+P — Desktop only");
+    await expect(page.locator(".cheatsheet-hints")).toContainText("Desktop only");
 
     const column = page.locator(".cheatsheet-item").filter({ hasText: "Switch column" });
     await expect(column.locator("kbd")).toHaveText(["gn", "gc", "Ctrl+t"]);
