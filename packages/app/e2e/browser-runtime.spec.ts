@@ -53,3 +53,19 @@ test.describe("Browser runtime", () => {
     await expect(column.locator("kbd")).toHaveText(["gn", "gc", "Ctrl+t"]);
   });
 });
+
+test.describe("Touch device", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("explains the app is keyboard-driven, then lets the board through", async ({ page }) => {
+    await page.goto("/");
+
+    const notice = page.locator("dialog.touch-notice");
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("Jot Deck is keyboard-driven.");
+
+    await notice.getByRole("button", { name: "Continue anyway" }).click();
+    await expect(notice).toHaveCount(0);
+    await expect(page.locator("h1")).toContainText("Getting Started");
+  });
+});

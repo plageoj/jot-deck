@@ -164,7 +164,10 @@
     padding: 0.5rem 1rem;
   }
 
+  /* Its own line under the keys: the fixed-width key column has no room for
+     it beside them. */
   .desktop-only {
+    display: block;
     font-size: 0.875rem;
     color: var(--text-muted);
     font-style: italic;
