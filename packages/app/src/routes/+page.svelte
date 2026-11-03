@@ -377,6 +377,7 @@
     <div class="status">
       <p>No columns in this deck. Create your first column!</p>
       <button onclick={() => data.createColumn()}>Create Column</button>
+      <p class="status-hint">Press <kbd>Shift+R</kbd> to rename this deck.</p>
     </div>
   {:else}
     <DeckComponent
@@ -692,5 +693,18 @@
 
   .status button:hover {
     background-color: var(--bg-tertiary);
+  }
+
+  .status-hint {
+    font-size: 0.875rem;
+  }
+
+  .status-hint kbd {
+    padding: 0.0625rem 0.375rem;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 0.875rem;
   }
 </style>

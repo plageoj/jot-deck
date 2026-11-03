@@ -214,6 +214,25 @@ test.describe("Deck Management", () => {
     await expect(page.locator("h1")).toContainText("Keyboard Deck");
   });
 
+  test("rename an empty deck with Shift+R from its hint", async ({ page }) => {
+    await page.keyboard.press("Control+p");
+    await page.waitForTimeout(300);
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator(".status-hint")).toContainText("Shift+R");
+
+    await page.keyboard.press("Shift+R");
+    await page.waitForTimeout(300);
+    await expect(page.locator("dialog.rename-dialog")).toBeVisible();
+
+    await page.locator(".rename-input").fill("Empty Deck");
+    await page.locator(".btn-confirm").click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator("h1")).toContainText("Empty Deck");
+  });
+
   test("rename deck via command palette", async ({ page }) => {
     // Open command palette and search for rename
     await page.keyboard.press("Control+Shift+P");
