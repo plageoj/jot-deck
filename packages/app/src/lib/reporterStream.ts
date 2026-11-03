@@ -1,3 +1,24 @@
+/**
+ * Card length backstop shared with the core (`query::MAX_CARD_LENGTH`), counted
+ * in Unicode code points like Rust's `chars().count()`. The overlay stops
+ * growing here (007-reporter-protocol.md §5.1): a Reporter that never commits
+ * cannot balloon memory or rendering cost, and anything past it could not be
+ * committed anyway.
+ */
+export const MAX_CARD_LENGTH = 4000;
+
+/** `text` cut to at most `max` code points (never splits a surrogate pair). */
+export function truncateToCodePoints(text: string, max: number): string {
+  // UTF-16 length is an upper bound on the code point count.
+  if (text.length <= max) return text;
+  let count = 0;
+  for (let i = 0; i < text.length; count++) {
+    if (count === max) return text.slice(0, i);
+    i += text.codePointAt(i)! > 0xffff ? 2 : 1;
+  }
+  return text;
+}
+
 interface ReporterStreamEvent {
   kind: "begin" | "delta" | "end";
   card_id: string;
@@ -76,7 +97,11 @@ export class ReporterStreamController {
   }
 
   private bufferDelta(cardId: string, chunk: string): void {
-    this.pendingDeltas[cardId] = (this.pendingDeltas[cardId] ?? "") + chunk;
+    // Bounded between frames too: more than a full card could never be shown.
+    this.pendingDeltas[cardId] = truncateToCodePoints(
+      (this.pendingDeltas[cardId] ?? "") + chunk,
+      MAX_CARD_LENGTH,
+    );
     if (this.deltaFlushHandle !== null) return;
     this.deltaFlushHandle = requestAnimationFrame(() => {
       this.deltaFlushHandle = null;
@@ -85,7 +110,10 @@ export class ReporterStreamController {
       const streamingText = { ...this.options.getStreamingText() };
       for (const [id, text] of Object.entries(pending)) {
         if (streamingText[id] === undefined) continue;
-        streamingText[id] += text;
+        streamingText[id] = truncateToCodePoints(
+          streamingText[id] + text,
+          MAX_CARD_LENGTH,
+        );
       }
       this.options.setStreamingText(streamingText);
     });
