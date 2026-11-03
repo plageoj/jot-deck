@@ -220,7 +220,7 @@ test.describe("Deck Management", () => {
     await page.locator(".palette-item", { hasText: "New deck" }).click();
     await page.waitForTimeout(500);
 
-    await expect(page.locator(".status-hint")).toContainText("Shift+R");
+    await expect(page.locator(".status-hint kbd")).toHaveText("R");
 
     await page.keyboard.press("Shift+R");
     await page.waitForTimeout(300);
@@ -231,6 +231,18 @@ test.describe("Deck Management", () => {
     await page.waitForTimeout(500);
 
     await expect(page.locator("h1")).toContainText("Empty Deck");
+  });
+
+  test("command palette shows each command's bound key", async ({ page }) => {
+    await page.keyboard.press("Control+Shift+P");
+    await page.waitForTimeout(300);
+
+    const shortcutOf = (label: string) =>
+      page.locator(".palette-item", { hasText: label }).locator(".palette-shortcut");
+    await expect(shortcutOf("Rename Deck")).toHaveText("R");
+    await expect(shortcutOf("Rename Column")).toHaveText("r");
+    await expect(shortcutOf("Switch Deck")).toHaveText("Ctrl+p");
+    await expect(shortcutOf("Keyboard Shortcuts")).toHaveText("?");
   });
 
   test("rename deck via command palette", async ({ page }) => {

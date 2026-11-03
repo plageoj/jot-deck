@@ -186,6 +186,21 @@ describe("SettingsStore (DB-backed)", () => {
     expect(parsed.fontSize).toBe(18);
   });
 
+  it("shortcutLabel shows the effective key and follows remaps", async () => {
+    await store.load();
+    expect(store.shortcutLabel("renameDeck")).toBe("R");
+
+    const deleteColumn = DEFAULT_KEYBINDINGS.find(
+      (b) => b.action === "deleteColumn" && b.sequence === "dd",
+    )!;
+    store.setKeybindingOverride(signatureOf(deleteColumn), "Shift+ArrowLeft");
+    expect(store.shortcutLabel("deleteColumn")).toBe("Shift+←");
+
+    store.resetAllKeybindings();
+    expect(store.shortcutLabel("deleteColumn")).toBe("dd");
+    expect(store.shortcutLabel("showShortcuts")).toBeNull();
+  });
+
   it("rehydrates state from the backend", async () => {
     stub.store.set(
       SETTINGS_DB_KEY,

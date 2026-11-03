@@ -1,5 +1,6 @@
 <script lang="ts">
   import { COMMANDS } from "#lib/commands.ts";
+  import { settingsStore } from "#lib/settings.svelte.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
 
   interface Props {
@@ -9,11 +10,13 @@
 
   let { onExecute, onClose }: Props = $props();
 
-  const items: PaletteItem[] = COMMANDS.map((cmd) => ({
-    id: cmd.id,
-    label: cmd.label,
-    shortcut: cmd.shortcut,
-  }));
+  const items: PaletteItem[] = $derived(
+    COMMANDS.map((cmd) => ({
+      id: cmd.id,
+      label: cmd.label,
+      shortcut: settingsStore.shortcutLabel(cmd.action) ?? cmd.fixedShortcut,
+    })),
+  );
 
   const actionById = new Map(COMMANDS.map((cmd) => [cmd.id, cmd.action]));
 

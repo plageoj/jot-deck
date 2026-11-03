@@ -5,6 +5,7 @@ import {
   getKeybindingsForMode,
   resolveKeybindings,
   setKeybindingOverrides,
+  shortcutFor,
   signatureOf,
   findKeybindingConflicts,
   getKnownActions,
@@ -326,6 +327,41 @@ describe("getKnownActions", () => {
     // "undo" is bound in both column and card modes.
     const undo = getKnownActions().find((a) => a.action === "undo");
     expect(undo?.modes).toEqual(expect.arrayContaining(["column", "card"]));
+  });
+});
+
+describe("shortcutFor", () => {
+  afterEach(() => setKeybindingOverrides({}));
+
+  const renameDeck = DEFAULT_KEYBINDINGS.find((b) => b.action === "renameDeck")!;
+
+  it("returns the first default binding for the action", () => {
+    expect(shortcutFor("renameDeck")).toBe("R");
+    expect(shortcutFor("deleteColumn")).toBe("dd");
+    expect(shortcutFor("showDeckPalette")).toBe("Ctrl+p");
+  });
+
+  it("follows a remapped key", () => {
+    setKeybindingOverrides({ [signatureOf(renameDeck)]: "Ctrl+e" });
+    expect(shortcutFor("renameDeck")).toBe("Ctrl+e");
+  });
+
+  it("prefers a user-added binding over the defaults", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "z", action: "renameColumn", modes: ["card"], description: "Rename column" },
+    ]);
+    expect(shortcutFor("renameColumn")).toBe("z");
+  });
+
+  it("returns null when every binding is disabled or the action is unbound", () => {
+    setKeybindingOverrides({ [signatureOf(renameDeck)]: null });
+    expect(shortcutFor("renameDeck")).toBeNull();
+    expect(shortcutFor("showShortcuts")).toBeNull();
+  });
+
+  it("only considers bindings in the given modes", () => {
+    expect(shortcutFor("createCardAbove", ["column"])).toBeNull();
+    expect(shortcutFor("createCardAbove", ["card"])).toBe("O");
   });
 });
 

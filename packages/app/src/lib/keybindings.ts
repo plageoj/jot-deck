@@ -304,6 +304,21 @@ export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
 }
 
 /**
+ * The key sequence shown as an action's shortcut in hints and the command
+ * palette: the first effective binding in any of `modes`, with the user's
+ * customizations first. `null` when every binding for the action is disabled.
+ */
+export function shortcutFor(
+  action: string,
+  modes: FocusMode[] = ["column", "card"],
+): string | null {
+  const binding = lookupBindings.find(
+    (b) => b.action === action && b.modes.some((m) => modes.includes(m))
+  );
+  return binding?.sequence ?? null;
+}
+
+/**
  * How key sequences read on screen. Stored sequences always keep the key names
  * (`Ctrl+Shift+ArrowLeft`); only the display goes through a label set, so a
  * platform-specific set (e.g. macOS: `⌘` / `⌥` / `⌃` / `⇧`, no joiner) can be

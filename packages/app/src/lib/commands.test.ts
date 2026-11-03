@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { COMMANDS, filterCommands } from "./commands";
+import { getKnownActions } from "./keybindings";
 
 describe("COMMANDS", () => {
   it("should have unique ids", () => {
@@ -46,15 +47,20 @@ describe("filterCommands", () => {
     expect(trash).toBeDefined();
     expect(trash?.label).toBe("Trash");
     expect(trash?.action).toBe("showTrashPalette");
-    expect(trash?.shortcut).toBe("g t");
   });
 
-  it("should include Settings command bound to showSettings with Ctrl+, shortcut", () => {
+  it("should include Settings command bound to showSettings", () => {
     const settings = COMMANDS.find((c) => c.id === "settings");
     expect(settings).toBeDefined();
     expect(settings?.label).toBe("Settings");
     expect(settings?.action).toBe("showSettings");
-    expect(settings?.shortcut).toBe("Ctrl+,");
+  });
+
+  it("gives a fixed shortcut only to actions without a keybinding", () => {
+    const bound = new Set(getKnownActions().map((a) => a.action));
+    for (const cmd of COMMANDS) {
+      if (cmd.fixedShortcut) expect(bound.has(cmd.action)).toBe(false);
+    }
   });
 
   it("should include Check for Updates command bound to checkForUpdates", () => {

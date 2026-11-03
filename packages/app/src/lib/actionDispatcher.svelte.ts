@@ -23,7 +23,7 @@ const ACTIONS_WITHOUT_LOADED_DECK = new Set([
 
 /** Palette commands that act on the board through UI callbacks rather than
  * `executeAction`, so they need the same guard. */
-const BOARD_COMMANDS = new Set(["newColumn", "renameColumn", "deleteColumn"]);
+const BOARD_COMMANDS = new Set(["createColumn", "renameColumn", "deleteColumn"]);
 
 export class ActionDispatcher {
   private readonly data: DeckData;
@@ -377,16 +377,13 @@ export class ActionDispatcher {
       case "restoreOnboarding":
         this.runTask(this.data.restoreOnboardingDeck());
         break;
-      case "switchDeck":
-        this.focus.openPalette("deck");
-        break;
       case "renameDeck":
         this.onRenameDeck?.();
         break;
       case "deleteDeck":
         this.onDeleteDeck?.();
         break;
-      case "newColumn":
+      case "createColumn":
         this.runTask(this.createColumnFromPalette());
         break;
       case "renameColumn":

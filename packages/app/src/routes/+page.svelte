@@ -203,6 +203,7 @@
   });
 
   let renamingDeck = $state<Deck | null>(null);
+  const renameDeckShortcut = $derived(settingsStore.shortcutLabel("renameDeck"));
   let deletingDeck = $state<Deck | null>(null);
   // In-place column rename. The draft lives here so starting another edit can
   // commit it, the way a card editor saves before another one opens.
@@ -377,7 +378,9 @@
     <div class="status">
       <p>No columns in this deck. Create your first column!</p>
       <button onclick={() => data.createColumn()}>Create Column</button>
-      <p class="status-hint">Press <kbd>Shift+R</kbd> to rename this deck.</p>
+      {#if renameDeckShortcut}
+        <p class="status-hint">Press <kbd>{renameDeckShortcut}</kbd> to rename this deck.</p>
+      {/if}
     </div>
   {:else}
     <DeckComponent

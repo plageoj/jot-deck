@@ -386,8 +386,8 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(focus.activePalette).toBeNull();
   });
 
-  it("switchDeck reopens the deck palette", async () => {
-    await dispatcher.executeCommand("switchDeck");
+  it("showDeckPalette reopens the deck palette", async () => {
+    await dispatcher.executeCommand("showDeckPalette");
     expect(focus.activePalette).toBe("deck");
   });
 
@@ -419,14 +419,14 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(calls).toEqual([1]);
   });
 
-  it("newColumn inserts to the right of the focused column and focuses it", async () => {
+  it("createColumn inserts to the right of the focused column and focuses it", async () => {
     boardState.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
     data.columns = [...boardState.columns];
     focus.focusedColumnIndex = 0;
     focus.previousFocusMode = "card";
     const scrolledIndices: number[] = [];
     focus.onScrollToColumn = (index) => scrolledIndices.push(index);
-    await dispatcher.executeCommand("newColumn");
+    await dispatcher.executeCommand("createColumn");
     await vi.waitFor(() => {
       expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
     });
@@ -746,7 +746,7 @@ describe("ActionDispatcher while the selected deck is not loaded", () => {
     dispatcher.handleKeydown(makeKeyEvent({ key: "c" }));
     dispatcher.handleKeydown(makeKeyEvent({ key: "u" }));
     await dispatcher.executeAction("createColumn");
-    dispatcher.executeCommand("newColumn");
+    dispatcher.executeCommand("createColumn");
     await flushPromises();
 
     expect(boardState.createColumnCalls).toHaveLength(0);

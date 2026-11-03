@@ -1,6 +1,8 @@
 import { getDatabase, type DatabaseBackend } from "./db";
 import {
+  formatSequence,
   setKeybindingOverrides,
+  shortcutFor,
   type FocusMode,
   type KeyBinding,
   type KeybindingOverrides,
@@ -206,6 +208,18 @@ export class SettingsStore {
       this.state.keybindingOverrides,
       this.state.customKeybindings,
     );
+  }
+
+  /**
+   * Display form of an action's effective shortcut, or `null` when it has
+   * none. Reads the keybinding customization so a view showing it re-renders
+   * when the user remaps the key.
+   */
+  shortcutLabel(action: string): string | null {
+    void this.state.keybindingOverrides;
+    void this.state.customKeybindings;
+    const sequence = shortcutFor(action);
+    return sequence === null ? null : formatSequence(sequence);
   }
 
   /** Persist the current state. Writes are serialized via writeChain. */
