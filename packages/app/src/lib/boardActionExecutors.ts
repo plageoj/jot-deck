@@ -123,6 +123,10 @@ export class BoardActionExecutors {
       case "copyCard":
         this.cardCopy();
         break;
+      case "cutCard":
+        this.cardCopy();
+        await this.cardDelete();
+        break;
       case "pasteBelow":
         await this.cardPasteBelow();
         break;

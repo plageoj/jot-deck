@@ -245,6 +245,12 @@ describe("card operations", () => {
       expect(focus.clipboardCard?.id).toBe("c-0-b");
     });
 
+    it("cutCard copies the focused card to the clipboard and deletes it", async () => {
+      await actions.executeCardAction("cutCard");
+      expect(focus.clipboardCard?.id).toBe("c-0-b");
+      expect(boardState.deleteCardCalls).toContain("c-0-b");
+    });
+
     it("pasteBelow creates a card after the focused card from clipboard", async () => {
       focus.clipboardCard = { ...makeCard("clip", "col-0"), content: "pasted" };
       await actions.executeCardAction("pasteBelow");

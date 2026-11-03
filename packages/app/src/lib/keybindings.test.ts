@@ -38,6 +38,13 @@ describe("findAction", () => {
     expect(findAction("gg", "card")).toBe("goFirst");
   });
 
+  it("should find Ctrl clipboard shortcuts in card focus", () => {
+    expect(findAction("Ctrl+c", "card")).toBe("copyCard");
+    expect(findAction("Ctrl+x", "card")).toBe("cutCard");
+    expect(findAction("Ctrl+v", "card")).toBe("pasteBelow");
+    expect(findAction("Ctrl+c", "column")).toBeNull();
+  });
+
   it("should find parameterized jump actions", () => {
     expect(findAction("g1", "column")).toBe("jumpToColumn:0");
     expect(findAction("g1", "card")).toBe("jumpToColumn:0");

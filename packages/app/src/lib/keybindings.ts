@@ -78,7 +78,10 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "dd", action: "deleteCard", modes: ["card"], description: "Delete card" },
   { sequence: "Delete", action: "deleteCard", modes: ["card"], description: "Delete card" },
   { sequence: "yy", action: "copyCard", modes: ["card"], description: "Copy card" },
+  { sequence: "Ctrl+c", action: "copyCard", modes: ["card"], description: "Copy card" },
+  { sequence: "Ctrl+x", action: "cutCard", modes: ["card"], description: "Cut card" },
   { sequence: "p", action: "pasteBelow", modes: ["card"], description: "Paste below" },
+  { sequence: "Ctrl+v", action: "pasteBelow", modes: ["card"], description: "Paste below" },
   { sequence: "P", action: "pasteAbove", modes: ["card"], description: "Paste above" },
 
   // Card focus - Score
