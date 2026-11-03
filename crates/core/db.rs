@@ -89,7 +89,91 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
     FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
 );
+
+-- 外部からの書き込み（MCP / Reporter）の変更履歴（008-mcp-server.md §5.1）。
+-- 1 書き込み = 1 行。before / after は変更した属性だけの JSON（作成は before が
+-- NULL）。target_id には FK を張らない:
+-- 履歴は対象の物理削除後も保持期間（30 日、cleanup）まで残す。Deck 削除では消す。
+CREATE TABLE IF NOT EXISTS change_history (
+    id TEXT PRIMARY KEY,
+    deck_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    before TEXT,
+    after TEXT,
+    author_source TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    author_label TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_history_deck ON change_history(deck_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_change_history_target ON change_history(target_id);
+CREATE INDEX IF NOT EXISTS idx_change_history_created_at ON change_history(created_at);
 "#;
+
+/// 入れ子にできる書き込みトランザクション。
+///
+/// トランザクション外では `BEGIN IMMEDIATE`、既に内側なら `SAVEPOINT` を張るので、
+/// Repository 関数（それぞれ自前でトランザクションを張る）を `write` 層が外側の
+/// トランザクションで包み、変更と変更履歴（008 §5.1）を 1 つにまとめられる。
+/// IMMEDIATE は最初から書き込みロックを取り、WAL で他プロセスと共有するとき読み
+/// →書きの昇格で `SQLITE_BUSY` になるのを避ける。`commit` せずに drop すると
+/// ロールバックする。
+pub struct WriteTx<'c> {
+    conn: &'c Connection,
+    nested: bool,
+    finished: bool,
+}
+
+/// [`WriteTx`] を開始する。
+pub fn write_tx(conn: &Connection) -> Result<WriteTx<'_>> {
+    let nested = !conn.is_autocommit();
+    conn.execute_batch(if nested {
+        "SAVEPOINT jot_deck_write"
+    } else {
+        "BEGIN IMMEDIATE"
+    })?;
+    Ok(WriteTx {
+        conn,
+        nested,
+        finished: false,
+    })
+}
+
+impl WriteTx<'_> {
+    pub fn commit(mut self) -> Result<()> {
+        self.finished = true;
+        self.conn.execute_batch(if self.nested {
+            "RELEASE jot_deck_write"
+        } else {
+            "COMMIT"
+        })?;
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for WriteTx<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.conn
+    }
+}
+
+impl Drop for WriteTx<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.conn.execute_batch(if self.nested {
+                "ROLLBACK TO jot_deck_write; RELEASE jot_deck_write"
+            } else {
+                "ROLLBACK"
+            });
+        }
+    }
+}
 
 /// データベースを初期化する
 pub fn init_db(conn: &Connection) -> Result<()> {

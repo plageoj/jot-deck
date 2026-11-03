@@ -488,6 +488,7 @@ fn cmd_cleanup(conn: &mut Connection) {
             println!("  Deleted columns: {}", result.deleted_columns);
             println!("  Deleted cards: {}", result.deleted_cards);
             println!("  Deleted orphan tags: {}", result.deleted_orphan_tags);
+            println!("  Deleted history rows: {}", result.deleted_history);
         }
         Err(e) => println!("Error: {}", e),
     }

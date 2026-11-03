@@ -13,6 +13,7 @@ use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use jot_deck_core::history::Author;
 use jot_deck_core::write::WriteScope;
 
 use crate::protocol::RpcError;
@@ -205,5 +206,11 @@ impl ReporterScope {
     /// drift apart here — 008 §4.5 / write.rs's trust boundary.
     pub fn write_scope(&self) -> &WriteScope {
         &self.write_scope
+    }
+
+    /// Who this Reporter's writes are attributed to in the change history
+    /// (008 §5.1). The GUI labels it from the registration.
+    pub fn author(&self) -> Author {
+        Author::reporter(self.reporter_id.clone())
     }
 }
