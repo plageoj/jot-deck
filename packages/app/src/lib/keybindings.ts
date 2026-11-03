@@ -30,6 +30,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "c", action: "createColumn", modes: ["card"], description: "New column" },
   { sequence: "N", action: "createColumn", modes: ["column", "card"], description: "New column" },
   { sequence: "r", action: "renameColumn", modes: ["column", "card"], description: "Rename column" },
+  { sequence: "F2", action: "renameColumn", modes: ["column", "card"], description: "Rename column" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "Delete column" },
   { sequence: "Delete", action: "deleteColumn", modes: ["column"], description: "Delete column" },
 
@@ -118,6 +119,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Trash
   { sequence: "gt", action: "showTrashPalette", modes: ["column", "card"], description: "Open trash" },
+
+  // Common - Deck
+  { sequence: "R", action: "renameDeck", modes: ["column", "card"], description: "Rename deck" },
 
   // Common - Palettes
   { sequence: "Ctrl+p", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },

@@ -23,6 +23,10 @@ describe("findAction", () => {
     expect(findAction("j", "column")).toBe("enterCardFocusFirst");
     expect(findAction("r", "column")).toBe("renameColumn");
     expect(findAction("r", "card")).toBe("renameColumn");
+    expect(findAction("F2", "column")).toBe("renameColumn");
+    expect(findAction("F2", "card")).toBe("renameColumn");
+    expect(findAction("R", "column")).toBe("renameDeck");
+    expect(findAction("R", "card")).toBe("renameDeck");
   });
 
   it("should find single-key action in card mode", () => {

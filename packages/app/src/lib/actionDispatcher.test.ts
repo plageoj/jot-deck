@@ -92,6 +92,17 @@ describe("ActionDispatcher with no columns loaded", () => {
     expect(event.defaultPrevented).toBe(true);
   });
 
+  it("renames the deck with `R` when no columns exist", async () => {
+    const renameDeck = vi.fn();
+    dispatcher.onRenameDeck = renameDeck;
+    const event = makeKeyEvent({ key: "R", shift: true });
+    dispatcher.handleKeydown(event);
+    await flushPromises();
+
+    expect(renameDeck).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
   it("creates a column with `c` when no columns exist", async () => {
     const event = makeKeyEvent({ key: "c" });
     dispatcher.handleKeydown(event);
@@ -537,6 +548,40 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     focus.focusMode = "column";
     focus.focusedColumnIndex = 0;
     dispatcher = new ActionDispatcher(data, focus);
+  });
+
+  it.each(["column", "card"] as const)("renames the deck with `R` in %s focus", async (mode) => {
+    focus.focusMode = mode;
+    focus.focusedCardIndex = 0;
+    const renameDeck = vi.fn();
+    const renameColumn = vi.fn();
+    dispatcher.onRenameDeck = renameDeck;
+    dispatcher.onRenameColumn = renameColumn;
+
+    const event = makeKeyEvent({ key: "R", shift: true });
+    dispatcher.handleKeydown(event);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(renameDeck).toHaveBeenCalledOnce();
+    expect(renameColumn).not.toHaveBeenCalled();
+  });
+
+  it.each(["column", "card"] as const)("renames the column with `F2` in %s focus", async (mode) => {
+    focus.focusMode = mode;
+    focus.focusedCardIndex = 0;
+    const renameDeck = vi.fn();
+    const renameColumn = vi.fn();
+    dispatcher.onRenameDeck = renameDeck;
+    dispatcher.onRenameColumn = renameColumn;
+
+    const event = makeKeyEvent({ key: "F2" });
+    dispatcher.handleKeydown(event);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(renameColumn).toHaveBeenCalledOnce();
+    expect(renameDeck).not.toHaveBeenCalled();
   });
 
   it("does nothing while in edit mode", () => {

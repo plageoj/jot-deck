@@ -259,6 +259,7 @@ export class ActionDispatcher {
       action === "showDeckPalette" ||
       action === "showCommandPalette" ||
       action === "showSettings" ||
+      action === "renameDeck" ||
       action === "undo" ||
       action === "redo"
     ) {
@@ -282,6 +283,11 @@ export class ActionDispatcher {
       // check — a manual check that finds nothing is otherwise silent.
       this.focus.showAbout = true;
       void updaterStore.check();
+      return;
+    }
+
+    if (action === "renameDeck") {
+      this.onRenameDeck?.();
       return;
     }
 
