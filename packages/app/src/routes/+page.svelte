@@ -169,6 +169,7 @@
     };
     actions.onStartEdit = startCardEdit;
     window.addEventListener("keydown", actions.handleKeydown);
+    window.addEventListener("paste", actions.handlePaste);
     await Promise.all([data.init(), settingsStore.load()]);
     if (!pageMounted) return;
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
@@ -198,6 +199,7 @@
   onDestroy(() => {
     pageMounted = false;
     window.removeEventListener("keydown", actions.handleKeydown);
+    window.removeEventListener("paste", actions.handlePaste);
     actions.destroy();
     data.stopWatchingExternalChanges();
   });

@@ -42,6 +42,14 @@ describe("findAction", () => {
     expect(findAction("gg", "card")).toBe("goFirst");
   });
 
+  it("should find Ctrl clipboard shortcuts in card focus", () => {
+    expect(findAction("Ctrl+c", "card")).toBe("copyCardText");
+    expect(findAction("Ctrl+x", "card")).toBe("cutCardText");
+    // Left unbound so keydown does not suppress the native paste event.
+    expect(findAction("Ctrl+v", "card")).toBeNull();
+    expect(findAction("Ctrl+c", "column")).toBeNull();
+  });
+
   it("should find parameterized jump actions", () => {
     expect(findAction("g1", "column")).toBe("jumpToColumn:0");
     expect(findAction("g1", "card")).toBe("jumpToColumn:0");
@@ -381,6 +389,14 @@ describe("findKeybindingConflicts", () => {
     // "j" in card mode is moveDown; trying to also bind it elsewhere in card.
     const conflicts = findKeybindingConflicts("j", ["card"], "no-such-sig");
     expect(conflicts.some((c) => c.severity === "error")).toBe(true);
+  });
+
+  it("rejects a native shortcut key in its mode only", () => {
+    const conflicts = findKeybindingConflicts("Ctrl+v", ["card"], "no-such-sig");
+    expect(conflicts).toContainEqual(
+      expect.objectContaining({ severity: "error", sequence: "Ctrl+v" }),
+    );
+    expect(findKeybindingConflicts("Ctrl+v", ["column"], "no-such-sig")).toEqual([]);
   });
 
   it("excludes the binding being edited", () => {

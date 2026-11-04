@@ -6,6 +6,7 @@
     formatSequence,
     getKeybindingsForMode,
     isBrowserReserved,
+    NATIVE_SHORTCUTS,
   } from "#lib/keybindings.ts";
 
   interface Props {
@@ -33,6 +34,11 @@
       } else {
         actionIndex.set(b.action, groups.length);
         groups.push({ sequences: [b.sequence], description: b.description });
+      }
+    }
+    for (const s of NATIVE_SHORTCUTS) {
+      if (s.modes.includes(mode)) {
+        groups.push({ sequences: [s.sequence], description: s.description });
       }
     }
     if (browser) {

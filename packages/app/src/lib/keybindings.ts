@@ -80,6 +80,8 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "yy", action: "copyCard", modes: ["card"], description: "Copy card" },
   { sequence: "p", action: "pasteBelow", modes: ["card"], description: "Paste below" },
   { sequence: "P", action: "pasteAbove", modes: ["card"], description: "Paste above" },
+  { sequence: "Ctrl+c", action: "copyCardText", modes: ["card"], description: "Copy card text to system clipboard" },
+  { sequence: "Ctrl+x", action: "cutCardText", modes: ["card"], description: "Cut card text to system clipboard" },
 
   // Card focus - Score
   { sequence: "f", action: "scoreUp", modes: ["card"], description: "Score +1" },
@@ -129,6 +131,16 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Reporters
   { sequence: "gr", action: "showReporters", modes: ["column", "card"], description: "Manage reporters" },
+];
+
+/**
+ * Shortcuts driven by native browser events rather than keydown, so they are
+ * listed in the cheatsheet but cannot be remapped. Ctrl+v must stay unbound
+ * in DEFAULT_KEYBINDINGS: a keydown binding would preventDefault and suppress
+ * the `paste` event.
+ */
+export const NATIVE_SHORTCUTS: Omit<KeyBinding, "action">[] = [
+  { sequence: "Ctrl+v", modes: ["card"], description: "Paste system clipboard text below" },
 ];
 
 /**
@@ -381,6 +393,17 @@ export function findKeybindingConflicts(
 ): KeybindingConflict[] {
   const effective = resolveWithSignatures(overrides, additions);
   const conflicts: KeybindingConflict[] = [];
+  // A keydown binding on a native shortcut would preventDefault and suppress
+  // the native event (e.g. paste), so these keys are never available.
+  for (const native of NATIVE_SHORTCUTS) {
+    if (native.sequence === candidate && native.modes.some((m) => modes.includes(m))) {
+      conflicts.push({
+        severity: "error",
+        sequence: native.sequence,
+        description: native.description,
+      });
+    }
+  }
   for (const b of effective) {
     if (b.signature === excludeSignature) continue;
     const sharesMode = b.modes.some((m) => modes.includes(m));
