@@ -409,6 +409,23 @@ describe("shortcutFor", () => {
     expect(shortcutFor("showTrashPalette")).toBeNull();
   });
 
+  it("skips browser-reserved keys in a browser", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["column", "card"], description: "Undo" },
+    ]);
+    expect(shortcutFor("showColumnPalette", undefined, { inBrowser: true })).toBeNull();
+    expect(shortcutFor("showColumnPalette", undefined, { inBrowser: false })).toBe("Ctrl+t");
+  });
+
+  it("falls back to the next key when the first is browser-reserved", () => {
+    // A customized binding ranks first, so Ctrl+t leads the lookup.
+    setKeybindingOverrides({}, [
+      { sequence: "Ctrl+t", action: "showColumnPalette", modes: ["column"], description: "Switch column" },
+    ]);
+    expect(shortcutFor("showColumnPalette", ["column"])).toBe("Ctrl+t");
+    expect(shortcutFor("showColumnPalette", ["column"], { inBrowser: true })).toBe("gn");
+  });
+
   it("splits a sequence into whole keys, not characters", () => {
     setKeybindingOverrides({}, [
       { sequence: "C", action: "undo", modes: ["column", "card"], description: "Undo" },

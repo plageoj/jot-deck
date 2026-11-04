@@ -40,4 +40,13 @@ describe("CommandPalette shortcuts", () => {
     expect(shortcutOf("Rename Deck")).toBe("R");
     expect(shortcutOf("Delete Column")).toBe("dd");
   });
+
+  it("does not offer a key the browser keeps for itself", () => {
+    // A bound `g` cuts off gn/gc, leaving only the browser-reserved Ctrl+t.
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["column"], description: "Undo" },
+    ]);
+    render(CommandPalette, { mode: "column", onExecute: () => {}, onClose: () => {} });
+    expect(shortcutOf("Switch Column")).toBeNull();
+  });
 });

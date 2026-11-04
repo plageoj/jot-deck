@@ -1,4 +1,4 @@
-import { getDatabase, type DatabaseBackend } from "./db";
+import { getDatabase, isTauri, type DatabaseBackend } from "./db";
 import {
   formatSequence,
   setKeybindingOverrides,
@@ -213,12 +213,13 @@ export class SettingsStore {
   /**
    * Display form of an action's effective shortcut, or `null` when it has
    * none. Reads the keybinding customization so a view showing it re-renders
-   * when the user remaps the key.
+   * when the user remaps the key. In a browser, keys the browser keeps for
+   * itself (e.g. `Ctrl+t`) are never offered.
    */
   shortcutLabel(action: string, modes?: FocusMode[]): string | null {
     void this.state.keybindingOverrides;
     void this.state.customKeybindings;
-    const sequence = shortcutFor(action, modes);
+    const sequence = shortcutFor(action, modes, { inBrowser: !isTauri() });
     return sequence === null ? null : formatSequence(sequence);
   }
 

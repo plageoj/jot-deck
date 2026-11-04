@@ -331,15 +331,18 @@ export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
  * The key sequence shown as an action's shortcut in hints and the command
  * palette: the first effective binding in any of `modes`, with the user's
  * customizations first. A binding that typing its key would not run is
- * skipped. `null` when no key reaches the action.
+ * skipped, as is a browser-reserved key when `inBrowser` (the page never sees
+ * it). `null` when no key reaches the action.
  */
 export function shortcutFor(
   action: string,
   modes: FocusMode[] = ["column", "card"],
+  { inBrowser = false }: { inBrowser?: boolean } = {},
 ): string | null {
   const binding = lookupBindings.find(
     (b) =>
       b.action === action &&
+      !(inBrowser && isBrowserReserved(b.sequence)) &&
       b.modes.some((m) => modes.includes(m) && reaches(b.sequence, m, action))
   );
   return binding?.sequence ?? null;
