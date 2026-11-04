@@ -1,9 +1,10 @@
 //! Which Deck an MCP call addresses (008-mcp-server.md §4.5).
 //!
-//! A connection is either pinned to one Deck (`JOT_DECK_DECK_ID`) or may address
-//! any local Deck per call. Deck-addressed tools resolve their target with
-//! [`DeckScope::resolve`] (pinned → explicit `deck_id` → error — there is no
-//! implicit default, so a call's target never depends on GUI state);
+//! A connection is either pinned to the Decks listed in `JOT_DECK_DECK_ID`
+//! (comma-separated) or may address any local Deck per call. Deck-addressed
+//! tools resolve their target with [`DeckScope::resolve`] (explicit `deck_id`,
+//! checked against a pinned connection's list → the sole pinned Deck → error —
+//! there is no implicit default, so a call's target never depends on GUI state);
 //! card/column-addressed tools derive it from the id they name. The GUI's last
 //! active Deck is only surfaced as a hint (`DeckSummary::active`). Like
 //! `query.rs`/`write.rs`, this validation lives in core — the bridge is
@@ -28,91 +29,119 @@ pub struct DeckSummary {
 /// 接続が扱える Deck の範囲。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeckScope {
-    /// `JOT_DECK_DECK_ID` で 1 Deck に厳格固定。他 Deck の指定は Unauthorized。
-    Pinned(String),
+    /// `JOT_DECK_DECK_ID` で列挙した Deck（1 つ以上・重複なし）に厳格限定。
+    /// 列挙外の Deck の指定は Unauthorized、そのカード/カラムは見えない。
+    Pinned(Vec<String>),
     /// ローカルの全 Deck。対象は呼び出しごとに `deck_id` で決まる。
     AnyDeck,
 }
 
 impl DeckScope {
-    /// 空文字列は未設定扱い（AnyDeck）。
+    /// `JOT_DECK_DECK_ID` の生値（カンマ区切り）から作る。空要素は無視し、
+    /// 重複は除く。有効な id が 1 つも無ければ未設定扱い（AnyDeck）。
     pub fn from_pinned(pinned: Option<String>) -> Self {
-        match pinned.filter(|id| !id.is_empty()) {
-            Some(id) => Self::Pinned(id),
-            None => Self::AnyDeck,
+        let mut ids: Vec<String> = Vec::new();
+        for id in pinned.as_deref().unwrap_or("").split(',').map(str::trim) {
+            if !id.is_empty() && !ids.iter().any(|seen| seen == id) {
+                ids.push(id.to_string());
+            }
+        }
+        if ids.is_empty() {
+            Self::AnyDeck
+        } else {
+            Self::Pinned(ids)
         }
     }
 
-    pub fn pinned(&self) -> Option<&str> {
+    /// 列挙した Deck（固定接続のみ）。
+    pub fn pinned(&self) -> Option<&[String]> {
         match self {
-            Self::Pinned(id) => Some(id),
+            Self::Pinned(ids) => Some(ids),
             Self::AnyDeck => None,
         }
     }
 
+    /// 1 Deck だけに固定された接続ならその Deck（`deck_id` を省略できる接続）。
+    pub fn sole_pinned(&self) -> Option<&str> {
+        match self.pinned() {
+            Some([only]) => Some(only),
+            _ => None,
+        }
+    }
+
+    /// この接続が `deck_id` の Deck を扱えるか（存在確認はしない）。
+    fn admits(&self, deck_id: &str) -> bool {
+        self.pinned()
+            .is_none_or(|ids| ids.iter().any(|id| id == deck_id))
+    }
+
     /// Deck を引数に取る tool の対象 Deck を決める（008 §4.5 の解決順）。
     ///
-    /// 1. 固定接続ならその Deck（別の `deck_id` 明示は Unauthorized）
-    /// 2. 呼び出しが明示した `deck_id`
+    /// 1. 呼び出しが明示した `deck_id`（固定接続では列挙外なら Unauthorized）
+    /// 2. 省略時、1 Deck だけに固定された接続ならその Deck
     /// 3. いずれも無ければ InvalidOperation（`list_decks` で選ばせる）
     pub fn resolve(&self, conn: &Connection, requested: Option<&str>) -> Result<String> {
         let requested = requested.filter(|id| !id.is_empty());
-        if let Self::Pinned(pinned) = self {
-            if let Some(req) = requested {
-                if req != pinned {
-                    return Err(JotDeckError::Unauthorized(format!(
-                        "Deck {} is outside this connection, which is pinned to Deck {} (JOT_DECK_DECK_ID). Omit deck_id.",
-                        req, pinned
-                    )));
-                }
-            }
-            return Ok(deck::get_by_id(conn, pinned)?.id);
-        }
-        match requested {
-            Some(req) => Ok(deck::get_by_id(conn, req)?.id),
-            None => Err(JotDeckError::InvalidOperation(
+        match (requested, self.sole_pinned()) {
+            (Some(req), _) if !self.admits(req) => Err(JotDeckError::Unauthorized(format!(
+                "Deck {} is outside this connection, which is limited to Deck(s) {} (JOT_DECK_DECK_ID). Call list_decks for the Decks you can use.",
+                req,
+                self.pinned().unwrap_or_default().join(", ")
+            ))),
+            (Some(req), _) => Ok(deck::get_by_id(conn, req)?.id),
+            (None, Some(only)) => Ok(deck::get_by_id(conn, only)?.id),
+            (None, None) => Err(JotDeckError::InvalidOperation(
                 "deck_id required: call list_decks and pass a deck_id (the `active` Deck is the one last open in the Jot Deck app)."
                     .to_string(),
             )),
         }
     }
 
-    /// カードを ID で指す tool の対象 Deck。固定接続では固定 Deck（他 Deck の
-    /// カードは下流のクエリが NotFound にする）、それ以外はカードの所属 Deck。
+    /// カードを ID で指す tool の対象 Deck（カードの所属 Deck）。固定接続で
+    /// 列挙外の Deck のカードは存在しないものとして NotFound（存在を漏らさない）。
     /// 可視性（private / 削除）は下流のクエリ/書き込みが判定する。
     pub fn deck_for_card(&self, conn: &Connection, card_id: &str) -> Result<String> {
-        if let Self::Pinned(pinned) = self {
-            return Ok(pinned.clone());
-        }
         conn.query_row(
             "SELECT col.deck_id FROM cards c JOIN columns col ON c.column_id = col.id WHERE c.id = ?1",
             params![card_id],
-            |row| row.get(0),
+            |row| row.get::<_, String>(0),
         )
         .optional()?
+        .filter(|deck_id| self.admits(deck_id))
         .ok_or_else(|| JotDeckError::NotFound(format!("Card not found: {}", card_id)))
     }
 
-    /// カラムを ID で指す tool の対象 Deck（`deck_for_card` のカラム版）。
+    /// カラムを ID で指す tool の対象 Deck（`deck_for_card` のカラム版。
+    /// 不在・列挙外とも Unauthorized）。
     pub fn deck_for_column(&self, conn: &Connection, column_id: &str) -> Result<String> {
-        if let Self::Pinned(pinned) = self {
-            return Ok(pinned.clone());
-        }
         conn.query_row(
             "SELECT deck_id FROM columns WHERE id = ?1",
             params![column_id],
-            |row| row.get(0),
+            |row| row.get::<_, String>(0),
         )
         .optional()?
+        .filter(|deck_id| self.admits(deck_id))
         .ok_or_else(|| JotDeckError::Unauthorized(format!("Column not accessible: {}", column_id)))
     }
 
-    /// この接続が扱える Deck の一覧（`list_decks`）。固定接続ではその 1 件のみ。
-    /// Deck 単位の可視性除外は無い（private はカラム単位のみ → 008 §4.5）。
+    /// この接続が扱える Deck の一覧（`list_decks`）。固定接続では列挙した Deck
+    /// のみ（列挙順）。Deck 単位の除外は列挙だけで、private はカラム単位
+    /// （008 §4.5）。列挙に残った削除済み Deck の id は飛ばす ―― 1 つの古い id
+    /// のせいで残りの Deck が見えなくならないように。
     pub fn list_decks(&self, conn: &Connection) -> Result<Vec<DeckSummary>> {
         let active = setting::get_active_deck_id(conn)?;
         let decks = match self {
-            Self::Pinned(pinned) => vec![deck::get_by_id(conn, pinned)?],
+            Self::Pinned(ids) => {
+                let mut decks = Vec::with_capacity(ids.len());
+                for id in ids {
+                    match deck::get_by_id(conn, id) {
+                        Ok(d) => decks.push(d),
+                        Err(JotDeckError::NotFound(_)) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+                decks
+            }
             Self::AnyDeck => deck::get_all(conn)?,
         };
         Ok(decks
@@ -145,27 +174,66 @@ mod tests {
         .id
     }
 
+    fn pinned(ids: &[&str]) -> DeckScope {
+        DeckScope::Pinned(ids.iter().map(|id| id.to_string()).collect())
+    }
+
     #[test]
-    fn from_pinned_treats_empty_as_any_deck() {
+    fn from_pinned_parses_a_comma_list() {
         assert_eq!(DeckScope::from_pinned(None), DeckScope::AnyDeck);
         assert_eq!(DeckScope::from_pinned(Some(String::new())), DeckScope::AnyDeck);
+        assert_eq!(DeckScope::from_pinned(Some(" , ,".to_string())), DeckScope::AnyDeck);
+        assert_eq!(DeckScope::from_pinned(Some("D".to_string())), pinned(&["D"]));
         assert_eq!(
-            DeckScope::from_pinned(Some("D".to_string())),
-            DeckScope::Pinned("D".to_string())
+            DeckScope::from_pinned(Some(" B, A ,,B".to_string())),
+            pinned(&["B", "A"])
         );
     }
 
     #[test]
-    fn pinned_uses_pinned_deck_and_rejects_others() {
+    fn sole_pinned_only_for_a_single_deck() {
+        assert_eq!(DeckScope::AnyDeck.sole_pinned(), None);
+        assert_eq!(pinned(&["A"]).sole_pinned(), Some("A"));
+        assert_eq!(pinned(&["A", "B"]).sole_pinned(), None);
+    }
+
+    #[test]
+    fn single_pin_uses_pinned_deck_and_rejects_others() {
         let conn = create_in_memory().unwrap();
         let a = new_deck(&conn, "A");
         let b = new_deck(&conn, "B");
-        let scope = DeckScope::Pinned(a.clone());
+        let scope = pinned(&[&a]);
         assert_eq!(scope.resolve(&conn, None).unwrap(), a);
         assert_eq!(scope.resolve(&conn, Some(&a)).unwrap(), a);
         assert!(matches!(
             scope.resolve(&conn, Some(&b)),
             Err(JotDeckError::Unauthorized(_))
+        ));
+    }
+
+    #[test]
+    fn multi_pin_requires_a_listed_deck_id() {
+        let conn = create_in_memory().unwrap();
+        let a = new_deck(&conn, "A");
+        let b = new_deck(&conn, "B");
+        let c = new_deck(&conn, "C");
+        let scope = pinned(&[&a, &b]);
+        assert_eq!(scope.resolve(&conn, Some(&a)).unwrap(), a);
+        assert_eq!(scope.resolve(&conn, Some(&b)).unwrap(), b);
+        assert!(matches!(
+            scope.resolve(&conn, Some(&c)),
+            Err(JotDeckError::Unauthorized(_))
+        ));
+        // Several Decks: there is no single one to fall back on.
+        assert!(matches!(
+            scope.resolve(&conn, None),
+            Err(JotDeckError::InvalidOperation(_))
+        ));
+        // A listed id must still exist.
+        let stale = pinned(&[&a, "missing"]);
+        assert!(matches!(
+            stale.resolve(&conn, Some("missing")),
+            Err(JotDeckError::NotFound(_))
         ));
     }
 
@@ -198,6 +266,7 @@ mod tests {
     fn deck_for_card_and_column_follow_ownership() {
         let conn = create_in_memory().unwrap();
         let a = new_deck(&conn, "A");
+        let b = new_deck(&conn, "B");
         let col = column::create(
             &conn,
             NewColumn {
@@ -215,22 +284,29 @@ mod tests {
         )
         .unwrap();
 
-        let any = DeckScope::AnyDeck;
-        assert_eq!(any.deck_for_card(&conn, &c.id).unwrap(), a);
-        assert_eq!(any.deck_for_column(&conn, &col.id).unwrap(), a);
+        for scope in [DeckScope::AnyDeck, pinned(&[&b, &a])] {
+            assert_eq!(scope.deck_for_card(&conn, &c.id).unwrap(), a);
+            assert_eq!(scope.deck_for_column(&conn, &col.id).unwrap(), a);
+            assert!(matches!(
+                scope.deck_for_card(&conn, "missing"),
+                Err(JotDeckError::NotFound(_))
+            ));
+            assert!(matches!(
+                scope.deck_for_column(&conn, "missing"),
+                Err(JotDeckError::Unauthorized(_))
+            ));
+        }
+
+        // Ids in an unlisted Deck look exactly like missing ones.
+        let other = pinned(&[&b]);
         assert!(matches!(
-            any.deck_for_card(&conn, "missing"),
+            other.deck_for_card(&conn, &c.id),
             Err(JotDeckError::NotFound(_))
         ));
         assert!(matches!(
-            any.deck_for_column(&conn, "missing"),
+            other.deck_for_column(&conn, &col.id),
             Err(JotDeckError::Unauthorized(_))
         ));
-
-        // A pinned scope never looks elsewhere: downstream queries reject ids
-        // outside the pinned Deck.
-        let pinned = DeckScope::Pinned("other".to_string());
-        assert_eq!(pinned.deck_for_card(&conn, &c.id).unwrap(), "other");
     }
 
     #[test]
@@ -238,16 +314,34 @@ mod tests {
         let conn = create_in_memory().unwrap();
         let a = new_deck(&conn, "A");
         let b = new_deck(&conn, "B");
+        let c = new_deck(&conn, "C");
         setting::set_active_deck_id(&conn, &b).unwrap();
 
         let all = DeckScope::AnyDeck.list_decks(&conn).unwrap();
-        assert_eq!(all.len(), 2);
+        assert_eq!(all.len(), 3);
         assert!(all.iter().any(|d| d.deck_id == b && d.active));
         assert!(all.iter().any(|d| d.deck_id == a && !d.active));
 
-        let pinned = DeckScope::Pinned(a.clone()).list_decks(&conn).unwrap();
-        assert_eq!(pinned.len(), 1);
-        assert_eq!(pinned[0].deck_id, a);
-        assert!(!pinned[0].active);
+        let one = pinned(&[&a]).list_decks(&conn).unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].deck_id, a);
+        assert!(!one[0].active);
+
+        let listed: Vec<_> = pinned(&[&c, &b])
+            .list_decks(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|d| (d.deck_id, d.active))
+            .collect();
+        assert_eq!(listed, vec![(c.clone(), false), (b, true)]);
+
+        // A stale id (Deck deleted since) does not hide the others.
+        let stale: Vec<_> = pinned(&[&a, "deleted", &c])
+            .list_decks(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.deck_id)
+            .collect();
+        assert_eq!(stale, vec![a, c]);
     }
 }
