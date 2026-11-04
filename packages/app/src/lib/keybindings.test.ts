@@ -157,6 +157,19 @@ describe("getKeybindingsForMode", () => {
       setKeybindingOverrides({});
     }
   });
+
+  it("leaves out sequences a shorter customized binding cuts off", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["card"], description: "Undo" },
+    ]);
+    try {
+      const card = getKeybindingsForMode("card");
+      expect(card.some((b) => b.sequence.startsWith("g") && b.sequence !== "g")).toBe(false);
+      expect(getKeybindingsForMode("column").some((b) => b.sequence === "gn")).toBe(true);
+    } finally {
+      setKeybindingOverrides({});
+    }
+  });
 });
 
 describe("formatSequence", () => {
@@ -386,6 +399,21 @@ describe("shortcutFor", () => {
     ]);
     expect(shortcutFor("renameDeck")).toBeNull();
     expect(shortcutFor("redo")).toBe("R");
+  });
+
+  it("skips a key whose leading part fires another binding first", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["column", "card"], description: "Undo" },
+    ]);
+    expect(shortcutFor("showColumnPalette")).toBe("Ctrl+t");
+    expect(shortcutFor("showTrashPalette")).toBeNull();
+  });
+
+  it("splits a sequence into whole keys, not characters", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "C", action: "undo", modes: ["column", "card"], description: "Undo" },
+    ]);
+    expect(shortcutFor("showDeckPalette")).toBe("Ctrl+p");
   });
 
   it("only considers bindings in the given modes", () => {

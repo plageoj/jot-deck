@@ -296,22 +296,42 @@ export function isValidPrefix(sequence: string, mode: FocusMode): boolean {
   );
 }
 
+/** One pressed key of a stored sequence, modifiers included (`Ctrl+p`, `ArrowLeft`, `g`). */
+const KEY_TOKEN =
+  /(?:(?:Ctrl|Shift|Alt|Meta)\+)*(?:Arrow(?:Left|Right|Up|Down)|Escape|Enter|Delete|PageUp|PageDown|F\d{1,2}|.)/gu;
+
 /**
- * Get all keybindings for display (cheatsheet). A binding whose key another
- * binding claims in `mode` is left out, since pressing it runs the other one.
+ * Whether typing `sequence` in `mode` runs `action`: the sequence resolves to
+ * it, and no shorter run of its leading keys fires another binding first (the
+ * key processor acts on the first exact match, so a user-bound `g` makes `gg`
+ * unreachable).
+ */
+function reaches(sequence: string, mode: FocusMode, action: string): boolean {
+  const keys = sequence.match(KEY_TOKEN) ?? [];
+  let prefix = "";
+  for (const key of keys.slice(0, -1)) {
+    prefix += key;
+    if (findAction(prefix, mode)) return false;
+  }
+  return findAction(sequence, mode) === action;
+}
+
+/**
+ * Get all keybindings for display (cheatsheet). A binding that typing its key
+ * would not run (another binding claims the key or a leading part of it) is
+ * left out.
  */
 export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
   return activeBindings.filter(
-    (b) => b.modes.includes(mode) && findAction(b.sequence, mode) === b.action
+    (b) => b.modes.includes(mode) && reaches(b.sequence, mode, b.action)
   );
 }
 
 /**
  * The key sequence shown as an action's shortcut in hints and the command
  * palette: the first effective binding in any of `modes`, with the user's
- * customizations first. A binding whose key another binding claims in that
- * mode is skipped, since pressing it would run the other action. `null` when
- * no key reaches the action.
+ * customizations first. A binding that typing its key would not run is
+ * skipped. `null` when no key reaches the action.
  */
 export function shortcutFor(
   action: string,
@@ -320,7 +340,7 @@ export function shortcutFor(
   const binding = lookupBindings.find(
     (b) =>
       b.action === action &&
-      b.modes.some((m) => modes.includes(m) && findAction(b.sequence, m) === action)
+      b.modes.some((m) => modes.includes(m) && reaches(b.sequence, m, action))
   );
   return binding?.sequence ?? null;
 }

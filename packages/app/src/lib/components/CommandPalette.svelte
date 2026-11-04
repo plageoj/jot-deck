@@ -1,20 +1,23 @@
 <script lang="ts">
   import { COMMANDS } from "#lib/commands.ts";
+  import type { FocusMode } from "#lib/keybindings.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
   import PaletteDialog, { type PaletteItem } from "./PaletteDialog.svelte";
 
   interface Props {
+    /** Focus the palette returns to; shortcuts are shown for this mode. */
+    mode: FocusMode;
     onExecute: (action: string) => void;
     onClose: () => void;
   }
 
-  let { onExecute, onClose }: Props = $props();
+  let { mode, onExecute, onClose }: Props = $props();
 
   const items: PaletteItem[] = $derived(
     COMMANDS.map((cmd) => ({
       id: cmd.id,
       label: cmd.label,
-      shortcut: settingsStore.shortcutLabel(cmd.action) ?? cmd.fixedShortcut,
+      shortcut: settingsStore.shortcutLabel(cmd.action, [mode]) ?? cmd.fixedShortcut,
     })),
   );
 

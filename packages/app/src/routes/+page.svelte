@@ -510,6 +510,7 @@
   />
 {:else if focus.focusMode === "command"}
   <CommandPalette
+    mode={focus.previousFocusMode}
     onExecute={(action) => actions.executeCommand(action)}
     onClose={() => focus.closePalette()}
   />
