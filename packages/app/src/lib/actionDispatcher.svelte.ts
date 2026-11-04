@@ -23,7 +23,7 @@ const ACTIONS_WITHOUT_LOADED_DECK = new Set([
 
 /** Palette commands that act on the board through UI callbacks rather than
  * `executeAction`, so they need the same guard. */
-const BOARD_COMMANDS = new Set(["newColumn", "renameColumn", "deleteColumn"]);
+const BOARD_COMMANDS = new Set(["createColumn", "renameColumn", "deleteColumn"]);
 
 export class ActionDispatcher {
   private readonly data: DeckData;
@@ -254,11 +254,19 @@ export class ActionDispatcher {
   private handleNoColumnsKey(event: KeyboardEvent) {
     const key = normalizeKey(event);
     if (!key) return;
-    const action = findAction(key, "column");
+    // Run through the sequence processor so a multi-key remap (e.g. `zz` for
+    // renameDeck) still works; a pending prefix is held like on the board.
+    const result = this.keyProcessor.process(key, "column");
+    if (result.type === "prefix") {
+      event.preventDefault();
+      return;
+    }
+    const action = result.type === "action" ? result.action : null;
     if (
       action === "showDeckPalette" ||
       action === "showCommandPalette" ||
       action === "showSettings" ||
+      action === "renameDeck" ||
       action === "undo" ||
       action === "redo"
     ) {
@@ -282,6 +290,11 @@ export class ActionDispatcher {
       // check — a manual check that finds nothing is otherwise silent.
       this.focus.showAbout = true;
       void updaterStore.check();
+      return;
+    }
+
+    if (action === "renameDeck") {
+      this.onRenameDeck?.();
       return;
     }
 
@@ -371,16 +384,13 @@ export class ActionDispatcher {
       case "restoreOnboarding":
         this.runTask(this.data.restoreOnboardingDeck());
         break;
-      case "switchDeck":
-        this.focus.openPalette("deck");
-        break;
       case "renameDeck":
         this.onRenameDeck?.();
         break;
       case "deleteDeck":
         this.onDeleteDeck?.();
         break;
-      case "newColumn":
+      case "createColumn":
         this.runTask(this.createColumnFromPalette());
         break;
       case "renameColumn":

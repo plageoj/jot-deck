@@ -214,6 +214,37 @@ test.describe("Deck Management", () => {
     await expect(page.locator("h1")).toContainText("Keyboard Deck");
   });
 
+  test("rename an empty deck with Shift+R from its hint", async ({ page }) => {
+    await page.keyboard.press("Control+p");
+    await page.waitForTimeout(300);
+    await page.locator(".palette-item", { hasText: "New deck" }).click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator(".status-hint kbd")).toHaveText("R");
+
+    await page.keyboard.press("Shift+R");
+    await page.waitForTimeout(300);
+    await expect(page.locator("dialog.rename-dialog")).toBeVisible();
+
+    await page.locator(".rename-input").fill("Empty Deck");
+    await page.locator(".btn-confirm").click();
+    await page.waitForTimeout(500);
+
+    await expect(page.locator("h1")).toContainText("Empty Deck");
+  });
+
+  test("command palette shows each command's bound key", async ({ page }) => {
+    await page.keyboard.press("Control+Shift+P");
+    await page.waitForTimeout(300);
+
+    const shortcutOf = (label: string) =>
+      page.locator(".palette-item", { hasText: label }).locator(".palette-shortcut");
+    await expect(shortcutOf("Rename Deck")).toHaveText("R");
+    await expect(shortcutOf("Rename Column")).toHaveText("r");
+    await expect(shortcutOf("Switch Deck")).toHaveText("Ctrl+p");
+    await expect(shortcutOf("Keyboard Shortcuts")).toHaveText("?");
+  });
+
   test("rename deck via command palette", async ({ page }) => {
     // Open command palette and search for rename
     await page.keyboard.press("Control+Shift+P");

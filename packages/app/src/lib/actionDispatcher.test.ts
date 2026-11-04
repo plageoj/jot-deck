@@ -5,6 +5,7 @@ import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 import { boardState } from "./__fixtures__/boardBackend";
 import { setupBoard } from "./__fixtures__/boardHarness";
 import { updaterStore } from "./updater.svelte";
+import { setKeybindingOverrides } from "./keybindings";
 
 // ActionDispatcher owns key interpretation, mode-dependent routing, palette
 // command dispatch, and the public dispatch entry points. The semantic
@@ -90,6 +91,37 @@ describe("ActionDispatcher with no columns loaded", () => {
 
     expect(focus.activePalette).toBe("command");
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("renames the deck with `R` when no columns exist", async () => {
+    const renameDeck = vi.fn();
+    dispatcher.onRenameDeck = renameDeck;
+    const event = makeKeyEvent({ key: "R", shift: true });
+    dispatcher.handleKeydown(event);
+    await flushPromises();
+
+    expect(renameDeck).toHaveBeenCalledOnce();
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("runs a multi-key renameDeck remap when no columns exist", async () => {
+    setKeybindingOverrides({}, [
+      { sequence: "zz", action: "renameDeck", modes: ["column"], description: "Rename deck" },
+    ]);
+    try {
+      const renameDeck = vi.fn();
+      dispatcher.onRenameDeck = renameDeck;
+      const first = makeKeyEvent({ key: "z" });
+      dispatcher.handleKeydown(first);
+      expect(first.defaultPrevented).toBe(true);
+      expect(renameDeck).not.toHaveBeenCalled();
+
+      dispatcher.handleKeydown(makeKeyEvent({ key: "z" }));
+      await flushPromises();
+      expect(renameDeck).toHaveBeenCalledOnce();
+    } finally {
+      setKeybindingOverrides({});
+    }
   });
 
   it("creates a column with `c` when no columns exist", async () => {
@@ -375,8 +407,8 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(focus.activePalette).toBeNull();
   });
 
-  it("switchDeck reopens the deck palette", async () => {
-    await dispatcher.executeCommand("switchDeck");
+  it("showDeckPalette reopens the deck palette", async () => {
+    await dispatcher.executeCommand("showDeckPalette");
     expect(focus.activePalette).toBe("deck");
   });
 
@@ -408,14 +440,14 @@ describe("ActionDispatcher.executeCommand", () => {
     expect(calls).toEqual([1]);
   });
 
-  it("newColumn inserts to the right of the focused column and focuses it", async () => {
+  it("createColumn inserts to the right of the focused column and focuses it", async () => {
     boardState.columns = [makeColumn("col-0", "deck-1", { position: 0 })];
     data.columns = [...boardState.columns];
     focus.focusedColumnIndex = 0;
     focus.previousFocusMode = "card";
     const scrolledIndices: number[] = [];
     focus.onScrollToColumn = (index) => scrolledIndices.push(index);
-    await dispatcher.executeCommand("newColumn");
+    await dispatcher.executeCommand("createColumn");
     await vi.waitFor(() => {
       expect(data.columns[focus.focusedColumnIndex]?.id).toBe("created-1");
     });
@@ -537,6 +569,40 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     focus.focusMode = "column";
     focus.focusedColumnIndex = 0;
     dispatcher = new ActionDispatcher(data, focus);
+  });
+
+  it.each(["column", "card"] as const)("renames the deck with `R` in %s focus", async (mode) => {
+    focus.focusMode = mode;
+    focus.focusedCardIndex = 0;
+    const renameDeck = vi.fn();
+    const renameColumn = vi.fn();
+    dispatcher.onRenameDeck = renameDeck;
+    dispatcher.onRenameColumn = renameColumn;
+
+    const event = makeKeyEvent({ key: "R", shift: true });
+    dispatcher.handleKeydown(event);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(renameDeck).toHaveBeenCalledOnce();
+    expect(renameColumn).not.toHaveBeenCalled();
+  });
+
+  it.each(["column", "card"] as const)("renames the column with `F2` in %s focus", async (mode) => {
+    focus.focusMode = mode;
+    focus.focusedCardIndex = 0;
+    const renameDeck = vi.fn();
+    const renameColumn = vi.fn();
+    dispatcher.onRenameDeck = renameDeck;
+    dispatcher.onRenameColumn = renameColumn;
+
+    const event = makeKeyEvent({ key: "F2" });
+    dispatcher.handleKeydown(event);
+    await flushPromises();
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(renameColumn).toHaveBeenCalledOnce();
+    expect(renameDeck).not.toHaveBeenCalled();
   });
 
   it("does nothing while in edit mode", () => {
@@ -701,7 +767,7 @@ describe("ActionDispatcher while the selected deck is not loaded", () => {
     dispatcher.handleKeydown(makeKeyEvent({ key: "c" }));
     dispatcher.handleKeydown(makeKeyEvent({ key: "u" }));
     await dispatcher.executeAction("createColumn");
-    dispatcher.executeCommand("newColumn");
+    dispatcher.executeCommand("createColumn");
     await flushPromises();
 
     expect(boardState.createColumnCalls).toHaveLength(0);
