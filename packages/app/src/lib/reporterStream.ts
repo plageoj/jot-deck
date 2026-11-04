@@ -11,12 +11,12 @@ export const MAX_CARD_LENGTH = 4000;
 export function truncateToCodePoints(text: string, max: number): string {
   // UTF-16 length is an upper bound on the code point count.
   if (text.length <= max) return text;
-  let count = 0;
-  for (let i = 0; i < text.length; count++) {
-    if (count === max) return text.slice(0, i);
-    i += text.codePointAt(i)! > 0xffff ? 2 : 1;
+  // `end` advances one code point (1 or 2 UTF-16 units) per step.
+  let end = 0;
+  for (let count = 0; count < max && end < text.length; count++) {
+    end += text.codePointAt(end)! > 0xffff ? 2 : 1;
   }
-  return text;
+  return text.slice(0, end);
 }
 
 interface ReporterStreamEvent {
@@ -40,7 +40,7 @@ interface ReporterStreamOptions {
 export class ReporterStreamController {
   private pendingDeltas: Record<string, string> = {};
   /** Cards whose overlay hit MAX_CARD_LENGTH: later deltas are dropped outright. */
-  private fullCards = new Set<string>();
+  private readonly fullCards = new Set<string>();
   private deltaFlushHandle: number | null = null;
   private streamTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   private static readonly INACTIVITY_MS = 30_000;
@@ -50,7 +50,9 @@ export class ReporterStreamController {
   handle(event: ReporterStreamEvent): void {
     switch (event.kind) {
       case "begin":
+        // A new stream starts clean: nothing unflushed from a previous one.
         this.fullCards.delete(event.card_id);
+        delete this.pendingDeltas[event.card_id];
         this.options.setStreamingText({
           ...this.options.getStreamingText(),
           [event.card_id]: "",

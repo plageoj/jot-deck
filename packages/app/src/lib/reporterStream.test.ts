@@ -185,9 +185,45 @@ describe("ReporterStreamController", () => {
         chunk: "x".repeat(MAX_CARD_LENGTH),
       });
     }
+    // The buffer between frames is bounded too, not only the painted text.
+    const pending = (
+      streams as unknown as { pendingDeltas: Record<string, string> }
+    ).pendingDeltas;
+    expect(pending["card-1"]).toHaveLength(MAX_CARD_LENGTH);
     flushFrame();
 
     expect(streamingText["card-1"]).toBe("x".repeat(MAX_CARD_LENGTH));
+  });
+
+  it("does not split a surrogate pair at the cap across frames", () => {
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({
+      kind: "delta",
+      card_id: "card-1",
+      chunk: "a".repeat(MAX_CARD_LENGTH - 1),
+    });
+    flushFrame();
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "😀😀" });
+    flushFrame();
+
+    expect(streamingText["card-1"]).toBe(
+      "a".repeat(MAX_CARD_LENGTH - 1) + "😀",
+    );
+  });
+
+  it("begin discards text a previous stream left unflushed", () => {
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({
+      kind: "delta",
+      card_id: "card-1",
+      chunk: "x".repeat(MAX_CARD_LENGTH + 1),
+    });
+    // Restarted before the frame ran.
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "new" });
+    flushFrame();
+
+    expect(streamingText["card-1"]).toBe("new");
   });
 });
 
