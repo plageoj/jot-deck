@@ -393,6 +393,17 @@ export function findKeybindingConflicts(
 ): KeybindingConflict[] {
   const effective = resolveWithSignatures(overrides, additions);
   const conflicts: KeybindingConflict[] = [];
+  // A keydown binding on a native shortcut would preventDefault and suppress
+  // the native event (e.g. paste), so these keys are never available.
+  for (const native of NATIVE_SHORTCUTS) {
+    if (native.sequence === candidate && native.modes.some((m) => modes.includes(m))) {
+      conflicts.push({
+        severity: "error",
+        sequence: native.sequence,
+        description: native.description,
+      });
+    }
+  }
   for (const b of effective) {
     if (b.signature === excludeSignature) continue;
     const sharesMode = b.modes.some((m) => modes.includes(m));

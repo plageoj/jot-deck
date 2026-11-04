@@ -301,12 +301,31 @@ describe("card operations", () => {
       await cut;
       expect(writeText).toHaveBeenCalledWith("c-0-b content");
       expect(boardState.deleteCardCalls).toEqual(["c-0-b"]);
+      // c-0-c shifted up when c-0-b was deleted; focus stays on it.
+      expect(data.cardsByColumn["col-0"][focus.focusedCardIndex]?.id).toBe("c-0-c");
     });
 
-    it("cutCardText keeps the card when the clipboard write fails", async () => {
+    it("cutCardText skips the delete when the deck changes during the write", async () => {
+      let finishWrite!: () => void;
+      writeText.mockReturnValue(new Promise<void>((resolve) => (finishWrite = resolve)));
+      const cut = actions.executeCardAction("cutCardText");
+      data.currentDeck = { ...data.currentDeck!, id: "deck-other" };
+      finishWrite();
+      await cut;
+      expect(boardState.deleteCardCalls).toHaveLength(0);
+    });
+
+    it("cutCardText keeps the card and reports when the clipboard write fails", async () => {
       writeText.mockRejectedValue(new Error("denied"));
       await actions.executeCardAction("cutCardText");
       expect(boardState.deleteCardCalls).toHaveLength(0);
+      expect(data.error).toMatch(/clipboard/);
+    });
+
+    it("copyCardText reports a failed clipboard write", async () => {
+      writeText.mockRejectedValue(new Error("denied"));
+      await actions.executeCardAction("copyCardText");
+      expect(data.error).toMatch(/clipboard/);
     });
 
     it("pasteTextBelow creates one card below with normalized line endings", async () => {
@@ -315,6 +334,14 @@ describe("card operations", () => {
       expect(boardState.createCardCalls[0]?.content).toBe("first line\nsecond line");
       expect(boardState.createCardCalls[0]?.position).toBe(2);
       expect(focus.focusedCardIndex).toBe(2);
+    });
+
+    it("pasteTextBelow strips a long blank-line run quickly", async () => {
+      const blank = "\n".repeat(200_000);
+      const started = performance.now();
+      await actions.pasteTextBelow(`${blank}x${blank}y${blank}`);
+      expect(performance.now() - started).toBeLessThan(1000);
+      expect(boardState.createCardCalls[0]?.content).toBe(`x${blank}y`);
     });
 
     it("pasteTextBelow ignores blank text", async () => {

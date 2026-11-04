@@ -129,12 +129,15 @@ export class BoardActionExecutors {
         break;
       }
       case "cutCardText": {
-        // Capture the card before awaiting the clipboard write: focus may move
-        // meanwhile, and the card that was copied is the one to delete.
-        const { focusedCard } = this.context();
-        if (focusedCard && (await this.cardCopyText(focusedCard))) {
-          await this.cardDelete(focusedCard);
-        }
+        // Capture the card and deck before awaiting the clipboard write: focus
+        // may move meanwhile, and the card that was copied is the one to
+        // delete. After a deck switch the undo entry would land in the other
+        // deck's history, so skip the delete then.
+        const { data, focusedCard } = this.context();
+        const deckId = data.currentDeck?.id;
+        if (!focusedCard || !(await this.cardCopyText(focusedCard))) break;
+        if (this.context().data.currentDeck?.id !== deckId) break;
+        await this.cardDelete(focusedCard);
         break;
       }
       case "pasteBelow":
@@ -349,15 +352,21 @@ export class BoardActionExecutors {
   }
 
   private async cardDelete(card = this.context().focusedCard): Promise<void> {
-    const { data } = this.context();
+    const { data, focusedCard: focusedBefore } = this.context();
     if (!card || !(await data.deleteCard(card.id))) return;
-    // Clamp against the board as it is now, after the awaited delete.
+    // Resolve focus against the board as it is now, after the awaited delete.
+    // If another card is focused (focus moved during an async cut), keep it
+    // focused even though deleting a card above it shifted its index.
     const { focus, focusedColumn } = this.context();
     const updated = data.cardsByColumn[focusedColumn?.id ?? ""] ?? [];
-    focus.focusedCardIndex = Math.min(
-      focus.focusedCardIndex,
-      Math.max(0, updated.length - 1),
-    );
+    const kept =
+      focusedBefore && focusedBefore.id !== card.id
+        ? updated.findIndex((candidate) => candidate.id === focusedBefore.id)
+        : -1;
+    focus.focusedCardIndex =
+      kept !== -1
+        ? kept
+        : Math.min(focus.focusedCardIndex, Math.max(0, updated.length - 1));
     if (updated.length === 0) focus.focusMode = "column";
   }
 
@@ -372,7 +381,9 @@ export class BoardActionExecutors {
       await navigator.clipboard.writeText(card.content);
       return true;
     } catch {
-      // Clipboard unavailable (e.g. permissions): keep the card.
+      // Clipboard unavailable (e.g. permissions): keep the card, and say so —
+      // the keydown was consumed, so no native copy ran either.
+      this.context().data.error = "Failed to copy card text to the clipboard";
       return false;
     }
   }
@@ -384,7 +395,14 @@ export class BoardActionExecutors {
 
   /** Pastes system clipboard text as a single card below the focused card. */
   async pasteTextBelow(text: string): Promise<void> {
-    const content = text.replace(/\r\n?/g, "\n").replace(/^\n+|\n+$/g, "");
+    const normalized = text.replace(/\r\n?/g, "\n");
+    // Strip leading/trailing blank lines with a linear scan; `/\n+$/` backtracks
+    // quadratically on long newline runs in large pastes.
+    let start = 0;
+    let end = normalized.length;
+    while (start < end && normalized[start] === "\n") start++;
+    while (end > start && normalized[end - 1] === "\n") end--;
+    const content = normalized.slice(start, end);
     if (content.trim()) await this.insertCardBelow(content);
   }
 
@@ -392,7 +410,13 @@ export class BoardActionExecutors {
     const { data, focus, focusedColumn } = this.context();
     if (!focusedColumn) return;
     const pasted = await data.createCard(focusedColumn.id, content, focus.focusedCardIndex + 1);
-    if (pasted) focus.focusedCardIndex++;
+    if (!pasted) return;
+    // Focus the pasted card by id: focus may have moved during the write. If
+    // the user left the column meanwhile, leave their focus alone.
+    if (data.columns[focus.focusedColumnIndex]?.id !== focusedColumn.id) return;
+    const cards = data.cardsByColumn[focusedColumn.id] ?? [];
+    const index = cards.findIndex((card) => card.id === pasted.id);
+    if (index !== -1) focus.focusedCardIndex = index;
   }
 
   private async cardPasteAbove(): Promise<void> {

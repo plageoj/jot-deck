@@ -391,6 +391,14 @@ describe("findKeybindingConflicts", () => {
     expect(conflicts.some((c) => c.severity === "error")).toBe(true);
   });
 
+  it("rejects a native shortcut key in its mode only", () => {
+    const conflicts = findKeybindingConflicts("Ctrl+v", ["card"], "no-such-sig");
+    expect(conflicts).toContainEqual(
+      expect.objectContaining({ severity: "error", sequence: "Ctrl+v" }),
+    );
+    expect(findKeybindingConflicts("Ctrl+v", ["column"], "no-such-sig")).toEqual([]);
+  });
+
   it("excludes the binding being edited", () => {
     const moveDown = DEFAULT_KEYBINDINGS.find(
       (b) => b.action === "moveDown" && b.sequence === "j",
