@@ -126,14 +126,22 @@ impl DeckScope {
 
     /// この接続が扱える Deck の一覧（`list_decks`）。固定接続では列挙した Deck
     /// のみ（列挙順）。Deck 単位の除外は列挙だけで、private はカラム単位
-    /// （008 §4.5）。
+    /// （008 §4.5）。列挙に残った削除済み Deck の id は飛ばす ―― 1 つの古い id
+    /// のせいで残りの Deck が見えなくならないように。
     pub fn list_decks(&self, conn: &Connection) -> Result<Vec<DeckSummary>> {
         let active = setting::get_active_deck_id(conn)?;
         let decks = match self {
-            Self::Pinned(ids) => ids
-                .iter()
-                .map(|id| deck::get_by_id(conn, id))
-                .collect::<Result<Vec<_>>>()?,
+            Self::Pinned(ids) => {
+                let mut decks = Vec::with_capacity(ids.len());
+                for id in ids {
+                    match deck::get_by_id(conn, id) {
+                        Ok(d) => decks.push(d),
+                        Err(JotDeckError::NotFound(_)) => {}
+                        Err(e) => return Err(e),
+                    }
+                }
+                decks
+            }
             Self::AnyDeck => deck::get_all(conn)?,
         };
         Ok(decks
@@ -325,6 +333,15 @@ mod tests {
             .into_iter()
             .map(|d| (d.deck_id, d.active))
             .collect();
-        assert_eq!(listed, vec![(c, false), (b, true)]);
+        assert_eq!(listed, vec![(c.clone(), false), (b, true)]);
+
+        // A stale id (Deck deleted since) does not hide the others.
+        let stale: Vec<_> = pinned(&[&a, "deleted", &c])
+            .list_decks(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|d| d.deck_id)
+            .collect();
+        assert_eq!(stale, vec![a, c]);
     }
 }

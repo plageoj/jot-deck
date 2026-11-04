@@ -1684,20 +1684,32 @@ mod tests {
         let listed = call(&bridge, 1, "list_decks", json!({}));
         assert_eq!(structured(&listed)["decks"].as_array().unwrap().len(), 1);
 
-        for (id, tool, args) in [
-            (2, "list_columns", json!({ "deck_id": work })),
-            (3, "read_card", json!({ "card_id": work_card })),
-            (4, "patch_card", json!({ "card_id": work_card, "content": "x", "expected_updated_at": 0 })),
-            (5, "delete_card", json!({ "card_id": work_card })),
-            (6, "append_card", json!({ "column_id": work_col, "content": "x" })),
-            (7, "update_column", json!({ "column_id": work_col, "name": "x" })),
+        // Valid arguments throughout, so each call fails at the pin check itself.
+        let updated_at = card::get_by_id(&bridge.conn, work_card)
+            .unwrap()
+            .updated_at
+            .to_rfc3339();
+        for (id, tool, args, expected) in [
+            (2, "list_columns", json!({ "deck_id": work }), "outside this connection"),
+            (3, "read_card", json!({ "card_id": work_card }), "Card not found"),
+            (
+                4,
+                "patch_card",
+                json!({ "card_id": work_card, "content": "x", "expected_updated_at": updated_at }),
+                "Card not found",
+            ),
+            (5, "delete_card", json!({ "card_id": work_card }), "Card not found"),
+            (6, "append_card", json!({ "column_id": work_col, "content": "x" }), "Column not accessible"),
+            (7, "update_column", json!({ "column_id": work_col, "name": "x" }), "Column not accessible"),
         ] {
             let resp = call(&bridge, id, tool, args);
             assert_eq!(resp["result"]["isError"], true, "{tool}");
+            let msg = resp["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(msg.contains(expected), "{tool}: {msg}");
         }
-        let card = call(&bridge, 8, "read_card", json!({ "card_id": work_card }));
-        let msg = card["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(msg.contains("not found"), "{msg}");
+        let untouched = card::get_by_id(&bridge.conn, work_card).unwrap();
+        assert_eq!(untouched.content, "Work card");
+        assert!(untouched.deleted_at.is_none());
     }
 
     #[test]
