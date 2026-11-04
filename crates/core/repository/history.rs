@@ -49,12 +49,18 @@ pub struct Author {
     pub label: Option<String>,
 }
 
+/// 表示名の上限（文字数）。クライアントが自己申告する値なので、履歴の各行に
+/// 複製される長さを抑える。
+pub const MAX_AUTHOR_LABEL_CHARS: usize = 64;
+
 impl Author {
     pub fn mcp(connection_id: impl Into<String>, client_name: Option<String>) -> Self {
         Self {
             source: AuthorSource::Mcp,
             id: connection_id.into(),
-            label: client_name.filter(|n| !n.is_empty()),
+            label: client_name
+                .filter(|n| !n.is_empty())
+                .map(|n| n.chars().take(MAX_AUTHOR_LABEL_CHARS).collect()),
         }
     }
 
@@ -362,7 +368,10 @@ mod tests {
     }
 
     #[test]
-    fn empty_client_name_is_no_label() {
+    fn client_name_label_is_optional_and_bounded() {
         assert_eq!(Author::mcp("c", Some(String::new())).label, None);
+        let long = "名".repeat(MAX_AUTHOR_LABEL_CHARS + 10);
+        let label = Author::mcp("c", Some(long)).label.unwrap();
+        assert_eq!(label.chars().count(), MAX_AUTHOR_LABEL_CHARS);
     }
 }

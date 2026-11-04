@@ -523,13 +523,23 @@ pub fn ensure_column(
     // 正規化した名前で lookup も作成も行う（raw と trimmed が食い違わないように）。
     let name = normalize_column_name(name)?;
 
+    // get は書き込みロックを取らずに済ませる（他プロセスの書き込みを待たない）。
+    // 作成するときだけ書き込みトランザクションに入り、並行作成に備えて引き直す。
+    let existing = |conn: &Connection| -> Result<Option<EnsureColumnResult>> {
+        Ok(find_writable_column_by_name(conn, deck_id, name, scope)?.map(|column| {
+            EnsureColumnResult {
+                column,
+                created: false,
+            }
+        }))
+    };
+    if let Some(found) = existing(conn)? {
+        return Ok(found);
+    }
     let tx = write_tx(conn)?;
     let conn: &Connection = &tx;
-    if let Some(existing) = find_writable_column_by_name(conn, deck_id, name, scope)? {
-        return Ok(EnsureColumnResult {
-            column: existing,
-            created: false,
-        });
+    if let Some(found) = existing(conn)? {
+        return Ok(found);
     }
 
     // allowlist を持つ接続は固定集合の意図なので新規作成しない。
@@ -1467,6 +1477,34 @@ mod tests {
     }
 
     #[test]
+    fn ensure_column_get_does_not_wait_for_another_writer() {
+        let path = std::env::temp_dir().join(format!("jot-deck-ensure-{}.db", ulid::Ulid::generate()));
+        let path_str = path.to_str().unwrap().to_string();
+        let a = crate::db::create_file_db(&path_str).unwrap();
+        let d = deck::create(
+            &a,
+            NewDeck {
+                name: "D".to_string(),
+                sort_order: SortOrder::default(),
+            },
+        )
+        .unwrap();
+        ensure_column(&a, &d.id, "Inbox", "", false, &sc(), &au()).unwrap();
+
+        let b = crate::db::create_file_db(&path_str).unwrap();
+        b.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let lock = write_tx(&a).unwrap();
+        let got = ensure_column(&b, &d.id, "Inbox", "", false, &sc(), &au()).unwrap();
+        assert!(!got.created);
+        drop(lock);
+
+        drop((a, b));
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{path_str}{suffix}"));
+        }
+    }
+
+    #[test]
     fn failed_or_replayed_writes_record_nothing() {
         let f = setup();
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
@@ -1491,6 +1529,8 @@ mod tests {
             .unwrap()
             .column;
         let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        // Moving A out would shift B up; the rollback must undo that too.
+        append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
         // Fail after both move steps ran: the history insert aborts.
         f.conn
             .execute_batch(
@@ -1501,6 +1541,13 @@ mod tests {
         move_card(&f.conn, &f.deck_id, &card.id, Some(&other.id), None, None, &sc(), &au()).unwrap_err();
 
         assert_eq!(card::get_by_id(&f.conn, &card.id).unwrap().column_id, f.public_col);
+        let positions: Vec<(String, i32)> = card::get_by_column_id(&f.conn, &f.public_col)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.content, c.position))
+            .collect();
+        assert_eq!(positions, vec![("A".to_string(), 0), ("B".to_string(), 1)]);
+        assert!(contents(&f, &other.id).is_empty());
         assert!(f.conn.is_autocommit(), "no transaction left open");
     }
 }

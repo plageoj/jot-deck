@@ -144,13 +144,16 @@ pub fn write_tx(conn: &Connection) -> Result<WriteTx<'_>> {
 }
 
 impl WriteTx<'_> {
+    /// 確定する。COMMIT / RELEASE 自体が失敗したら（`SQLITE_BUSY` / `SQLITE_FULL`
+    /// など）未確定のまま返り、drop がロールバックする ―― 開いたトランザクションが
+    /// 接続に残ると、以後の `write_tx` が SAVEPOINT になって何も確定しなくなる。
     pub fn commit(mut self) -> Result<()> {
-        self.finished = true;
         self.conn.execute_batch(if self.nested {
             "RELEASE jot_deck_write"
         } else {
             "COMMIT"
         })?;
+        self.finished = true;
         Ok(())
     }
 }
@@ -462,5 +465,50 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}-wal", path_str));
         let _ = std::fs::remove_file(format!("{}-shm", path_str));
+    }
+
+    /// Insert a card whose column does not exist, with the FK check deferred to
+    /// COMMIT so the commit itself fails.
+    fn insert_dangling_card(conn: &Connection) {
+        conn.execute_batch(
+            "PRAGMA defer_foreign_keys = ON;
+             INSERT INTO cards (id, column_id, content, position, created_at, updated_at)
+             VALUES ('c', 'missing', 'x', 0, 't', 't');",
+        )
+        .unwrap();
+    }
+
+    fn card_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM cards", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn write_tx_nests_as_savepoints() {
+        let conn = create_in_memory().unwrap();
+        let outer = write_tx(&conn).unwrap();
+        {
+            let inner = write_tx(&outer).unwrap();
+            insert_dangling_card(&inner);
+            // Dropped without commit: only the inner work is undone.
+        }
+        assert_eq!(card_count(&conn), 0);
+        assert!(!conn.is_autocommit(), "outer transaction still open");
+        drop(outer);
+        assert!(conn.is_autocommit());
+    }
+
+    #[test]
+    fn failed_commit_rolls_back_instead_of_leaving_the_transaction_open() {
+        let conn = create_in_memory().unwrap();
+        let tx = write_tx(&conn).unwrap();
+        insert_dangling_card(&tx);
+        assert!(tx.commit().is_err());
+
+        assert!(conn.is_autocommit(), "no transaction left open");
+        assert_eq!(card_count(&conn), 0);
+        // The next write_tx is a real top-level transaction again.
+        let next = write_tx(&conn).unwrap();
+        assert!(!next.nested);
     }
 }
