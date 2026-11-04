@@ -92,7 +92,7 @@ pub fn create_at_position(conn: &Connection, new_card: NewCard, position: i32) -
     // 末尾より後ろを指定されても欠番を作らないよう [0, 末尾] に丸める
     let position = position.clamp(0, get_next_position(conn, &new_card.column_id)?);
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     // 挿入位置以降の Card の position を +1 する
     tx.execute(
@@ -271,7 +271,7 @@ pub fn update_content_cas_owned(
 ) -> Result<Card> {
     let now = Utc::now();
     let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let affected = tx.execute(
         "UPDATE cards SET content = ?1, updated_at = ?2, locked_at = ?3
          WHERE id = ?4 AND locked_by = ?5 AND updated_at = ?6
@@ -316,7 +316,7 @@ pub fn update_content_cas_and_release(
 ) -> Result<Card> {
     let now = Utc::now();
     let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let affected = tx.execute(
         "UPDATE cards SET content = ?1, updated_at = ?2, locked_by = NULL, locked_at = NULL
          WHERE id = ?3 AND locked_by = ?4 AND updated_at = ?5
@@ -426,7 +426,7 @@ pub fn commit_stream_and_release(
 ) -> Result<Card> {
     let now = Utc::now();
     let cutoff = lock_timestamp(now - chrono::Duration::seconds(LOCK_LEASE_SECONDS));
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let affected = tx.execute(
         "UPDATE cards SET content = ?1, updated_at = ?2, locked_by = NULL, locked_at = NULL
          WHERE id = ?3 AND locked_by = ?4 AND deleted_at IS NULL AND locked_at >= ?5",
@@ -511,7 +511,7 @@ pub fn move_to_column(conn: &Connection, id: &str, new_column_id: &str) -> Resul
     let now = Utc::now();
     let old_column_id = &card.column_id;
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     // 元の Column 内の position を詰める
     tx.execute(
@@ -559,7 +559,7 @@ pub fn move_to_position(conn: &Connection, id: &str, new_position: i32) -> Resul
     let old_position = card.position;
     let now = Utc::now();
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     if new_position > old_position {
         // 下に移動: old_position < x <= new_position の Card を -1
@@ -601,7 +601,7 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
 
     let now = Utc::now();
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     tx.execute(
         "UPDATE cards SET deleted_at = ?1, updated_at = ?1 WHERE id = ?2",
@@ -627,7 +627,7 @@ pub fn discard_empty(conn: &Connection, id: &str, holder: &str) -> Result<()> {
     let now = Utc::now();
     let cutoff = now - chrono::Duration::seconds(LOCK_LEASE_SECONDS);
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
     let card = get_by_id(&tx, id)?;
 
     if card.deleted_at.is_some() {
@@ -695,7 +695,7 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Card> {
     // 削除後に他の Card も減っていれば保存位置は末尾を越えうる。欠番を作らないよう丸める
     let restore_position = card.position.clamp(0, get_next_position(conn, &card.column_id)?);
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     // 復元位置以降の Card の position を +1 する
     tx.execute(

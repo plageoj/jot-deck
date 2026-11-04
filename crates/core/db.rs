@@ -89,7 +89,94 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
     FOREIGN KEY (card_id) REFERENCES cards(id) ON DELETE CASCADE,
     FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
 );
+
+-- 外部からの書き込み（MCP / Reporter）の変更履歴（008-mcp-server.md §5.1）。
+-- 1 書き込み = 1 行。before / after は変更した属性だけの JSON（作成は before が
+-- NULL）。target_id には FK を張らない:
+-- 履歴は対象の物理削除後も保持期間（30 日、cleanup）まで残す。Deck 削除では消す。
+CREATE TABLE IF NOT EXISTS change_history (
+    id TEXT PRIMARY KEY,
+    deck_id TEXT NOT NULL,
+    target_kind TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    before TEXT,
+    after TEXT,
+    author_source TEXT NOT NULL,
+    author_id TEXT NOT NULL,
+    author_label TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_change_history_deck ON change_history(deck_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_change_history_target ON change_history(target_id);
+CREATE INDEX IF NOT EXISTS idx_change_history_created_at ON change_history(created_at);
 "#;
+
+/// 入れ子にできる書き込みトランザクション。
+///
+/// トランザクション外では `BEGIN IMMEDIATE`、既に内側なら `SAVEPOINT` を張るので、
+/// Repository 関数（それぞれ自前でトランザクションを張る）を `write` 層が外側の
+/// トランザクションで包み、変更と変更履歴（008 §5.1）を 1 つにまとめられる。
+/// IMMEDIATE は最初から書き込みロックを取り、WAL で他プロセスと共有するとき読み
+/// →書きの昇格で `SQLITE_BUSY` になるのを避ける。`commit` せずに drop すると
+/// ロールバックする。
+pub struct WriteTx<'c> {
+    conn: &'c Connection,
+    nested: bool,
+    finished: bool,
+}
+
+/// [`WriteTx`] を開始する。
+pub fn write_tx(conn: &Connection) -> Result<WriteTx<'_>> {
+    let nested = !conn.is_autocommit();
+    conn.execute_batch(if nested {
+        "SAVEPOINT jot_deck_write"
+    } else {
+        "BEGIN IMMEDIATE"
+    })?;
+    Ok(WriteTx {
+        conn,
+        nested,
+        finished: false,
+    })
+}
+
+impl WriteTx<'_> {
+    /// 確定する。COMMIT / RELEASE 自体が失敗したら（`SQLITE_BUSY` / `SQLITE_FULL`
+    /// など）未確定のまま返り、drop がロールバックする ―― 開いたトランザクションが
+    /// 接続に残ると、以後の `write_tx` が SAVEPOINT になって何も確定しなくなる。
+    pub fn commit(mut self) -> Result<()> {
+        self.conn.execute_batch(if self.nested {
+            "RELEASE jot_deck_write"
+        } else {
+            "COMMIT"
+        })?;
+        self.finished = true;
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for WriteTx<'_> {
+    type Target = Connection;
+
+    fn deref(&self) -> &Connection {
+        self.conn
+    }
+}
+
+impl Drop for WriteTx<'_> {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.conn.execute_batch(if self.nested {
+                "ROLLBACK TO jot_deck_write; RELEASE jot_deck_write"
+            } else {
+                "ROLLBACK"
+            });
+        }
+    }
+}
 
 /// データベースを初期化する
 pub fn init_db(conn: &Connection) -> Result<()> {
@@ -378,5 +465,50 @@ mod tests {
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(format!("{}-wal", path_str));
         let _ = std::fs::remove_file(format!("{}-shm", path_str));
+    }
+
+    /// Insert a card whose column does not exist, with the FK check deferred to
+    /// COMMIT so the commit itself fails.
+    fn insert_dangling_card(conn: &Connection) {
+        conn.execute_batch(
+            "PRAGMA defer_foreign_keys = ON;
+             INSERT INTO cards (id, column_id, content, position, created_at, updated_at)
+             VALUES ('c', 'missing', 'x', 0, 't', 't');",
+        )
+        .unwrap();
+    }
+
+    fn card_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM cards", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn write_tx_nests_as_savepoints() {
+        let conn = create_in_memory().unwrap();
+        let outer = write_tx(&conn).unwrap();
+        {
+            let inner = write_tx(&outer).unwrap();
+            insert_dangling_card(&inner);
+            // Dropped without commit: only the inner work is undone.
+        }
+        assert_eq!(card_count(&conn), 0);
+        assert!(!conn.is_autocommit(), "outer transaction still open");
+        drop(outer);
+        assert!(conn.is_autocommit());
+    }
+
+    #[test]
+    fn failed_commit_rolls_back_instead_of_leaving_the_transaction_open() {
+        let conn = create_in_memory().unwrap();
+        let tx = write_tx(&conn).unwrap();
+        insert_dangling_card(&tx);
+        assert!(tx.commit().is_err());
+
+        assert!(conn.is_autocommit(), "no transaction left open");
+        assert_eq!(card_count(&conn), 0);
+        // The next write_tx is a real top-level transaction again.
+        let next = write_tx(&conn).unwrap();
+        assert!(!next.nested);
     }
 }

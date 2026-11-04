@@ -113,7 +113,7 @@ pub fn create_at_position(conn: &Connection, new_column: NewColumn, position: i3
     // 末尾より後ろを指定されても欠番を作らないよう [0, 末尾] に丸める
     let position = position.clamp(0, get_next_position(conn, &new_column.deck_id)?);
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     // 挿入位置以降の Column の position を +1 する
     tx.execute(
@@ -310,7 +310,7 @@ pub fn move_to_position(conn: &Connection, id: &str, new_position: i32) -> Resul
     let old_position = column.position;
     let now = Utc::now();
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     if new_position > old_position {
         // 下に移動: old_position < x <= new_position の Column を -1
@@ -352,7 +352,7 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<()> {
 
     let now = Utc::now();
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     // 所属する Card を連動削除
     tx.execute(
@@ -390,7 +390,7 @@ pub fn restore(conn: &Connection, id: &str) -> Result<Column> {
     let now = Utc::now();
     let new_position = get_next_position(conn, &column.deck_id)?;
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = crate::db::write_tx(conn)?;
 
     // 連動削除された Card を復元
     tx.execute(
