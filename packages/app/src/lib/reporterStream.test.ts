@@ -191,6 +191,62 @@ describe("ReporterStreamController", () => {
   });
 });
 
+describe("ReporterStreamController at the cap", () => {
+  let streamingText: Record<string, string>;
+  let setStreamingText: ReturnType<
+    typeof vi.fn<(value: Record<string, string>) => void>
+  >;
+  let streams: ReporterStreamController;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    streamingText = {};
+    setStreamingText = vi.fn((value) => {
+      streamingText = value;
+    });
+    streams = new ReporterStreamController({
+      getStreamingText: () => streamingText,
+      setStreamingText,
+      reloadColumn: vi.fn(async () => {}),
+      scheduleReload: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function fill(cardId: string): void {
+    streams.handle({ kind: "begin", card_id: cardId });
+    streams.handle({
+      kind: "delta",
+      card_id: cardId,
+      chunk: "x".repeat(MAX_CARD_LENGTH + 1),
+    });
+    vi.advanceTimersByTime(20);
+  }
+
+  it("drops deltas for a full card without scheduling a repaint", () => {
+    fill("card-1");
+    setStreamingText.mockClear();
+
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "more" });
+    vi.advanceTimersByTime(20);
+
+    expect(setStreamingText).not.toHaveBeenCalled();
+    expect(streamingText["card-1"]).toHaveLength(MAX_CARD_LENGTH);
+  });
+
+  it("a fresh stream on the same card accepts text again", () => {
+    fill("card-1");
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "new" });
+    vi.advanceTimersByTime(20);
+
+    expect(streamingText["card-1"]).toBe("new");
+  });
+});
+
 describe("truncateToCodePoints", () => {
   it("keeps text within the limit unchanged", () => {
     expect(truncateToCodePoints("", 3)).toBe("");

@@ -39,6 +39,8 @@ interface ReporterStreamOptions {
  */
 export class ReporterStreamController {
   private pendingDeltas: Record<string, string> = {};
+  /** Cards whose overlay hit MAX_CARD_LENGTH: later deltas are dropped outright. */
+  private fullCards = new Set<string>();
   private deltaFlushHandle: number | null = null;
   private streamTimers: Record<string, ReturnType<typeof setTimeout>> = {};
   private static readonly INACTIVITY_MS = 30_000;
@@ -48,6 +50,7 @@ export class ReporterStreamController {
   handle(event: ReporterStreamEvent): void {
     switch (event.kind) {
       case "begin":
+        this.fullCards.delete(event.card_id);
         this.options.setStreamingText({
           ...this.options.getStreamingText(),
           [event.card_id]: "",
@@ -72,6 +75,7 @@ export class ReporterStreamController {
     for (const timer of Object.values(this.streamTimers)) clearTimeout(timer);
     this.streamTimers = {};
     this.pendingDeltas = {};
+    this.fullCards.clear();
     this.options.setStreamingText({});
   }
 
@@ -82,6 +86,7 @@ export class ReporterStreamController {
       this.pendingDeltas = Object.fromEntries(
         Object.entries(this.pendingDeltas).filter(([id]) => id !== cardId),
       );
+      this.fullCards.delete(cardId);
       const streamingText = { ...this.options.getStreamingText() };
       delete streamingText[cardId];
       this.options.setStreamingText(streamingText);
@@ -96,11 +101,21 @@ export class ReporterStreamController {
     }
   }
 
+  /** `text` capped at MAX_CARD_LENGTH; marks the card full if anything was cut. */
+  private capped(cardId: string, text: string): string {
+    const bounded = truncateToCodePoints(text, MAX_CARD_LENGTH);
+    if (bounded.length < text.length) this.fullCards.add(cardId);
+    return bounded;
+  }
+
   private bufferDelta(cardId: string, chunk: string): void {
+    // A full overlay can show nothing more, so skip the concatenation and the
+    // code point scan for every later delta of this stream.
+    if (this.fullCards.has(cardId)) return;
     // Bounded between frames too: more than a full card could never be shown.
-    this.pendingDeltas[cardId] = truncateToCodePoints(
+    this.pendingDeltas[cardId] = this.capped(
+      cardId,
       (this.pendingDeltas[cardId] ?? "") + chunk,
-      MAX_CARD_LENGTH,
     );
     if (this.deltaFlushHandle !== null) return;
     this.deltaFlushHandle = requestAnimationFrame(() => {
@@ -110,10 +125,7 @@ export class ReporterStreamController {
       const streamingText = { ...this.options.getStreamingText() };
       for (const [id, text] of Object.entries(pending)) {
         if (streamingText[id] === undefined) continue;
-        streamingText[id] = truncateToCodePoints(
-          streamingText[id] + text,
-          MAX_CARD_LENGTH,
-        );
+        streamingText[id] = this.capped(id, streamingText[id] + text);
       }
       this.options.setStreamingText(streamingText);
     });
@@ -131,6 +143,7 @@ export class ReporterStreamController {
       delete streamingText[cardId];
       this.options.setStreamingText(streamingText);
       delete this.pendingDeltas[cardId];
+      this.fullCards.delete(cardId);
     }
   }
 }
