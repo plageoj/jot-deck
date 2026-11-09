@@ -352,16 +352,25 @@ export class BoardActionExecutors {
   }
 
   private async cardDelete(card = this.context().focusedCard): Promise<void> {
-    const { data, focusedCard: focusedBefore } = this.context();
-    if (!card || !(await data.deleteCard(card.id))) return;
-    // Resolve focus against the board as it is now, after the awaited delete.
-    // If another card is focused (focus moved during an async cut), keep it
-    // focused even though deleting a card above it shifted its index.
+    const { data } = this.context();
+    if (!card) return;
+    // The card lists only change once the delete refreshes the deck, so any
+    // focus move made meanwhile (e.g. during an async cut) indexes the lists as
+    // they are now. Snapshot their ids to tell which card the user is on.
+    const idsBefore = new Map(
+      Object.entries(data.cardsByColumn).map(([columnId, cards]) => [
+        columnId,
+        cards.map((c) => c.id),
+      ]),
+    );
+    if (!(await data.deleteCard(card.id))) return;
     const { focus, focusedColumn } = this.context();
     const updated = data.cardsByColumn[focusedColumn?.id ?? ""] ?? [];
+    // Keep focus on that card even though deleting one above it shifted it.
+    const targetId = idsBefore.get(focusedColumn?.id ?? "")?.[focus.focusedCardIndex];
     const kept =
-      focusedBefore && focusedBefore.id !== card.id
-        ? updated.findIndex((candidate) => candidate.id === focusedBefore.id)
+      targetId && targetId !== card.id
+        ? updated.findIndex((candidate) => candidate.id === targetId)
         : -1;
     focus.focusedCardIndex =
       kept !== -1

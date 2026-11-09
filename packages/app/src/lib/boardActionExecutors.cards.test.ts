@@ -305,6 +305,34 @@ describe("card operations", () => {
       expect(data.cardsByColumn["col-0"][focus.focusedCardIndex]?.id).toBe("c-0-c");
     });
 
+    it("cutCardText keeps the card the user picks while the delete is pending", async () => {
+      // Cut c-0-a; move to c-0-c during the write, then to c-0-b during the delete.
+      focus.focusedCardIndex = 0;
+      let finishWrite!: () => void;
+      writeText.mockReturnValue(new Promise<void>((resolve) => (finishWrite = resolve)));
+      const realDelete = data.deleteCard.bind(data);
+      let deleteStarted!: () => void;
+      const started = new Promise<void>((resolve) => (deleteStarted = resolve));
+      let releaseDelete!: () => void;
+      const gate = new Promise<void>((resolve) => (releaseDelete = resolve));
+      vi.spyOn(data, "deleteCard").mockImplementation(async (id, record) => {
+        deleteStarted();
+        await gate;
+        return realDelete(id, record);
+      });
+
+      const cut = actions.executeCardAction("cutCardText");
+      focus.focusedCardIndex = 2;
+      finishWrite();
+      await started;
+      focus.focusedCardIndex = 1;
+      releaseDelete();
+      await cut;
+
+      expect(boardState.deleteCardCalls).toEqual(["c-0-a"]);
+      expect(data.cardsByColumn["col-0"][focus.focusedCardIndex]?.id).toBe("c-0-b");
+    });
+
     it("cutCardText leaves an opened palette alone when the cut finishes", async () => {
       // Cut the only card of col-1, then open a palette before the write ends.
       focus.focusedColumnIndex = 1;

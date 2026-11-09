@@ -2,7 +2,7 @@ import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
 import type { Card, Column, EditEntry } from "./types";
 import { findAction } from "./keybindings";
-import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
+import { isModifierOnly, normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
 import { executeGlobalAction } from "./actionDispatchHelpers";
 import { BoardActionExecutors } from "./boardActionExecutors";
@@ -206,7 +206,7 @@ export class ActionDispatcher {
     ) {
       return false;
     }
-    if (normalizeKey(event) === null) {
+    if (isModifierOnly(event)) {
       // Modifier-only press: keep the hints up.
       this.focus.linkHints = hints;
       return true;

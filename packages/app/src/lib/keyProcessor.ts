@@ -3,6 +3,11 @@ import { type FocusMode, findAction, isValidPrefix } from "./keybindings";
 /** Modifier-only keys that never produce a sequence on their own. */
 const MODIFIER_KEYS = new Set(["Control", "Alt", "Shift", "Meta"]);
 
+/** Whether the event is a bare modifier press (Shift, Ctrl, …). */
+export function isModifierOnly(event: KeyboardEvent): boolean {
+  return MODIFIER_KEYS.has(event.key);
+}
+
 /** Keys that map directly to their own name as a sequence token. */
 const DIRECT_KEYS: Record<string, string> = {
   Escape: "Escape",
@@ -35,6 +40,11 @@ export function normalizeKey(event: KeyboardEvent): string | null {
   const { key } = event;
 
   if (MODIFIER_KEYS.has(key)) return null;
+
+  // Cmd/Win combos belong to the OS and browser (Cmd+c / Cmd+v copy and
+  // paste on macOS). There is no Meta token, so treating them as the bare key
+  // would run e.g. `c` on Cmd+c and cancel the native action.
+  if (event.metaKey) return null;
 
   const direct = DIRECT_KEYS[key];
   if (direct) return direct;

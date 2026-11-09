@@ -3,12 +3,13 @@ import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 
 function key(
   k: string,
-  opts: { ctrl?: boolean; shift?: boolean } = {},
+  opts: { ctrl?: boolean; shift?: boolean; meta?: boolean } = {},
 ): KeyboardEvent {
   return new KeyboardEvent("keydown", {
     key: k,
     ctrlKey: opts.ctrl ?? false,
     shiftKey: opts.shift ?? false,
+    metaKey: opts.meta ?? false,
   });
 }
 
@@ -17,6 +18,12 @@ describe("normalizeKey", () => {
     for (const k of ["Control", "Alt", "Shift", "Meta"]) {
       expect(normalizeKey(key(k))).toBeNull();
     }
+  });
+
+  it("leaves Cmd/Win combos to the OS instead of reading them as bare keys", () => {
+    expect(normalizeKey(key("c", { meta: true }))).toBeNull();
+    expect(normalizeKey(key("v", { meta: true }))).toBeNull();
+    expect(normalizeKey(key("ArrowUp", { meta: true }))).toBeNull();
   });
 
   it("maps direct keys to their own token", () => {

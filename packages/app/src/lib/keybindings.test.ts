@@ -336,6 +336,16 @@ describe("getKnownActions", () => {
 describe("setKeybindingOverrides", () => {
   afterEach(() => setKeybindingOverrides({}));
 
+  it("drops saved card-mode bindings on native shortcuts, keeping other modes", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "Ctrl+v", action: "pasteBelow", modes: ["card", "column"], description: "Paste" },
+      { sequence: "Ctrl+Shift+V", action: "pasteAbove", modes: ["card"], description: "Paste above" },
+    ]);
+    expect(findAction("Ctrl+v", "card")).toBeNull();
+    expect(findAction("Ctrl+Shift+V", "card")).toBeNull();
+    expect(findAction("Ctrl+v", "column")).toBe("pasteBelow");
+  });
+
   it("makes findAction reflect a remapped sequence", () => {
     const startEdit = DEFAULT_KEYBINDINGS.find(
       (b) => b.action === "startEdit" && b.sequence === "i",

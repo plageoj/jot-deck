@@ -151,6 +151,15 @@ export const NATIVE_SHORTCUTS: (Omit<KeyBinding, "action"> & { alsoReserves?: st
   },
 ];
 
+/** Whether `sequence` is held by a native shortcut in `mode`. */
+function isNativeReserved(sequence: string, mode: FocusMode): boolean {
+  return NATIVE_SHORTCUTS.some(
+    (n) =>
+      n.modes.includes(mode) &&
+      (n.sequence === sequence || (n.alsoReserves ?? []).includes(sequence)),
+  );
+}
+
 /**
  * User customization is stored as a map keyed by a *default* binding's stable
  * signature. The value is the user's replacement key sequence, or `null` to
@@ -282,7 +291,11 @@ export function setKeybindingOverrides(
   overrides: KeybindingOverrides,
   additions: KeyBinding[] = []
 ): void {
-  const resolved = resolveWithSignatures(overrides, additions);
+  // Saved customizations may predate a native shortcut's reservation; drop the
+  // reserved modes so a stored binding cannot suppress the native event.
+  const resolved = resolveWithSignatures(overrides, additions)
+    .map((b) => ({ ...b, modes: b.modes.filter((m) => !isNativeReserved(b.sequence, m)) }))
+    .filter((b) => b.modes.length > 0);
   activeBindings = resolved.map(toKeyBinding);
   lookupBindings = [
     ...resolved.filter((b) => b.customized),
@@ -404,8 +417,7 @@ export function findKeybindingConflicts(
   // A keydown binding on a native shortcut would preventDefault and suppress
   // the native event (e.g. paste), so these keys are never available.
   for (const native of NATIVE_SHORTCUTS) {
-    const reserved = [native.sequence, ...(native.alsoReserves ?? [])];
-    if (reserved.includes(candidate) && native.modes.some((m) => modes.includes(m))) {
+    if (modes.some((m) => native.modes.includes(m) && isNativeReserved(candidate, m))) {
       conflicts.push({
         severity: "error",
         sequence: candidate,
