@@ -5,6 +5,7 @@ import {
   getKeybindingsForMode,
   resolveKeybindings,
   setKeybindingOverrides,
+  shortcutFor,
   signatureOf,
   findKeybindingConflicts,
   getKnownActions,
@@ -23,6 +24,10 @@ describe("findAction", () => {
     expect(findAction("j", "column")).toBe("enterCardFocusFirst");
     expect(findAction("r", "column")).toBe("renameColumn");
     expect(findAction("r", "card")).toBe("renameColumn");
+    expect(findAction("F2", "column")).toBe("renameColumn");
+    expect(findAction("F2", "card")).toBe("renameColumn");
+    expect(findAction("R", "column")).toBe("renameDeck");
+    expect(findAction("R", "card")).toBe("renameDeck");
   });
 
   it("should find single-key action in card mode", () => {
@@ -130,6 +135,40 @@ describe("getKeybindingsForMode", () => {
     // "u" (undo) should be in both
     expect(columnBindings.some((b) => b.action === "undo")).toBe(true);
     expect(cardBindings.some((b) => b.action === "undo")).toBe(true);
+  });
+
+  it("keeps every default binding when nothing is customized", () => {
+    for (const mode of ["column", "card"] as const) {
+      const expected = DEFAULT_KEYBINDINGS.filter((b) => b.modes.includes(mode));
+      expect(getKeybindingsForMode(mode)).toHaveLength(expected.length);
+    }
+  });
+
+  it("leaves out a default whose key a customized binding claims", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "R", action: "redo", modes: ["column"], description: "Redo" },
+    ]);
+    try {
+      const column = getKeybindingsForMode("column");
+      expect(column.some((b) => b.action === "renameDeck")).toBe(false);
+      expect(column.some((b) => b.action === "redo" && b.sequence === "R")).toBe(true);
+      expect(getKeybindingsForMode("card").some((b) => b.action === "renameDeck")).toBe(true);
+    } finally {
+      setKeybindingOverrides({});
+    }
+  });
+
+  it("leaves out sequences a shorter customized binding cuts off", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["card"], description: "Undo" },
+    ]);
+    try {
+      const card = getKeybindingsForMode("card");
+      expect(card.some((b) => b.sequence.startsWith("g") && b.sequence !== "g")).toBe(false);
+      expect(getKeybindingsForMode("column").some((b) => b.sequence === "gn")).toBe(true);
+    } finally {
+      setKeybindingOverrides({});
+    }
   });
 });
 
@@ -322,6 +361,86 @@ describe("getKnownActions", () => {
     // "undo" is bound in both column and card modes.
     const undo = getKnownActions().find((a) => a.action === "undo");
     expect(undo?.modes).toEqual(expect.arrayContaining(["column", "card"]));
+  });
+});
+
+describe("shortcutFor", () => {
+  afterEach(() => setKeybindingOverrides({}));
+
+  const renameDeck = DEFAULT_KEYBINDINGS.find((b) => b.action === "renameDeck")!;
+
+  it("returns the first default binding for the action", () => {
+    expect(shortcutFor("renameDeck")).toBe("R");
+    expect(shortcutFor("deleteColumn")).toBe("dd");
+    expect(shortcutFor("showDeckPalette")).toBe("Ctrl+p");
+  });
+
+  it("follows a remapped key", () => {
+    setKeybindingOverrides({ [signatureOf(renameDeck)]: "Ctrl+e" });
+    expect(shortcutFor("renameDeck")).toBe("Ctrl+e");
+  });
+
+  it("prefers a user-added binding over the defaults", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "z", action: "renameColumn", modes: ["card"], description: "Rename column" },
+    ]);
+    expect(shortcutFor("renameColumn")).toBe("z");
+  });
+
+  it("returns null when every binding is disabled or the action is unbound", () => {
+    setKeybindingOverrides({ [signatureOf(renameDeck)]: null });
+    expect(shortcutFor("renameDeck")).toBeNull();
+    expect(shortcutFor("showShortcuts")).toBeNull();
+  });
+
+  it("skips a key another customized binding claims", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "R", action: "redo", modes: ["column", "card"], description: "Redo" },
+    ]);
+    expect(shortcutFor("renameDeck")).toBeNull();
+    expect(shortcutFor("redo")).toBe("R");
+  });
+
+  it("skips a key whose leading part fires another binding first", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["column", "card"], description: "Undo" },
+    ]);
+    expect(shortcutFor("showColumnPalette")).toBe("Ctrl+t");
+    expect(shortcutFor("showTrashPalette")).toBeNull();
+  });
+
+  it("skips browser-reserved keys in a browser", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "g", action: "undo", modes: ["column", "card"], description: "Undo" },
+    ]);
+    expect(shortcutFor("showColumnPalette", undefined, { inBrowser: true })).toBeNull();
+    expect(shortcutFor("showColumnPalette", undefined, { inBrowser: false })).toBe("Ctrl+t");
+  });
+
+  it("falls back to the next key when the first is browser-reserved", () => {
+    // A customized binding ranks first, so Ctrl+t leads the lookup.
+    setKeybindingOverrides({}, [
+      { sequence: "Ctrl+t", action: "showColumnPalette", modes: ["column"], description: "Switch column" },
+    ]);
+    expect(shortcutFor("showColumnPalette", ["column"])).toBe("Ctrl+t");
+    expect(shortcutFor("showColumnPalette", ["column"], { inBrowser: true })).toBe("gn");
+  });
+
+  it("splits a sequence into whole keys, not characters", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "C", action: "undo", modes: ["column", "card"], description: "Undo" },
+    ]);
+    expect(shortcutFor("showDeckPalette")).toBe("Ctrl+p");
+  });
+
+  it("only considers bindings in the given modes", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "z", action: "renameDeck", modes: ["card"], description: "Rename deck" },
+    ]);
+    expect(shortcutFor("renameDeck")).toBe("z");
+    expect(shortcutFor("renameDeck", ["column"])).toBe("R");
+    expect(shortcutFor("createCardAbove", ["column"])).toBeNull();
+    expect(shortcutFor("createCardAbove", ["card"])).toBe("O");
   });
 });
 
