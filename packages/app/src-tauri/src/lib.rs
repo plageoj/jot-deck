@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use jot_deck_core::{
     create_file_db,
     repository::{card, column, deck, setting, tag},
+    run_cleanup_batch,
     Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder, Tag,
 };
 use serde::{Deserialize, Serialize};
@@ -463,8 +464,14 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data dir");
             let db_path = app_data_dir.join("jot-deck.db");
 
-            let conn = create_file_db(db_path.to_str().unwrap())
+            let mut conn = create_file_db(db_path.to_str().unwrap())
                 .expect("Failed to create database");
+
+            // 起動時に 30 日を過ぎた論理削除データと変更履歴を物理削除する
+            // （002 §3 / 008 §5.1）。失敗しても起動は止めない（次回起動で再試行）。
+            if let Err(e) = run_cleanup_batch(&mut conn) {
+                eprintln!("[jot-deck] cleanup failed: {}", e);
+            }
 
             app.manage(AppState {
                 conn: Mutex::new(conn),

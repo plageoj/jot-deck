@@ -12,6 +12,7 @@ pub struct CleanupResult {
     pub deleted_columns: usize,
     pub deleted_cards: usize,
     pub deleted_orphan_tags: usize,
+    pub deleted_history: usize,
 }
 
 /// 論理削除から指定日数経過したデータを物理削除する
@@ -49,6 +50,12 @@ pub fn cleanup_with_threshold(conn: &mut Connection, threshold: &str) -> Result<
     result.deleted_orphan_tags = tx.execute(
         "DELETE FROM tags WHERE id NOT IN (SELECT DISTINCT tag_id FROM card_tags)",
         [],
+    )?;
+
+    // 5. 保持期間を過ぎた変更履歴を削除（008-mcp-server.md §5.1）
+    result.deleted_history = tx.execute(
+        "DELETE FROM change_history WHERE created_at < ?1",
+        params![threshold],
     )?;
 
     tx.commit()?;
@@ -194,5 +201,41 @@ mod tests {
         let result = cleanup_old_deleted(&mut conn).unwrap();
         assert_eq!(result.deleted_columns, 1);
         assert_eq!(result.deleted_cards, 2);
+    }
+
+    #[test]
+    fn test_cleanup_expires_change_history() {
+        use crate::repository::history::{self, Author};
+        use crate::repository::write::{self, WriteScope};
+
+        let mut conn = create_in_memory().unwrap();
+        let d = deck::create(
+            &conn,
+            NewDeck {
+                name: "Test".to_string(),
+                sort_order: SortOrder::default(),
+            },
+        )
+        .unwrap();
+        let author = Author::mcp("conn", None);
+        let scope = WriteScope::unrestricted();
+        let old = write::ensure_column(&conn, &d.id, "Old", "", false, &scope, &author)
+            .unwrap()
+            .column;
+        let fresh = write::ensure_column(&conn, &d.id, "Fresh", "", false, &scope, &author)
+            .unwrap()
+            .column;
+        conn.execute(
+            "UPDATE change_history SET created_at = ?1 WHERE target_id = ?2",
+            params![(Utc::now() - Duration::days(31)).to_rfc3339(), old.id],
+        )
+        .unwrap();
+
+        let result = cleanup_old_deleted(&mut conn).unwrap();
+        assert_eq!(result.deleted_history, 1);
+        // Only the history row expires; the column itself stays.
+        assert!(history::list_by_target(&conn, &old.id).unwrap().is_empty());
+        assert_eq!(history::list_by_target(&conn, &fresh.id).unwrap().len(), 1);
+        assert!(column::get_by_id(&conn, &old.id).is_ok());
     }
 }

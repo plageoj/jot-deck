@@ -13,14 +13,20 @@
 //! Numbering (ULID / position) and tag extraction stay centralized in the `card`
 //! repository; this module validates scope, resolves move anchors to positions,
 //! and delegates the mutation.
+//!
+//! Each mutation runs in one transaction together with its change-history row
+//! (`history`, 008 §5.1), attributed to the caller's [`Author`].
 
 use std::collections::HashSet;
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::{json, Value};
 
+use crate::db::write_tx;
 use crate::error::{JotDeckError, Result};
 use crate::models::{Card, Column, NewCard};
+use crate::repository::history::{self, Author, ChangeOp};
 use crate::repository::{card, column, query};
 
 /// 接続の書き込みスコープ（008 §4.5 の write allowlist）。
@@ -189,6 +195,58 @@ fn resolve_anchor_index(
     })
 }
 
+/// 変更前後が異なるときだけ履歴を 1 行記録する（同じ位置への move・同値の patch
+/// など、実質 no-op の書き込みで Activity を埋めない）。
+fn record_change(
+    conn: &Connection,
+    deck_id: &str,
+    target_id: &str,
+    op: ChangeOp,
+    before: Option<Value>,
+    after: Value,
+    author: &Author,
+) -> Result<()> {
+    if before.as_ref() == Some(&after) {
+        return Ok(());
+    }
+    history::record(conn, deck_id, target_id, op, before, Some(after), author)
+}
+
+/// 直前の兄弟の id（先頭なら null）。履歴は位置をこのアンカーで持つ（`history::ChangeOp`）。
+fn preceding_id(ordered: &[String], id: &str) -> Value {
+    match ordered.iter().position(|x| x == id) {
+        Some(i) if i > 0 => json!(ordered[i - 1]),
+        _ => Value::Null,
+    }
+}
+
+/// カードの位置（所属カラム＋直前のカード）。
+fn card_placement(conn: &Connection, card_id: &str) -> Result<Value> {
+    let c = card::get_by_id(conn, card_id)?;
+    let siblings: Vec<String> = card::get_by_column_id(conn, &c.column_id)?
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    Ok(json!({
+        "column_id": c.column_id,
+        "after_card_id": preceding_id(&siblings, card_id),
+    }))
+}
+
+/// カラムの位置（直前のカラム）。
+fn column_placement(conn: &Connection, deck_id: &str, column_id: &str) -> Result<Value> {
+    let siblings: Vec<String> = column::get_by_deck_id(conn, deck_id)?
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    Ok(json!({ "after_column_id": preceding_id(&siblings, column_id) }))
+}
+
+/// `update_column` が変えうるカラム属性。
+fn column_attrs(c: &Column) -> Value {
+    json!({ "name": c.name, "description": c.description, "private": c.private })
+}
+
 /// カラム末尾にカードを作成する（`append_card`）。
 ///
 /// `idempotency_key` を添えると、同一 (deck, key) の再送は新規作成せず既存カードを
@@ -201,6 +259,7 @@ pub fn append_card(
     content: &str,
     idempotency_key: Option<&str>,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Card> {
     ensure_column_writable(conn, deck_id, column_id, scope)?;
     ensure_card_length(content)?;
@@ -214,7 +273,7 @@ pub fn append_card(
         }
     }
 
-    let tx = conn.unchecked_transaction()?;
+    let tx = write_tx(conn)?;
     let created = card::create(
         &tx,
         NewCard {
@@ -238,6 +297,15 @@ pub fn append_card(
             return writable_card(conn, deck_id, &winner, scope);
         }
     }
+    record_change(
+        &tx,
+        deck_id,
+        &created.id,
+        ChangeOp::AppendCard,
+        None,
+        json!({ "column_id": created.column_id, "content": created.content }),
+        author,
+    )?;
     tx.commit()?;
     Ok(created)
 }
@@ -251,10 +319,23 @@ pub fn patch_card(
     content: &str,
     expected_updated_at: chrono::DateTime<Utc>,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Card> {
-    writable_card(conn, deck_id, card_id, scope)?;
     ensure_card_length(content)?;
-    card::update_content_cas(conn, card_id, content, expected_updated_at)
+    let tx = write_tx(conn)?;
+    let before = writable_card(&tx, deck_id, card_id, scope)?;
+    let card = card::update_content_cas(&tx, card_id, content, expected_updated_at)?;
+    record_change(
+        &tx,
+        deck_id,
+        card_id,
+        ChangeOp::PatchCard,
+        Some(json!({ "content": before.content })),
+        json!({ "content": card.content }),
+        author,
+    )?;
+    tx.commit()?;
+    Ok(card)
 }
 
 /// ストリーム開始 ―― 対象カードを Reporter 占有としてロック取得する（`card.stream.begin`,
@@ -287,10 +368,23 @@ pub fn end_card_stream(
     holder: &str,
     content: &str,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Card> {
-    writable_card(conn, deck_id, card_id, scope)?;
     ensure_card_length(content)?;
-    card::commit_stream_and_release(conn, card_id, holder, content)
+    let tx = write_tx(conn)?;
+    let before = writable_card(&tx, deck_id, card_id, scope)?;
+    let card = card::commit_stream_and_release(&tx, card_id, holder, content)?;
+    record_change(
+        &tx,
+        deck_id,
+        card_id,
+        ChangeOp::StreamCard,
+        Some(json!({ "content": before.content })),
+        json!({ "content": card.content }),
+        author,
+    )?;
+    tx.commit()?;
+    Ok(card)
 }
 
 /// カードを論理削除する（`delete_card`）。物理削除・復元はエージェントに公開せず、
@@ -300,10 +394,23 @@ pub fn delete_card(
     deck_id: &str,
     card_id: &str,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Card> {
-    writable_card(conn, deck_id, card_id, scope)?;
-    card::soft_delete(conn, card_id)?;
-    card::get_by_id(conn, card_id)
+    let tx = write_tx(conn)?;
+    writable_card(&tx, deck_id, card_id, scope)?;
+    card::soft_delete(&tx, card_id)?;
+    record_change(
+        &tx,
+        deck_id,
+        card_id,
+        ChangeOp::DeleteCard,
+        Some(json!({ "deleted": false })),
+        json!({ "deleted": true }),
+        author,
+    )?;
+    let card = card::get_by_id(&tx, card_id)?;
+    tx.commit()?;
+    Ok(card)
 }
 
 /// カードをカラム間移動 / 並べ替えする（`move_card`）。
@@ -312,6 +419,7 @@ pub fn delete_card(
 /// position ではなく **アンカー**（`before_card_id` / `after_card_id`）で表明し、実際の
 /// position は本体が採番する。どちらも省略すると移動先の末尾。両方指定はエラー。
 /// 同じ位置への move は no-op（再送に安全）。
+#[allow(clippy::too_many_arguments)] // 引数は tool の引数と 1:1
 pub fn move_card(
     conn: &Connection,
     deck_id: &str,
@@ -320,6 +428,7 @@ pub fn move_card(
     before_card_id: Option<&str>,
     after_card_id: Option<&str>,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Card> {
     if before_card_id.is_some() && after_card_id.is_some() {
         return Err(JotDeckError::InvalidOperation(
@@ -327,9 +436,12 @@ pub fn move_card(
         ));
     }
 
+    let tx = write_tx(conn)?;
+    let conn: &Connection = &tx;
     let card = writable_card(conn, deck_id, card_id, scope)?;
     let target_col = to_column_id.unwrap_or(&card.column_id);
     ensure_column_writable(conn, deck_id, target_col, scope)?;
+    let before = card_placement(conn, card_id)?;
 
     // 移動先カラムの生存カードを position 順に、移動対象を除いて列挙する。card
     // リポジトリの列挙を再利用し、順序/論理削除の規則をここに二重で持たない。カードは
@@ -342,13 +454,16 @@ pub fn move_card(
     let target_index = resolve_anchor_index(&others, before_card_id, after_card_id, "card")?;
 
     // カラムを跨ぐ場合はまず移動先の末尾へ運び（採番一元化）、続いて目的 index へ寄せる。
-    // 現状は 2 つの確定トランザクション（末尾へ移動→再配置）。単一トランザクションの
-    // アンカー対応 reorder プリミティブへの集約は将来課題（中間の末尾位置が一瞬観測され得る）。
+    // 両段は外側の 1 トランザクションに入るので、中間の末尾位置は他から観測されない。
     if target_col != card.column_id {
         card::move_to_column(conn, card_id, target_col)?;
     }
     // このとき対象は移動先カラムに属し、全 len+1 件中の dense index を target_index にする。
-    card::move_to_position(conn, card_id, target_index as i32)
+    let moved = card::move_to_position(conn, card_id, target_index as i32)?;
+    let after = card_placement(conn, card_id)?;
+    record_change(conn, deck_id, card_id, ChangeOp::MoveCard, Some(before), after, author)?;
+    tx.commit()?;
+    Ok(moved)
 }
 
 // ---- 構造再編（008 §4.1）: カラムの作成/更新/並べ替え ----
@@ -403,15 +518,28 @@ pub fn ensure_column(
     description: &str,
     private: bool,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<EnsureColumnResult> {
     // 正規化した名前で lookup も作成も行う（raw と trimmed が食い違わないように）。
     let name = normalize_column_name(name)?;
 
-    if let Some(existing) = find_writable_column_by_name(conn, deck_id, name, scope)? {
-        return Ok(EnsureColumnResult {
-            column: existing,
-            created: false,
-        });
+    // get は書き込みロックを取らずに済ませる（他プロセスの書き込みを待たない）。
+    // 作成するときだけ書き込みトランザクションに入り、並行作成に備えて引き直す。
+    let existing = |conn: &Connection| -> Result<Option<EnsureColumnResult>> {
+        Ok(find_writable_column_by_name(conn, deck_id, name, scope)?.map(|column| {
+            EnsureColumnResult {
+                column,
+                created: false,
+            }
+        }))
+    };
+    if let Some(found) = existing(conn)? {
+        return Ok(found);
+    }
+    let tx = write_tx(conn)?;
+    let conn: &Connection = &tx;
+    if let Some(found) = existing(conn)? {
+        return Ok(found);
     }
 
     // allowlist を持つ接続は固定集合の意図なので新規作成しない。
@@ -428,6 +556,16 @@ pub fn ensure_column(
         Some(description)
     };
     let column = column::create_with(conn, deck_id, name, desc_arg, private)?;
+    record_change(
+        conn,
+        deck_id,
+        &column.id,
+        ChangeOp::CreateColumn,
+        None,
+        column_attrs(&column),
+        author,
+    )?;
+    tx.commit()?;
     Ok(EnsureColumnResult {
         column,
         created: true,
@@ -437,6 +575,7 @@ pub fn ensure_column(
 /// カラムの name / description / private を更新する（`update_column`）。各引数は None で
 /// 据え置き、`description` は `Some(None)` で NULL クリア。対象は接続 Deck の可視・書き込み
 /// 可能カラムに限る（private / 別 Deck / 削除済みは Unauthorized）。
+#[allow(clippy::too_many_arguments)] // 引数は tool の引数と 1:1
 pub fn update_column(
     conn: &Connection,
     deck_id: &str,
@@ -445,11 +584,25 @@ pub fn update_column(
     description: Option<Option<&str>>,
     private: Option<bool>,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Column> {
-    ensure_column_writable(conn, deck_id, column_id, scope)?;
     // 改名する場合は ensure_column と同じ正規化・空名拒否を適用する。
     let name = name.map(normalize_column_name).transpose()?;
-    column::update(conn, column_id, name, description, private)
+    let tx = write_tx(conn)?;
+    ensure_column_writable(&tx, deck_id, column_id, scope)?;
+    let before = column_attrs(&column::get_by_id(&tx, column_id)?);
+    let updated = column::update(&tx, column_id, name, description, private)?;
+    record_change(
+        &tx,
+        deck_id,
+        column_id,
+        ChangeOp::UpdateColumn,
+        Some(before),
+        column_attrs(&updated),
+        author,
+    )?;
+    tx.commit()?;
+    Ok(updated)
 }
 
 /// カラムを並べ替える（`move_column`）。順序は生の position ではなくアンカー
@@ -462,6 +615,7 @@ pub fn move_column(
     before_column_id: Option<&str>,
     after_column_id: Option<&str>,
     scope: &WriteScope,
+    author: &Author,
 ) -> Result<Column> {
     if before_column_id.is_some() && after_column_id.is_some() {
         return Err(JotDeckError::InvalidOperation(
@@ -469,6 +623,8 @@ pub fn move_column(
         ));
     }
 
+    let tx = write_tx(conn)?;
+    let conn: &Connection = &tx;
     ensure_column_writable(conn, deck_id, column_id, scope)?;
     // アンカーも書き込みスコープ内に限る（private / allowlist 外を anchor に使わせない）。
     // both-anchors は上で弾いているので Some は高々 1 つ。
@@ -486,7 +642,12 @@ pub fn move_column(
         .collect();
     let target_index = resolve_anchor_index(&others, before_column_id, after_column_id, "column")?;
 
-    column::move_to_position(conn, column_id, target_index as i32)
+    let before = column_placement(conn, deck_id, column_id)?;
+    let moved = column::move_to_position(conn, column_id, target_index as i32)?;
+    let after = column_placement(conn, deck_id, column_id)?;
+    record_change(conn, deck_id, column_id, ChangeOp::MoveColumn, Some(before), after, author)?;
+    tx.commit()?;
+    Ok(moved)
 }
 
 #[cfg(test)]
@@ -495,6 +656,11 @@ mod tests {
     use crate::db::create_in_memory;
     use crate::models::{NewColumn, NewDeck, SortOrder};
     use crate::repository::{card, column, deck};
+
+    /// テスト用の書き込み主。
+    fn au() -> Author {
+        Author::mcp("test-conn", None)
+    }
 
     /// 既定の（制限なし）書き込みスコープ。allowlist を試すテストは個別に組む。
     fn sc() -> WriteScope {
@@ -554,8 +720,8 @@ mod tests {
     #[test]
     fn append_creates_card_at_tail() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "first", None, &sc()).unwrap();
-        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "second", None, &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "first", None, &sc(), &au()).unwrap();
+        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "second", None, &sc(), &au()).unwrap();
         assert_eq!(a.position, 0);
         assert_eq!(b.position, 1);
         assert_eq!(contents(&f, &f.public_col), vec!["first", "second"]);
@@ -564,7 +730,7 @@ mod tests {
     #[test]
     fn append_to_private_column_is_unauthorized() {
         let f = setup();
-        let err = append_card(&f.conn, &f.deck_id, &f.private_col, "x", None, &sc()).unwrap_err();
+        let err = append_card(&f.conn, &f.deck_id, &f.private_col, "x", None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
@@ -587,7 +753,7 @@ mod tests {
             },
         )
         .unwrap();
-        let err = append_card(&f.conn, &f.deck_id, &other_col.id, "x", None, &sc()).unwrap_err();
+        let err = append_card(&f.conn, &f.deck_id, &other_col.id, "x", None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
@@ -595,16 +761,16 @@ mod tests {
     fn append_rejects_too_long_content() {
         let f = setup();
         let long = "a".repeat(query::MAX_CARD_LENGTH + 1);
-        let err = append_card(&f.conn, &f.deck_id, &f.public_col, &long, None, &sc()).unwrap_err();
+        let err = append_card(&f.conn, &f.deck_id, &f.public_col, &long, None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
     #[test]
     fn append_is_idempotent_per_key() {
         let f = setup();
-        let first = append_card(&f.conn, &f.deck_id, &f.public_col, "once", Some("k1"), &sc()).unwrap();
+        let first = append_card(&f.conn, &f.deck_id, &f.public_col, "once", Some("k1"), &sc(), &au()).unwrap();
         // 同一キーの再送は新規作成せず同じ id を返す。
-        let again = append_card(&f.conn, &f.deck_id, &f.public_col, "ignored", Some("k1"), &sc()).unwrap();
+        let again = append_card(&f.conn, &f.deck_id, &f.public_col, "ignored", Some("k1"), &sc(), &au()).unwrap();
         assert_eq!(first.id, again.id);
         assert_eq!(again.content, "once");
         assert_eq!(card::get_by_column_id(&f.conn, &f.public_col).unwrap().len(), 1);
@@ -613,26 +779,26 @@ mod tests {
     #[test]
     fn idempotent_replay_of_card_moved_to_private_is_not_found() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k"), &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k"), &sc(), &au()).unwrap();
         // The mapped card is later moved into the private column.
         card::move_to_column(&f.conn, &a.id, &f.private_col).unwrap();
         // Resending to the (still writable) public column must not hand back the
         // now-inaccessible card through the write surface.
-        let err = append_card(&f.conn, &f.deck_id, &f.public_col, "x", Some("k"), &sc()).unwrap_err();
+        let err = append_card(&f.conn, &f.deck_id, &f.public_col, "x", Some("k"), &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::NotFound(_)));
     }
 
     #[test]
     fn idempotency_key_is_purged_when_card_is_physically_deleted() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k"), &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k"), &sc(), &au()).unwrap();
         // Simulate the 30-day cleanup physically removing the card; the ON DELETE
         // CASCADE FK drops the idempotency key with it.
         f.conn
             .execute("DELETE FROM cards WHERE id = ?1", params![a.id])
             .unwrap();
         // The same key now creates a fresh card instead of resolving to the gone one.
-        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "again", Some("k"), &sc()).unwrap();
+        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "again", Some("k"), &sc(), &au()).unwrap();
         assert_ne!(a.id, b.id);
         assert_eq!(b.content, "again");
     }
@@ -657,8 +823,8 @@ mod tests {
             },
         )
         .unwrap();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "deck a", Some("dup"), &sc()).unwrap();
-        let b = append_card(&f.conn, &other.id, &other_col.id, "deck b", Some("dup"), &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "deck a", Some("dup"), &sc(), &au()).unwrap();
+        let b = append_card(&f.conn, &other.id, &other_col.id, "deck b", Some("dup"), &sc(), &au()).unwrap();
         assert_ne!(a.id, b.id);
         assert_eq!(a.content, "deck a");
         assert_eq!(b.content, "deck b");
@@ -667,8 +833,8 @@ mod tests {
     #[test]
     fn patch_updates_with_matching_cas() {
         let f = setup();
-        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", None, &sc()).unwrap();
-        let updated = patch_card(&f.conn, &f.deck_id, &c.id, "new #tag", c.updated_at, &sc()).unwrap();
+        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", None, &sc(), &au()).unwrap();
+        let updated = patch_card(&f.conn, &f.deck_id, &c.id, "new #tag", c.updated_at, &sc(), &au()).unwrap();
         assert_eq!(updated.content, "new #tag");
         assert!(updated.updated_at > c.updated_at);
     }
@@ -676,10 +842,10 @@ mod tests {
     #[test]
     fn patch_rejects_stale_cas() {
         let f = setup();
-        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", None, &sc()).unwrap();
-        patch_card(&f.conn, &f.deck_id, &c.id, "first", c.updated_at, &sc()).unwrap();
+        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", None, &sc(), &au()).unwrap();
+        patch_card(&f.conn, &f.deck_id, &c.id, "first", c.updated_at, &sc(), &au()).unwrap();
         // 古い updated_at での patch は Conflict。
-        let err = patch_card(&f.conn, &f.deck_id, &c.id, "second", c.updated_at, &sc()).unwrap_err();
+        let err = patch_card(&f.conn, &f.deck_id, &c.id, "second", c.updated_at, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
     }
 
@@ -694,15 +860,15 @@ mod tests {
             },
         )
         .unwrap();
-        let err = patch_card(&f.conn, &f.deck_id, &hidden.id, "x", hidden.updated_at, &sc()).unwrap_err();
+        let err = patch_card(&f.conn, &f.deck_id, &hidden.id, "x", hidden.updated_at, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::NotFound(_)));
     }
 
     #[test]
     fn delete_soft_deletes_visible_card() {
         let f = setup();
-        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "bye", None, &sc()).unwrap();
-        let deleted = delete_card(&f.conn, &f.deck_id, &c.id, &sc()).unwrap();
+        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "bye", None, &sc(), &au()).unwrap();
+        let deleted = delete_card(&f.conn, &f.deck_id, &c.id, &sc(), &au()).unwrap();
         assert!(deleted.deleted_at.is_some());
         assert!(card::get_by_column_id(&f.conn, &f.public_col).unwrap().is_empty());
     }
@@ -718,42 +884,42 @@ mod tests {
             },
         )
         .unwrap();
-        let err = delete_card(&f.conn, &f.deck_id, &hidden.id, &sc()).unwrap_err();
+        let err = delete_card(&f.conn, &f.deck_id, &hidden.id, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::NotFound(_)));
     }
 
     #[test]
     fn move_within_column_before_anchor() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc()).unwrap();
-        let _b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc()).unwrap();
-        let _c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let _b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
+        let _c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc(), &au()).unwrap();
 
         // A を C の前へ: (A,B,C) -> (B,A,C)
-        move_card(&f.conn, &f.deck_id, &a.id, None, Some(&_c.id), None, &sc()).unwrap();
+        move_card(&f.conn, &f.deck_id, &a.id, None, Some(&_c.id), None, &sc(), &au()).unwrap();
         assert_eq!(contents(&f, &f.public_col), vec!["B", "A", "C"]);
     }
 
     #[test]
     fn move_within_column_after_anchor() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc()).unwrap();
-        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc()).unwrap();
-        let _c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
+        let _c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc(), &au()).unwrap();
 
         // A を B の後ろへ: (A,B,C) -> (B,A,C)
-        move_card(&f.conn, &f.deck_id, &a.id, None, None, Some(&b.id), &sc()).unwrap();
+        move_card(&f.conn, &f.deck_id, &a.id, None, None, Some(&b.id), &sc(), &au()).unwrap();
         assert_eq!(contents(&f, &f.public_col), vec!["B", "A", "C"]);
     }
 
     #[test]
     fn move_to_tail_when_no_anchor() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc()).unwrap();
-        let _b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc()).unwrap();
-        let _c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let _b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
+        let _c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc(), &au()).unwrap();
 
-        move_card(&f.conn, &f.deck_id, &a.id, None, None, None, &sc()).unwrap();
+        move_card(&f.conn, &f.deck_id, &a.id, None, None, None, &sc(), &au()).unwrap();
         assert_eq!(contents(&f, &f.public_col), vec!["B", "C", "A"]);
     }
 
@@ -768,12 +934,12 @@ mod tests {
             },
         )
         .unwrap();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc()).unwrap();
-        let x = append_card(&f.conn, &f.deck_id, &second.id, "X", None, &sc()).unwrap();
-        let _y = append_card(&f.conn, &f.deck_id, &second.id, "Y", None, &sc()).unwrap();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let x = append_card(&f.conn, &f.deck_id, &second.id, "X", None, &sc(), &au()).unwrap();
+        let _y = append_card(&f.conn, &f.deck_id, &second.id, "Y", None, &sc(), &au()).unwrap();
 
         // A を Second カラムの X の前へ移動: Second -> (A, X, Y)
-        let moved = move_card(&f.conn, &f.deck_id, &a.id, Some(&second.id), Some(&x.id), None, &sc()).unwrap();
+        let moved = move_card(&f.conn, &f.deck_id, &a.id, Some(&second.id), Some(&x.id), None, &sc(), &au()).unwrap();
         assert_eq!(moved.column_id, second.id);
         assert_eq!(moved.position, 0);
         assert!(contents(&f, &f.public_col).is_empty());
@@ -783,18 +949,18 @@ mod tests {
     #[test]
     fn move_into_private_column_is_unauthorized() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc()).unwrap();
-        let err = move_card(&f.conn, &f.deck_id, &a.id, Some(&f.private_col), None, None, &sc()).unwrap_err();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let err = move_card(&f.conn, &f.deck_id, &a.id, Some(&f.private_col), None, None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
     #[test]
     fn move_rejects_both_anchors() {
         let f = setup();
-        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc()).unwrap();
-        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc()).unwrap();
-        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc()).unwrap();
-        let err = move_card(&f.conn, &f.deck_id, &a.id, None, Some(&b.id), Some(&c.id), &sc()).unwrap_err();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
+        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "C", None, &sc(), &au()).unwrap();
+        let err = move_card(&f.conn, &f.deck_id, &a.id, None, Some(&b.id), Some(&c.id), &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
@@ -811,7 +977,7 @@ mod tests {
     #[test]
     fn ensure_column_creates_when_allowed() {
         let f = setup();
-        let r = ensure_column(&f.conn, &f.deck_id, "Research", "papers to read", false, &sc()).unwrap();
+        let r = ensure_column(&f.conn, &f.deck_id, "Research", "papers to read", false, &sc(), &au()).unwrap();
         assert!(r.created);
         assert_eq!(r.column.name, "Research");
         assert_eq!(r.column.description.as_deref(), Some("papers to read"));
@@ -821,10 +987,10 @@ mod tests {
     #[test]
     fn ensure_column_is_idempotent_by_name() {
         let f = setup();
-        let a = ensure_column(&f.conn, &f.deck_id, "ToDo", "tasks", false, &sc()).unwrap();
+        let a = ensure_column(&f.conn, &f.deck_id, "ToDo", "tasks", false, &sc(), &au()).unwrap();
         assert!(a.created);
         // 同名の再呼び出しは新規作成せず既存を返す（get）。
-        let b = ensure_column(&f.conn, &f.deck_id, "ToDo", "ignored", false, &sc()).unwrap();
+        let b = ensure_column(&f.conn, &f.deck_id, "ToDo", "ignored", false, &sc(), &au()).unwrap();
         assert!(!b.created);
         assert_eq!(a.column.id, b.column.id);
         assert_eq!(b.column.description.as_deref(), Some("tasks")); // 変更されない
@@ -833,9 +999,9 @@ mod tests {
     #[test]
     fn ensure_column_second_call_is_a_get() {
         let f = setup();
-        ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc()).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc(), &au()).unwrap();
         // 二度目は新規作成せず既存を返す（get）。
-        let got = ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc()).unwrap();
+        let got = ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc(), &au()).unwrap();
         assert!(!got.created);
         assert_eq!(got.column.name, "Notes");
     }
@@ -849,7 +1015,7 @@ mod tests {
         // private カラムを "Hidden" にリネームしておく。
         column::update(&f.conn, &f.private_col, Some("Hidden"), None, None).unwrap();
         // 同名 ensure は private をヒットさせず、新規作成する。
-        let r = ensure_column(&f.conn, &f.deck_id, "Hidden", "d", false, &sc()).unwrap();
+        let r = ensure_column(&f.conn, &f.deck_id, "Hidden", "d", false, &sc(), &au()).unwrap();
         assert!(r.created);
         assert_ne!(r.column.id, f.private_col);
     }
@@ -857,7 +1023,7 @@ mod tests {
     #[test]
     fn ensure_column_rejects_empty_name() {
         let f = setup();
-        let err = ensure_column(&f.conn, &f.deck_id, "   ", "d", false, &sc()).unwrap_err();
+        let err = ensure_column(&f.conn, &f.deck_id, "   ", "d", false, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
@@ -865,11 +1031,11 @@ mod tests {
     fn ensure_column_normalizes_name_for_lookup_and_create() {
         let f = setup();
         // Create with surrounding whitespace → stored trimmed.
-        let a = ensure_column(&f.conn, &f.deck_id, "  Ideas  ", "d", false, &sc()).unwrap();
+        let a = ensure_column(&f.conn, &f.deck_id, "  Ideas  ", "d", false, &sc(), &au()).unwrap();
         assert!(a.created);
         assert_eq!(a.column.name, "Ideas");
         // A differently-padded spelling resolves to the same column (get, not create).
-        let b = ensure_column(&f.conn, &f.deck_id, "Ideas", "d", false, &sc()).unwrap();
+        let b = ensure_column(&f.conn, &f.deck_id, "Ideas", "d", false, &sc(), &au()).unwrap();
         assert!(!b.created);
         assert_eq!(a.column.id, b.column.id);
     }
@@ -877,14 +1043,14 @@ mod tests {
     #[test]
     fn update_column_rejects_whitespace_name() {
         let f = setup();
-        let err = update_column(&f.conn, &f.deck_id, &f.public_col, Some("   "), None, None, &sc()).unwrap_err();
+        let err = update_column(&f.conn, &f.deck_id, &f.public_col, Some("   "), None, None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
     #[test]
     fn ensure_column_can_create_private() {
         let f = setup();
-        let r = ensure_column(&f.conn, &f.deck_id, "Secrets", "sensitive", true, &sc()).unwrap();
+        let r = ensure_column(&f.conn, &f.deck_id, "Secrets", "sensitive", true, &sc(), &au()).unwrap();
         assert!(r.created);
         assert!(r.column.private);
     }
@@ -900,6 +1066,7 @@ mod tests {
             Some(Some("new axis")),
             None,
         &sc(),
+        &au(),
         )
         .unwrap();
         assert_eq!(updated.name, "Renamed");
@@ -909,7 +1076,7 @@ mod tests {
     #[test]
     fn update_column_on_private_is_unauthorized() {
         let f = setup();
-        let err = update_column(&f.conn, &f.deck_id, &f.private_col, Some("x"), None, None, &sc()).unwrap_err();
+        let err = update_column(&f.conn, &f.deck_id, &f.private_col, Some("x"), None, None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
@@ -918,11 +1085,11 @@ mod tests {
         let f = setup();
         // 可視カラム: public_col(A) then create B, C.
         column::update(&f.conn, &f.public_col, Some("A"), None, None).unwrap();
-        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc()).unwrap().column;
-        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc()).unwrap().column;
+        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc(), &au()).unwrap().column;
+        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc(), &au()).unwrap().column;
 
         // A を C の後ろへ。private_col は非表示だが position は全生存集合で一貫。
-        move_column(&f.conn, &f.deck_id, &f.public_col, None, Some(&c.id), &sc()).unwrap();
+        move_column(&f.conn, &f.deck_id, &f.public_col, None, Some(&c.id), &sc(), &au()).unwrap();
         let names = column_names(&f);
         // A が C の直後に来る（Secret[private] の相対位置は保存）。
         let pos_a = names.iter().position(|n| n == "A").unwrap();
@@ -935,10 +1102,10 @@ mod tests {
     fn move_column_to_tail_without_anchor() {
         let f = setup();
         column::update(&f.conn, &f.public_col, Some("A"), None, None).unwrap();
-        ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc()).unwrap();
-        ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc()).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc(), &au()).unwrap();
+        ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc(), &au()).unwrap();
 
-        move_column(&f.conn, &f.deck_id, &f.public_col, None, None, &sc()).unwrap();
+        move_column(&f.conn, &f.deck_id, &f.public_col, None, None, &sc(), &au()).unwrap();
         let names = column_names(&f);
         assert_eq!(names.last().unwrap(), "A");
     }
@@ -946,16 +1113,16 @@ mod tests {
     #[test]
     fn move_column_on_private_is_unauthorized() {
         let f = setup();
-        let err = move_column(&f.conn, &f.deck_id, &f.private_col, None, None, &sc()).unwrap_err();
+        let err = move_column(&f.conn, &f.deck_id, &f.private_col, None, None, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
     #[test]
     fn move_column_rejects_both_anchors() {
         let f = setup();
-        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc()).unwrap().column;
-        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc()).unwrap().column;
-        let err = move_column(&f.conn, &f.deck_id, &f.public_col, Some(&b.id), Some(&c.id), &sc()).unwrap_err();
+        let b = ensure_column(&f.conn, &f.deck_id, "B", "", false, &sc(), &au()).unwrap().column;
+        let c = ensure_column(&f.conn, &f.deck_id, "C", "", false, &sc(), &au()).unwrap().column;
+        let err = move_column(&f.conn, &f.deck_id, &f.public_col, Some(&b.id), Some(&c.id), &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
@@ -990,9 +1157,9 @@ mod tests {
         let other = make_column(&f, "Other");
         let scope = only(&f.public_col);
         // Allowlisted column → ok.
-        append_card(&f.conn, &f.deck_id, &f.public_col, "ok", None, &scope).unwrap();
+        append_card(&f.conn, &f.deck_id, &f.public_col, "ok", None, &scope, &au()).unwrap();
         // Visible but not allowlisted → Unauthorized.
-        let err = append_card(&f.conn, &f.deck_id, &other, "no", None, &scope).unwrap_err();
+        let err = append_card(&f.conn, &f.deck_id, &other, "no", None, &scope, &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
@@ -1009,9 +1176,9 @@ mod tests {
         )
         .unwrap();
         let scope = only(&f.public_col);
-        let e1 = patch_card(&f.conn, &f.deck_id, &card.id, "y", card.updated_at, &scope).unwrap_err();
+        let e1 = patch_card(&f.conn, &f.deck_id, &card.id, "y", card.updated_at, &scope, &au()).unwrap_err();
         assert!(matches!(e1, JotDeckError::Unauthorized(_)));
-        let e2 = delete_card(&f.conn, &f.deck_id, &card.id, &scope).unwrap_err();
+        let e2 = delete_card(&f.conn, &f.deck_id, &card.id, &scope, &au()).unwrap_err();
         assert!(matches!(e2, JotDeckError::Unauthorized(_)));
     }
 
@@ -1027,7 +1194,7 @@ mod tests {
         )
         .unwrap();
         // A private column leaks nothing → NotFound wins over the allowlist Unauthorized.
-        let err = patch_card(&f.conn, &f.deck_id, &hidden.id, "y", hidden.updated_at, &only(&f.public_col))
+        let err = patch_card(&f.conn, &f.deck_id, &hidden.id, "y", hidden.updated_at, &only(&f.public_col), &au())
             .unwrap_err();
         assert!(matches!(err, JotDeckError::NotFound(_)));
     }
@@ -1038,11 +1205,11 @@ mod tests {
         column::update(&f.conn, &f.public_col, Some("Inbox"), None, None).unwrap();
         let scope = only(&f.public_col);
         // allow_create=false (bridge derives it from the allowlist); in-scope get works.
-        let got = ensure_column(&f.conn, &f.deck_id, "Inbox", "d", false, &scope).unwrap();
+        let got = ensure_column(&f.conn, &f.deck_id, "Inbox", "d", false, &scope, &au()).unwrap();
         assert!(!got.created);
         assert_eq!(got.column.id, f.public_col);
         // A name not resolvable in scope cannot be created.
-        let err = ensure_column(&f.conn, &f.deck_id, "BrandNew", "d", false, &scope).unwrap_err();
+        let err = ensure_column(&f.conn, &f.deck_id, "BrandNew", "d", false, &scope, &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
 
@@ -1052,7 +1219,7 @@ mod tests {
         // A visible column named "Shared" that is NOT in the allowlist.
         make_column(&f, "Shared");
         // get must not resolve to it; with create disabled → InvalidOperation.
-        let err = ensure_column(&f.conn, &f.deck_id, "Shared", "d", false, &only(&f.public_col))
+        let err = ensure_column(&f.conn, &f.deck_id, "Shared", "d", false, &only(&f.public_col), &au())
             .unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
     }
@@ -1061,7 +1228,7 @@ mod tests {
     fn allowlist_move_column_anchor_must_be_in_scope() {
         let f = setup();
         let other = make_column(&f, "Other");
-        let err = move_column(&f.conn, &f.deck_id, &f.public_col, Some(&other), None, &only(&f.public_col))
+        let err = move_column(&f.conn, &f.deck_id, &f.public_col, Some(&other), None, &only(&f.public_col), &au())
             .unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
@@ -1071,8 +1238,8 @@ mod tests {
         let f = setup();
         let other = make_column(&f, "Other");
         let scope = only(&f.public_col);
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &scope).unwrap();
-        let err = move_card(&f.conn, &f.deck_id, &card.id, Some(&other), None, None, &scope).unwrap_err();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &scope, &au()).unwrap();
+        let err = move_card(&f.conn, &f.deck_id, &card.id, Some(&other), None, None, &scope, &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Unauthorized(_)));
     }
 
@@ -1081,7 +1248,7 @@ mod tests {
     #[test]
     fn begin_stream_locks_visible_card() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
         let locked = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         assert_eq!(locked.locked_by.as_deref(), Some("reporter:1"));
         assert!(locked.locked_at.is_some());
@@ -1106,7 +1273,7 @@ mod tests {
     #[test]
     fn begin_stream_conflicts_when_held_by_another() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
         begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         let err = begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:2", &sc()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
@@ -1115,10 +1282,10 @@ mod tests {
     #[test]
     fn end_stream_commits_content_and_releases_lock() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
         begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         let committed =
-            end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "final text #done", &sc()).unwrap();
+            end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "final text #done", &sc(), &au()).unwrap();
         assert_eq!(committed.content, "final text #done");
         assert!(committed.locked_by.is_none());
         assert!(committed.locked_at.is_none());
@@ -1128,7 +1295,7 @@ mod tests {
     #[test]
     fn end_stream_conflicts_after_lease_takeover() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
         begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         // Expire reporter:1's lease so a second holder can take over (as the lock
         // primitive tests do), then reporter:2 acquires.
@@ -1140,7 +1307,7 @@ mod tests {
             .unwrap();
         card::acquire_lock(&f.conn, &card.id, "reporter:2").unwrap();
         // reporter:1 can no longer commit its stream — the lock moved on.
-        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "x", &sc()).unwrap_err();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "x", &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
         // The conflicting end must NOT have overwritten content or stolen the
         // lock: the atomic `WHERE locked_by = holder` guard leaves reporter:2's
@@ -1153,7 +1320,7 @@ mod tests {
     #[test]
     fn end_stream_conflicts_after_own_lease_expiry() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
         begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         // Expire reporter:1's own lease with nobody taking over. An expired lease
         // is no longer exclusive (acquire_lock would let another editor in), so
@@ -1164,7 +1331,7 @@ mod tests {
                 params![card.id],
             )
             .unwrap();
-        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "late", &sc()).unwrap_err();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", "late", &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
         let after = card::get_by_id(&f.conn, &card.id).unwrap();
         assert_eq!(after.content, "draft");
@@ -1173,10 +1340,214 @@ mod tests {
     #[test]
     fn end_stream_rejects_too_long_content() {
         let f = setup();
-        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc()).unwrap();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
         begin_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &sc()).unwrap();
         let long = "a".repeat(query::MAX_CARD_LENGTH + 1);
-        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &long, &sc()).unwrap_err();
+        let err = end_card_stream(&f.conn, &f.deck_id, &card.id, "reporter:1", &long, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::InvalidOperation(_)));
+    }
+
+    // ---- change history (008 §5.1) ----
+
+    /// Deck の履歴を古い順に (op, target_id, before, after) で。
+    fn history_of(f: &Fixture) -> Vec<(ChangeOp, String, Option<Value>, Option<Value>)> {
+        let mut rows = history::list_by_deck(&f.conn, &f.deck_id, 100).unwrap();
+        rows.reverse();
+        rows.into_iter()
+            .map(|r| (r.op, r.target_id, r.before, r.after))
+            .collect()
+    }
+
+    #[test]
+    fn card_writes_record_before_and_after() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "v1", None, &sc(), &au()).unwrap();
+        let patched = patch_card(&f.conn, &f.deck_id, &card.id, "v2", card.updated_at, &sc(), &au()).unwrap();
+        // Re-patching with identical content is not worth an Activity row.
+        patch_card(&f.conn, &f.deck_id, &card.id, "v2", patched.updated_at, &sc(), &au()).unwrap();
+        delete_card(&f.conn, &f.deck_id, &card.id, &sc(), &au()).unwrap();
+
+        assert_eq!(
+            history_of(&f),
+            vec![
+                (
+                    ChangeOp::AppendCard,
+                    card.id.clone(),
+                    None,
+                    Some(json!({ "column_id": f.public_col, "content": "v1" })),
+                ),
+                (
+                    ChangeOp::PatchCard,
+                    card.id.clone(),
+                    Some(json!({ "content": "v1" })),
+                    Some(json!({ "content": "v2" })),
+                ),
+                (
+                    ChangeOp::DeleteCard,
+                    card.id.clone(),
+                    Some(json!({ "deleted": false })),
+                    Some(json!({ "deleted": true })),
+                ),
+            ]
+        );
+        let row = &history::list_by_target(&f.conn, &card.id).unwrap()[0];
+        assert_eq!(row.author, au());
+    }
+
+    #[test]
+    fn stream_end_records_the_overwrite() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "draft", None, &sc(), &au()).unwrap();
+        begin_card_stream(&f.conn, &f.deck_id, &card.id, "rep", &sc()).unwrap();
+        let reporter = Author::reporter("rep");
+        end_card_stream(&f.conn, &f.deck_id, &card.id, "rep", "final", &sc(), &reporter).unwrap();
+
+        let rows = history::list_by_target(&f.conn, &card.id).unwrap();
+        assert_eq!(rows.len(), 2, "begin (lock only) is not recorded");
+        assert_eq!(rows[0].op, ChangeOp::StreamCard);
+        assert_eq!(rows[0].before, Some(json!({ "content": "draft" })));
+        assert_eq!(rows[0].after, Some(json!({ "content": "final" })));
+        assert_eq!(rows[0].author, reporter);
+    }
+
+    #[test]
+    fn move_card_records_placement_by_preceding_card() {
+        let f = setup();
+        let other = ensure_column(&f.conn, &f.deck_id, "Other", "", false, &sc(), &au())
+            .unwrap()
+            .column;
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let b = append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
+        let x = append_card(&f.conn, &f.deck_id, &other.id, "X", None, &sc(), &au()).unwrap();
+
+        move_card(&f.conn, &f.deck_id, &b.id, Some(&other.id), Some(&x.id), None, &sc(), &au()).unwrap();
+        // Moving to where it already is records nothing.
+        move_card(&f.conn, &f.deck_id, &b.id, None, Some(&x.id), None, &sc(), &au()).unwrap();
+
+        let moves: Vec<_> = history_of(&f)
+            .into_iter()
+            .filter(|(op, ..)| *op == ChangeOp::MoveCard)
+            .collect();
+        assert_eq!(
+            moves,
+            vec![(
+                ChangeOp::MoveCard,
+                b.id.clone(),
+                Some(json!({ "column_id": f.public_col, "after_card_id": a.id })),
+                Some(json!({ "column_id": other.id, "after_card_id": null })),
+            )]
+        );
+    }
+
+    #[test]
+    fn column_writes_record_attrs_and_placement() {
+        let f = setup();
+        let created = ensure_column(&f.conn, &f.deck_id, "Ideas", "raw", false, &sc(), &au())
+            .unwrap()
+            .column;
+        // A get (no create) records nothing.
+        ensure_column(&f.conn, &f.deck_id, "Ideas", "raw", false, &sc(), &au()).unwrap();
+        update_column(&f.conn, &f.deck_id, &created.id, Some("Ideas!"), None, None, &sc(), &au()).unwrap();
+        move_column(&f.conn, &f.deck_id, &created.id, Some(&f.public_col), None, &sc(), &au()).unwrap();
+
+        assert_eq!(
+            history_of(&f),
+            vec![
+                (
+                    ChangeOp::CreateColumn,
+                    created.id.clone(),
+                    None,
+                    Some(json!({ "name": "Ideas", "description": "raw", "private": false })),
+                ),
+                (
+                    ChangeOp::UpdateColumn,
+                    created.id.clone(),
+                    Some(json!({ "name": "Ideas", "description": "raw", "private": false })),
+                    Some(json!({ "name": "Ideas!", "description": "raw", "private": false })),
+                ),
+                (
+                    ChangeOp::MoveColumn,
+                    created.id.clone(),
+                    // Visible order was Public, Secret(private), Ideas.
+                    Some(json!({ "after_column_id": f.private_col })),
+                    Some(json!({ "after_column_id": null })),
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn ensure_column_get_does_not_wait_for_another_writer() {
+        let path = std::env::temp_dir().join(format!("jot-deck-ensure-{}.db", ulid::Ulid::generate()));
+        let path_str = path.to_str().unwrap().to_string();
+        let a = crate::db::create_file_db(&path_str).unwrap();
+        let d = deck::create(
+            &a,
+            NewDeck {
+                name: "D".to_string(),
+                sort_order: SortOrder::default(),
+            },
+        )
+        .unwrap();
+        ensure_column(&a, &d.id, "Inbox", "", false, &sc(), &au()).unwrap();
+
+        let b = crate::db::create_file_db(&path_str).unwrap();
+        b.busy_timeout(std::time::Duration::ZERO).unwrap();
+        let lock = write_tx(&a).unwrap();
+        let got = ensure_column(&b, &d.id, "Inbox", "", false, &sc(), &au()).unwrap();
+        assert!(!got.created);
+        drop(lock);
+
+        drop((a, b));
+        for suffix in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{path_str}{suffix}"));
+        }
+    }
+
+    #[test]
+    fn failed_or_replayed_writes_record_nothing() {
+        let f = setup();
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        append_card(&f.conn, &f.deck_id, &f.public_col, "K", Some("k"), &sc(), &au()).unwrap();
+        let before = history_of(&f).len();
+
+        // Idempotent replay, stale CAS, unknown anchor, out-of-scope column.
+        append_card(&f.conn, &f.deck_id, &f.public_col, "K", Some("k"), &sc(), &au()).unwrap();
+        patch_card(&f.conn, &f.deck_id, &card.id, "B", card.updated_at - chrono::Duration::seconds(1), &sc(), &au())
+            .unwrap_err();
+        move_card(&f.conn, &f.deck_id, &card.id, None, Some("missing"), None, &sc(), &au()).unwrap_err();
+        append_card(&f.conn, &f.deck_id, &f.private_col, "P", None, &sc(), &au()).unwrap_err();
+
+        assert_eq!(history_of(&f).len(), before);
+        assert_eq!(contents(&f, &f.public_col), vec!["A", "K"]);
+    }
+
+    #[test]
+    fn failed_cross_column_move_rolls_back_both_steps() {
+        let f = setup();
+        let other = ensure_column(&f.conn, &f.deck_id, "Other", "", false, &sc(), &au())
+            .unwrap()
+            .column;
+        let card = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        // Moving A out would shift B up; the rollback must undo that too.
+        append_card(&f.conn, &f.deck_id, &f.public_col, "B", None, &sc(), &au()).unwrap();
+        // Fail after both move steps ran: the history insert aborts.
+        f.conn
+            .execute_batch(
+                "CREATE TEMP TRIGGER fail_history BEFORE INSERT ON change_history
+                 BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+            )
+            .unwrap();
+        move_card(&f.conn, &f.deck_id, &card.id, Some(&other.id), None, None, &sc(), &au()).unwrap_err();
+
+        assert_eq!(card::get_by_id(&f.conn, &card.id).unwrap().column_id, f.public_col);
+        let positions: Vec<(String, i32)> = card::get_by_column_id(&f.conn, &f.public_col)
+            .unwrap()
+            .into_iter()
+            .map(|c| (c.content, c.position))
+            .collect();
+        assert_eq!(positions, vec![("A".to_string(), 0), ("B".to_string(), 1)]);
+        assert!(contents(&f, &other.id).is_empty());
+        assert!(f.conn.is_autocommit(), "no transaction left open");
     }
 }
