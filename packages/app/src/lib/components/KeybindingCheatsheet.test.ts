@@ -60,6 +60,40 @@ describe("KeybindingCheatsheet key labels", () => {
   });
 });
 
+describe("KeybindingCheatsheet native shortcuts", () => {
+  /** Row descriptions and their key labels within one rendered cheatsheet. */
+  function rows(container: HTMLElement): Map<string, string[]> {
+    return new Map(
+      Array.from(container.querySelectorAll(".cheatsheet-item")).map((item) => [
+        item.querySelector("dd")?.textContent ?? "",
+        Array.from(item.querySelectorAll("dt kbd")).map((k) => k.textContent ?? ""),
+      ]),
+    );
+  }
+
+  it.each([true, false])("lists Ctrl+v paste in card mode (tauri: %s)", (tauri) => {
+    mockEnv.tauri = tauri;
+    const { container } = render(KeybindingCheatsheet, {
+      props: { mode: "card", onClose: vi.fn() },
+    });
+    const shown = rows(container);
+    expect(shown.get("Paste system clipboard text below")).toEqual(["Ctrl+v"]);
+    expect(shown.get("Copy card text to system clipboard")).toEqual(["Ctrl+c"]);
+    expect(shown.get("Cut card text to system clipboard")).toEqual(["Ctrl+x"]);
+    // Reserved-only aliases are not listed, and the paste key is never dimmed.
+    expect(container.textContent).not.toContain("Ctrl+Shift+V");
+    expect(container.querySelector('kbd.unavailable[title^="Ctrl+v"]')).toBeNull();
+  });
+
+  it("does not list it in column mode", () => {
+    mockEnv.tauri = true;
+    const { container } = render(KeybindingCheatsheet, {
+      props: { mode: "column", onClose: vi.fn() },
+    });
+    expect(rows(container).has("Paste system clipboard text below")).toBe(false);
+  });
+});
+
 describe("KeybindingCheatsheet in the desktop app", () => {
   beforeEach(() => {
     mockEnv.tauri = true;
