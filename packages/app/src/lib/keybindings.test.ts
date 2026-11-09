@@ -396,6 +396,9 @@ describe("findKeybindingConflicts", () => {
     expect(conflicts).toContainEqual(
       expect.objectContaining({ severity: "error", sequence: "Ctrl+v" }),
     );
+    expect(findKeybindingConflicts("Ctrl+Shift+V", ["card"], "no-such-sig")).toContainEqual(
+      expect.objectContaining({ severity: "error", sequence: "Ctrl+Shift+V" }),
+    );
     expect(findKeybindingConflicts("Ctrl+v", ["column"], "no-such-sig")).toEqual([]);
   });
 

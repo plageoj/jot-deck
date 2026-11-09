@@ -137,10 +137,18 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
  * Shortcuts driven by native browser events rather than keydown, so they are
  * listed in the cheatsheet but cannot be remapped. Ctrl+v must stay unbound
  * in DEFAULT_KEYBINDINGS: a keydown binding would preventDefault and suppress
- * the `paste` event.
+ * the `paste` event. `alsoReserves` lists other keys that fire the same
+ * native event on some platforms; they are rejected as bindings too but not
+ * shown in the cheatsheet.
  */
-export const NATIVE_SHORTCUTS: Omit<KeyBinding, "action">[] = [
-  { sequence: "Ctrl+v", modes: ["card"], description: "Paste system clipboard text below" },
+export const NATIVE_SHORTCUTS: (Omit<KeyBinding, "action"> & { alsoReserves?: string[] })[] = [
+  {
+    sequence: "Ctrl+v",
+    modes: ["card"],
+    description: "Paste system clipboard text below",
+    // Paste as plain text in Chromium / WebView2
+    alsoReserves: ["Ctrl+Shift+V"],
+  },
 ];
 
 /**
@@ -396,10 +404,11 @@ export function findKeybindingConflicts(
   // A keydown binding on a native shortcut would preventDefault and suppress
   // the native event (e.g. paste), so these keys are never available.
   for (const native of NATIVE_SHORTCUTS) {
-    if (native.sequence === candidate && native.modes.some((m) => modes.includes(m))) {
+    const reserved = [native.sequence, ...(native.alsoReserves ?? [])];
+    if (reserved.includes(candidate) && native.modes.some((m) => modes.includes(m))) {
       conflicts.push({
         severity: "error",
-        sequence: native.sequence,
+        sequence: candidate,
         description: native.description,
       });
     }

@@ -305,6 +305,20 @@ describe("card operations", () => {
       expect(data.cardsByColumn["col-0"][focus.focusedCardIndex]?.id).toBe("c-0-c");
     });
 
+    it("cutCardText leaves an opened palette alone when the cut finishes", async () => {
+      // Cut the only card of col-1, then open a palette before the write ends.
+      focus.focusedColumnIndex = 1;
+      focus.focusedCardIndex = 0;
+      let finishWrite!: () => void;
+      writeText.mockReturnValue(new Promise<void>((resolve) => (finishWrite = resolve)));
+      const cut = actions.executeCardAction("cutCardText");
+      focus.focusMode = "command";
+      finishWrite();
+      await cut;
+      expect(boardState.deleteCardCalls).toEqual(["c-1-a"]);
+      expect(focus.focusMode).toBe("command");
+    });
+
     it("cutCardText skips the delete when the deck changes during the write", async () => {
       let finishWrite!: () => void;
       writeText.mockReturnValue(new Promise<void>((resolve) => (finishWrite = resolve)));

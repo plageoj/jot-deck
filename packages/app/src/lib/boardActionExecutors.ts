@@ -367,7 +367,9 @@ export class BoardActionExecutors {
       kept !== -1
         ? kept
         : Math.min(focus.focusedCardIndex, Math.max(0, updated.length - 1));
-    if (updated.length === 0) focus.focusMode = "column";
+    // Only leave card focus: by the end of an async cut the user may already
+    // be in column focus or a palette, which must not be overridden.
+    if (updated.length === 0 && focus.focusMode === "card") focus.focusMode = "column";
   }
 
   private cardCopy(): void {
