@@ -149,6 +149,7 @@ fn card_append(
         &p.content,
         p.idempotency_key.as_deref(),
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -185,6 +186,7 @@ fn card_patch(
         &p.content,
         expected_updated_at,
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
@@ -214,6 +216,7 @@ fn card_move(
         p.before_card_id.as_deref(),
         p.after_card_id.as_deref(),
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -235,7 +238,7 @@ fn card_delete(
 ) -> Result<DispatchOutcome, RpcError> {
     scope.begin_write(scope.capabilities().delete, "delete")?;
     let p: DeleteParams = parse_params(params)?;
-    let card = write::delete_card(conn, deck_id, &p.card_id, scope.write_scope())?;
+    let card = write::delete_card(conn, deck_id, &p.card_id, scope.write_scope(), &scope.author())?;
     let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "deleted_at": deleted_at }),
@@ -289,6 +292,7 @@ fn card_stream_end(
         &scope.reporter_id,
         &p.content,
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }),
@@ -317,6 +321,7 @@ fn column_ensure(
         &p.description,
         p.private,
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -351,6 +356,7 @@ fn column_update(
         description,
         p.private,
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({
@@ -378,6 +384,7 @@ fn column_move(
         p.before_column_id.as_deref(),
         p.after_column_id.as_deref(),
         scope.write_scope(),
+        &scope.author(),
     )?;
     Ok(DispatchOutcome::wrote(
         json!({ "column_id": column.id, "position": column.position }),

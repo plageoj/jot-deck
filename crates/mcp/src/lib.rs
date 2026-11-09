@@ -27,6 +27,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use jot_deck_core::deck_scope::DeckScope;
+use jot_deck_core::history::Author;
 use jot_deck_core::write::WriteScope;
 use jot_deck_core::{query, write, Connection};
 use serde_json::{json, Value};
@@ -256,6 +257,8 @@ pub struct Bridge {
     rate_limiter: RateLimiter,
     write_scope: WriteScope,
     connection_id: String,
+    /// `initialize` の `clientInfo.name`（例: "claude-code"）。変更履歴の表示名。
+    client_name: Mutex<Option<String>>,
 }
 
 impl Bridge {
@@ -281,7 +284,19 @@ impl Bridge {
             rate_limiter: RateLimiter::new(config.max_writes_per_min),
             write_scope: config.write_scope,
             connection_id: config.connection_id,
+            client_name: Mutex::new(None),
         }
+    }
+
+    /// Who this connection's writes are attributed to in the change history
+    /// (008 §5.1): the connection id, labelled with the MCP client's name.
+    fn author(&self) -> Author {
+        let client_name = self
+            .client_name
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        Author::mcp(self.connection_id.clone(), client_name)
     }
 
     /// Handle one incoming JSON-RPC message. Returns the serialized response, or
@@ -326,6 +341,9 @@ impl Bridge {
             .and_then(Value::as_str)
             .filter(|v| SUPPORTED_PROTOCOL_VERSIONS.contains(v))
             .unwrap_or(DEFAULT_PROTOCOL_VERSION);
+        if let Some(name) = params.pointer("/clientInfo/name").and_then(Value::as_str) {
+            *self.client_name.lock().unwrap_or_else(|e| e.into_inner()) = Some(name.to_string());
+        }
         json!({
             "protocolVersion": protocol_version,
             "capabilities": { "tools": {}, "resources": {} },
@@ -513,6 +531,7 @@ impl Bridge {
             &content,
             idempotency_key.as_deref(),
             &self.write_scope,
+            &self.author(),
         )
         .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "append_card", &card.id);
@@ -543,6 +562,7 @@ impl Bridge {
             &content,
             expected_updated_at,
             &self.write_scope,
+            &self.author(),
         )
         .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "patch_card", &card.id);
@@ -566,6 +586,7 @@ impl Bridge {
             before_card_id.as_deref(),
             after_card_id.as_deref(),
             &self.write_scope,
+            &self.author(),
         )
         .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "move_card", &card.id);
@@ -576,7 +597,7 @@ impl Bridge {
         self.begin_write(self.capabilities.delete, "delete")?;
         let card_id = require_str(args, "card_id")?;
         let deck_id = self.deck_of_card(&card_id)?;
-        let card = write::delete_card(&self.conn, &deck_id, &card_id, &self.write_scope)
+        let card = write::delete_card(&self.conn, &deck_id, &card_id, &self.write_scope, &self.author())
             .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "delete_card", &card.id);
         let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
@@ -601,6 +622,7 @@ impl Bridge {
             &description,
             private,
             &self.write_scope,
+            &self.author(),
         )
         .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "ensure_column", &result.column.id);
@@ -632,6 +654,7 @@ impl Bridge {
             description,
             private,
             &self.write_scope,
+            &self.author(),
         )
         .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "update_column", &column.id);
@@ -656,6 +679,7 @@ impl Bridge {
             before_column_id.as_deref(),
             after_column_id.as_deref(),
             &self.write_scope,
+            &self.author(),
         )
         .map_err(|e| e.to_string())?;
         self.log_write(&deck_id, "move_column", &column.id);
@@ -1095,6 +1119,26 @@ mod tests {
 
     fn structured(resp: &Value) -> &Value {
         &resp["result"]["structuredContent"]
+    }
+
+    #[test]
+    fn writes_are_recorded_under_this_connection_and_client_name() {
+        let (bridge, col_id, _) = bridge_with_data();
+        let init = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": { "protocolVersion": DEFAULT_PROTOCOL_VERSION,
+                "clientInfo": { "name": "claude-code", "version": "1" } } })
+        .to_string();
+        bridge.handle_message(&init).unwrap();
+
+        let resp = call(&bridge, 2, "append_card", json!({ "column_id": col_id, "content": "n" }));
+        let card_id = structured(&resp)["card_id"].as_str().unwrap().to_string();
+
+        let rows = jot_deck_core::history::list_by_target(&bridge.conn, &card_id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].author,
+            Author::mcp(bridge.connection_id.clone(), Some("claude-code".to_string()))
+        );
     }
 
     #[test]

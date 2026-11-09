@@ -189,6 +189,25 @@ mod tests {
     }
 
     #[test]
+    fn writes_are_recorded_under_the_reporter() {
+        let (conn, deck_id, col_id, _, _) = deck_with_data();
+        let scope = ReporterScope::default();
+        let (resp, _) = call_scoped(
+            &conn,
+            &deck_id,
+            &scope,
+            "card.append",
+            json!({ "column_id": col_id, "content": "note" }),
+        );
+        let card_id = resp["result"]["card_id"].as_str().unwrap();
+
+        let rows = jot_deck_core::history::list_by_target(&conn, card_id).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].author, scope.author());
+        assert_eq!(rows[0].author.id, scope.reporter_id);
+    }
+
+    #[test]
     fn append_idempotency_key_returns_same_card() {
         let (conn, deck_id, col_id, _, _) = deck_with_data();
         let args = json!({ "column_id": col_id, "content": "once", "idempotency_key": "k1" });
