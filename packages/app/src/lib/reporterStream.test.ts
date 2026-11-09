@@ -1,5 +1,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
-import { ReporterStreamController } from "./reporterStream";
+import {
+  MAX_CARD_LENGTH,
+  ReporterStreamController,
+  truncateToCodePoints,
+} from "./reporterStream";
 
 // Ephemeral Reporter stream overlay lifecycle: begin/delta/end handling,
 // animation-frame delta batching, late-delta handling, stalled-stream
@@ -8,9 +12,13 @@ import { ReporterStreamController } from "./reporterStream";
 
 describe("ReporterStreamController", () => {
   let streamingText: Record<string, string>;
-  let reloadColumn: ReturnType<typeof vi.fn<(columnId: string) => Promise<void>>>;
+  let reloadColumn: ReturnType<
+    typeof vi.fn<(columnId: string) => Promise<void>>
+  >;
   let scheduleReload: ReturnType<typeof vi.fn<() => void>>;
-  let setStreamingText: ReturnType<typeof vi.fn<(value: Record<string, string>) => void>>;
+  let setStreamingText: ReturnType<
+    typeof vi.fn<(value: Record<string, string>) => void>
+  >;
   let streams: ReporterStreamController;
 
   /** Run the pending animation-frame delta flush (fake timers fake rAF too). */
@@ -106,7 +114,9 @@ describe("ReporterStreamController", () => {
   });
 
   it("drops the overlay even when the post-stream reload fails", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
     reloadColumn.mockRejectedValue(new Error("db gone"));
     streams.handle({ kind: "begin", card_id: "card-1" });
 
@@ -143,5 +153,147 @@ describe("ReporterStreamController", () => {
     setStreamingText.mockClear();
     vi.advanceTimersByTime(60_000);
     expect(setStreamingText).not.toHaveBeenCalled();
+  });
+
+  it("stops the overlay at the card length cap across frames", () => {
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({
+      kind: "delta",
+      card_id: "card-1",
+      chunk: "a".repeat(MAX_CARD_LENGTH - 2),
+    });
+    flushFrame();
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "bcdef" });
+    flushFrame();
+
+    expect(streamingText["card-1"]).toBe(
+      "a".repeat(MAX_CARD_LENGTH - 2) + "bc",
+    );
+
+    // A full overlay ignores further deltas but stays open.
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "more" });
+    flushFrame();
+    expect(streamingText["card-1"]).toHaveLength(MAX_CARD_LENGTH);
+  });
+
+  it("caps an oversized burst before it is painted", () => {
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    for (let i = 0; i < 3; i++) {
+      streams.handle({
+        kind: "delta",
+        card_id: "card-1",
+        chunk: "x".repeat(MAX_CARD_LENGTH),
+      });
+    }
+    // The buffer between frames is bounded too, not only the painted text.
+    const pending = (
+      streams as unknown as { pendingDeltas: Record<string, string> }
+    ).pendingDeltas;
+    expect(pending["card-1"]).toHaveLength(MAX_CARD_LENGTH);
+    flushFrame();
+
+    expect(streamingText["card-1"]).toBe("x".repeat(MAX_CARD_LENGTH));
+  });
+
+  it("does not split a surrogate pair at the cap across frames", () => {
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({
+      kind: "delta",
+      card_id: "card-1",
+      chunk: "a".repeat(MAX_CARD_LENGTH - 1),
+    });
+    flushFrame();
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "😀😀" });
+    flushFrame();
+
+    expect(streamingText["card-1"]).toBe(
+      "a".repeat(MAX_CARD_LENGTH - 1) + "😀",
+    );
+  });
+
+  it("begin discards text a previous stream left unflushed", () => {
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({
+      kind: "delta",
+      card_id: "card-1",
+      chunk: "x".repeat(MAX_CARD_LENGTH + 1),
+    });
+    // Restarted before the frame ran.
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "new" });
+    flushFrame();
+
+    expect(streamingText["card-1"]).toBe("new");
+  });
+});
+
+describe("ReporterStreamController at the cap", () => {
+  let streamingText: Record<string, string>;
+  let setStreamingText: ReturnType<
+    typeof vi.fn<(value: Record<string, string>) => void>
+  >;
+  let streams: ReporterStreamController;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    streamingText = {};
+    setStreamingText = vi.fn((value) => {
+      streamingText = value;
+    });
+    streams = new ReporterStreamController({
+      getStreamingText: () => streamingText,
+      setStreamingText,
+      reloadColumn: vi.fn(async () => {}),
+      scheduleReload: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function fill(cardId: string): void {
+    streams.handle({ kind: "begin", card_id: cardId });
+    streams.handle({
+      kind: "delta",
+      card_id: cardId,
+      chunk: "x".repeat(MAX_CARD_LENGTH + 1),
+    });
+    vi.advanceTimersByTime(20);
+  }
+
+  it("drops deltas for a full card without scheduling a repaint", () => {
+    fill("card-1");
+    setStreamingText.mockClear();
+
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "more" });
+    vi.advanceTimersByTime(20);
+
+    expect(setStreamingText).not.toHaveBeenCalled();
+    expect(streamingText["card-1"]).toHaveLength(MAX_CARD_LENGTH);
+  });
+
+  it("a fresh stream on the same card accepts text again", () => {
+    fill("card-1");
+    streams.handle({ kind: "begin", card_id: "card-1" });
+    streams.handle({ kind: "delta", card_id: "card-1", chunk: "new" });
+    vi.advanceTimersByTime(20);
+
+    expect(streamingText["card-1"]).toBe("new");
+  });
+});
+
+describe("truncateToCodePoints", () => {
+  it("keeps text within the limit unchanged", () => {
+    expect(truncateToCodePoints("", 3)).toBe("");
+    expect(truncateToCodePoints("abc", 3)).toBe("abc");
+  });
+
+  it("cuts by code points, not UTF-16 units", () => {
+    // Each emoji is one code point but two UTF-16 units, as Rust counts chars.
+    expect(truncateToCodePoints("😀😀😀", 2)).toBe("😀😀");
+    expect(truncateToCodePoints("a😀b", 2)).toBe("a😀");
+    expect(truncateToCodePoints("😀😀", 2)).toBe("😀😀");
+    expect(truncateToCodePoints("abcd", 0)).toBe("");
   });
 });

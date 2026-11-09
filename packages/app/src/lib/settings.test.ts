@@ -186,6 +186,37 @@ describe("SettingsStore (DB-backed)", () => {
     expect(parsed.fontSize).toBe(18);
   });
 
+  it("shortcutLabel shows the effective key and follows remaps", async () => {
+    await store.load();
+    expect(store.shortcutLabel("renameDeck")).toBe("R");
+
+    const deleteColumn = DEFAULT_KEYBINDINGS.find(
+      (b) => b.action === "deleteColumn" && b.sequence === "dd",
+    )!;
+    store.setKeybindingOverride(signatureOf(deleteColumn), "Shift+ArrowLeft");
+    expect(store.shortcutLabel("deleteColumn")).toBe("Shift+←");
+
+    store.resetAllKeybindings();
+    expect(store.shortcutLabel("deleteColumn")).toBe("dd");
+    expect(store.shortcutLabel("showShortcuts")).toBeNull();
+  });
+
+  it("shortcutLabel limits the lookup to the given modes", async () => {
+    await store.load();
+    store.addCustomKeybinding({
+      sequence: "z",
+      action: "renameDeck",
+      modes: ["card"],
+      description: "Rename deck",
+    });
+    try {
+      expect(store.shortcutLabel("renameDeck")).toBe("z");
+      expect(store.shortcutLabel("renameDeck", ["column"])).toBe("R");
+    } finally {
+      store.resetAllKeybindings();
+    }
+  });
+
   it("rehydrates state from the backend", async () => {
     stub.store.set(
       SETTINGS_DB_KEY,
