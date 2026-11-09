@@ -203,6 +203,8 @@
   });
 
   let renamingDeck = $state<Deck | null>(null);
+  // An empty deck resolves keys in column focus only (see handleNoColumnsKey).
+  const renameDeckShortcut = $derived(settingsStore.shortcutLabel("renameDeck", ["column"]));
   let deletingDeck = $state<Deck | null>(null);
   // In-place column rename. The draft lives here so starting another edit can
   // commit it, the way a card editor saves before another one opens.
@@ -377,6 +379,9 @@
     <div class="status">
       <p>No columns in this deck. Create your first column!</p>
       <button onclick={() => data.createColumn()}>Create Column</button>
+      {#if renameDeckShortcut}
+        <p class="status-hint">Press <kbd>{renameDeckShortcut}</kbd> to rename this deck.</p>
+      {/if}
     </div>
   {:else}
     <DeckComponent
@@ -505,6 +510,7 @@
   />
 {:else if focus.focusMode === "command"}
   <CommandPalette
+    mode={focus.previousFocusMode}
     onExecute={(action) => actions.executeCommand(action)}
     onClose={() => focus.closePalette()}
   />
@@ -692,5 +698,18 @@
 
   .status button:hover {
     background-color: var(--bg-tertiary);
+  }
+
+  .status-hint {
+    font-size: 0.875rem;
+  }
+
+  .status-hint kbd {
+    padding: 0.0625rem 0.375rem;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--bg-tertiary);
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 0.875rem;
   }
 </style>

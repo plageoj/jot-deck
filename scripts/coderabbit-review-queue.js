@@ -14,6 +14,8 @@ const FAILED_CHECK_CONCLUSIONS = new Set([
   'startup_failure',
   'timed_out',
 ]);
+// Coverage reports are informational; a failing Codecov check must not hold back a review.
+const IGNORED_CHECK_NAME = /^codecov\b/i;
 
 async function getPrBlockReason(github, owner, repo, pr) {
   const [pull, checkRuns, statuses] = await Promise.all([
@@ -40,12 +42,14 @@ async function getPrBlockReason(github, owner, repo, pr) {
   if (pull.data.mergeable === false || pull.data.mergeable_state === 'dirty') {
     return 'merge conflict';
   }
-  if (checkRuns.some(check => FAILED_CHECK_CONCLUSIONS.has(check.conclusion))) {
+  if (checkRuns.some(check =>
+    !IGNORED_CHECK_NAME.test(check.name) && FAILED_CHECK_CONCLUSIONS.has(check.conclusion))) {
     return 'failed check run';
   }
 
   const latestStatusByContext = new Map();
   statuses
+    .filter(status => !IGNORED_CHECK_NAME.test(status.context))
     .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
     .forEach(status => latestStatusByContext.set(status.context, status));
   if ([...latestStatusByContext.values()].some(status =>

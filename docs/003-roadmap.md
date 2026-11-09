@@ -18,7 +18,7 @@ Reporter（外部ストリーミング入力アダプタ）と汎用エージェ
 
 ### 完了済み
 * 書き込み共通の土台: カードの占有ロック＋楽観ロック（`002` §5）、GUI の外部変更観測
-* Reporter 基盤: ホスト spawn ＋ stdio のローカル書き込み口（`crates/reporter-host`）、committed / ephemeral の 2 チャネル、カード単位のストリーミングオーバーレイ、Reporter 登録・認証スコープ編集 UI（`g r`）
+* Reporter 基盤: ホスト spawn ＋ stdio のローカル書き込み口（`crates/reporter-host`）、committed / ephemeral の 2 チャネル、カード単位のストリーミングオーバーレイ（4000 字で表示打ち切り）、Reporter 登録・認証スコープ編集 UI（`g r`）
 * MCP 書き込み面: カード書き込み・構造再編 tool、capability opt-out・レート制限・論理削除のみ公開の安全域（`008` §5）
 * `JOT_DECK_DECK_ID` の複数指定: カンマ区切りで列挙した Deck に接続を限定（`008` §4.5）
 
@@ -26,7 +26,6 @@ Reporter（外部ストリーミング入力アダプタ）と汎用エージェ
 * **参照実装 Reporter ―― 別のプライベートリポジトリで開発中**（Python。例: 議事録、Whisper ベースの音声認識）。本リポジトリには配置しない。Reporter プロトコルを実際に話す唯一のクライアント実装であり、下記の配管パッケージはここから切り出す
 * **配管パッケージの切り出し ―― 本リポジトリへ配置予定**: stdio JSON-RPC ループ / `stream.*` 状態機械 / backstop 遵守を、permissive ライセンス（MIT / Apache-2.0）の独立パッケージに分離する。一次実装は **Python**（`007` §9.5）。**Reporter プロトコルが固まってから**切り出す方針のため、それまでは本リポジトリに置かない。したがって現状、本リポジトリにあるプロトコル実装はホスト側（Rust、`crates/reporter-host`）のみで、パイプの反対側にあたるクライアント側の配管は存在しない
 * **変更履歴**: 外部からの書き込み（MCP / Reporter）の変更前後を `jot_deck_core::write` で記録し、上書き・改名・移動を GUI から復元できるようにする。監査ログを兼ねる（`008` §5.1）
-* **ストリーム overlay の上限表示**: overlay を 4000 字で打ち切って表示する（`007` §5.1）
 * **MCP 書き込み面の整理**: `move_card` / `move_column` をアンカー対応の並べ替え 1 トランザクションにまとめる（途中で末尾位置が一瞬見える問題の解消）、capability と tool の対応をテーブル駆動にする、allowlist 入りの `mcpServers` 設定を生成する GUI のカラムピッカー
 
 詳細設計: `007-reporter-protocol.md` / `008-mcp-server.md`

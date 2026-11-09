@@ -30,6 +30,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "c", action: "createColumn", modes: ["card"], description: "New column" },
   { sequence: "N", action: "createColumn", modes: ["column", "card"], description: "New column" },
   { sequence: "r", action: "renameColumn", modes: ["column", "card"], description: "Rename column" },
+  { sequence: "F2", action: "renameColumn", modes: ["column", "card"], description: "Rename column" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "Delete column" },
   { sequence: "Delete", action: "deleteColumn", modes: ["column"], description: "Delete column" },
 
@@ -118,6 +119,9 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Trash
   { sequence: "gt", action: "showTrashPalette", modes: ["column", "card"], description: "Open trash" },
+
+  // Common - Deck
+  { sequence: "R", action: "renameDeck", modes: ["column", "card"], description: "Rename deck" },
 
   // Common - Palettes
   { sequence: "Ctrl+p", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
@@ -292,11 +296,56 @@ export function isValidPrefix(sequence: string, mode: FocusMode): boolean {
   );
 }
 
+/** One pressed key of a stored sequence, modifiers included (`Ctrl+p`, `ArrowLeft`, `g`). */
+const KEY_TOKEN =
+  /(?:(?:Ctrl|Shift|Alt|Meta)\+)*(?:Arrow(?:Left|Right|Up|Down)|Escape|Enter|Delete|PageUp|PageDown|F\d{1,2}|.)/gu;
+
 /**
- * Get all keybindings for display (cheatsheet)
+ * Whether typing `sequence` in `mode` runs `action`: the sequence resolves to
+ * it, and no shorter run of its leading keys fires another binding first (the
+ * key processor acts on the first exact match, so a user-bound `g` makes `gg`
+ * unreachable).
+ */
+function reaches(sequence: string, mode: FocusMode, action: string): boolean {
+  const keys = sequence.match(KEY_TOKEN) ?? [];
+  let prefix = "";
+  for (const key of keys.slice(0, -1)) {
+    prefix += key;
+    if (findAction(prefix, mode)) return false;
+  }
+  return findAction(sequence, mode) === action;
+}
+
+/**
+ * Get all keybindings for display (cheatsheet). A binding that typing its key
+ * would not run (another binding claims the key or a leading part of it) is
+ * left out.
  */
 export function getKeybindingsForMode(mode: FocusMode): KeyBinding[] {
-  return activeBindings.filter((b) => b.modes.includes(mode));
+  return activeBindings.filter(
+    (b) => b.modes.includes(mode) && reaches(b.sequence, mode, b.action)
+  );
+}
+
+/**
+ * The key sequence shown as an action's shortcut in hints and the command
+ * palette: the first effective binding in any of `modes`, with the user's
+ * customizations first. A binding that typing its key would not run is
+ * skipped, as is a browser-reserved key when `inBrowser` (the page never sees
+ * it). `null` when no key reaches the action.
+ */
+export function shortcutFor(
+  action: string,
+  modes: FocusMode[] = ["column", "card"],
+  { inBrowser = false }: { inBrowser?: boolean } = {},
+): string | null {
+  const binding = lookupBindings.find(
+    (b) =>
+      b.action === action &&
+      !(inBrowser && isBrowserReserved(b.sequence)) &&
+      b.modes.some((m) => modes.includes(m) && reaches(b.sequence, m, action))
+  );
+  return binding?.sequence ?? null;
 }
 
 /**
