@@ -151,12 +151,18 @@ export const NATIVE_SHORTCUTS: (Omit<KeyBinding, "action"> & { alsoReserves?: st
   },
 ];
 
-/** Whether `sequence` is held by a native shortcut in `mode`. */
+/**
+ * Whether `sequence` is held by a native shortcut in `mode`. Sequences that
+ * merely start with a reserved key count too: pressing that key would then be
+ * consumed as a prefix (preventDefault) and suppress the native event.
+ */
 function isNativeReserved(sequence: string, mode: FocusMode): boolean {
   return NATIVE_SHORTCUTS.some(
     (n) =>
       n.modes.includes(mode) &&
-      (n.sequence === sequence || (n.alsoReserves ?? []).includes(sequence)),
+      [n.sequence, ...(n.alsoReserves ?? [])].some((reserved) =>
+        sequence.startsWith(reserved),
+      ),
   );
 }
 

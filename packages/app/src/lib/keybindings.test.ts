@@ -346,6 +346,14 @@ describe("setKeybindingOverrides", () => {
     expect(findAction("Ctrl+v", "column")).toBe("pasteBelow");
   });
 
+  it("drops saved card-mode bindings that start with a native shortcut", () => {
+    setKeybindingOverrides({}, [
+      { sequence: "Ctrl+Shift+Vq", action: "pasteAbove", modes: ["card"], description: "Paste above" },
+    ]);
+    expect(isValidPrefix("Ctrl+Shift+V", "card")).toBe(false);
+    expect(findAction("Ctrl+Shift+Vq", "card")).toBeNull();
+  });
+
   it("makes findAction reflect a remapped sequence", () => {
     const startEdit = DEFAULT_KEYBINDINGS.find(
       (b) => b.action === "startEdit" && b.sequence === "i",
@@ -409,6 +417,14 @@ describe("findKeybindingConflicts", () => {
     expect(findKeybindingConflicts("Ctrl+Shift+V", ["card"], "no-such-sig")).toContainEqual(
       expect.objectContaining({ severity: "error", sequence: "Ctrl+Shift+V" }),
     );
+    // Multi-key sequences starting with a reserved key would wait for their
+    // next key on it and swallow the native paste as well.
+    for (const sequence of ["Ctrl+vq", "Ctrl+Shift+Vq"]) {
+      expect(findKeybindingConflicts(sequence, ["card"], "no-such-sig")).toContainEqual(
+        expect.objectContaining({ severity: "error", sequence }),
+      );
+    }
+    expect(findKeybindingConflicts("qCtrl+v", ["card"], "no-such-sig")).toEqual([]);
     expect(findKeybindingConflicts("Ctrl+v", ["column"], "no-such-sig")).toEqual([]);
   });
 
