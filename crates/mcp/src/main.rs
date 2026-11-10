@@ -4,9 +4,10 @@
 //! config. Configuration is passed through environment variables — the host
 //! does not hand ULIDs on argv:
 //!
-//! - `JOT_DECK_DECK_ID`  — optional ULID that pins the connection to one Deck
-//!   (copy it from the GUI's "Deck id"). Unset, every local Deck is reachable and
-//!   each call names its Deck via a `deck_id` argument (008 §4.5).
+//! - `JOT_DECK_DECK_ID`  — optional comma list of Deck ULIDs the connection is
+//!   limited to (copy each from the GUI's "Deck id"); with exactly one, calls may
+//!   omit `deck_id`. Unset, every local Deck is reachable and each call names its
+//!   Deck via a `deck_id` argument (008 §4.5).
 //! - `JOT_DECK_DB_PATH`  — optional override of the `jot-deck.db` path. The DB
 //!   lives at a fixed, identifier-based location (same as the GUI), so this is
 //!   only for dev or non-standard installs; normally it is not set.

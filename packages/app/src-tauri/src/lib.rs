@@ -372,7 +372,7 @@ fn set_settings(state: State<AppState>, key: String, value: String) -> CommandRe
 /// 設定スニペットを生成する。ブリッジのバイナリパスはアプリだけが正確に知って
 /// いるので生成側で埋める。DB パスは本体と同じ固定の app data dir をブリッジが
 /// 自力で導出するため env には出さない。`JOT_DECK_DECK_ID` も含めない全 Deck
-/// 対象の最小構成とし、1 Deck に固定したいユーザは「Deck id」を自分で足す
+/// 対象の最小構成とし、対象 Deck を限定したいユーザは「Deck id」をカンマ区切りで足す
 /// （008-mcp-server.md §4.5）。
 #[tauri::command]
 fn generate_mcp_config() -> CommandResult<String> {
