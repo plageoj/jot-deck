@@ -2,7 +2,7 @@ import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
 import type { Card, Column, EditEntry } from "./types";
 import { findAction } from "./keybindings";
-import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
+import { isModifierOnly, normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import { updaterStore } from "./updater.svelte";
 import { executeGlobalAction } from "./actionDispatchHelpers";
 import { BoardActionExecutors } from "./boardActionExecutors";
@@ -140,6 +140,32 @@ export class ActionDispatcher {
     }
   };
 
+  /**
+   * Native paste (Ctrl+V, Shift+Insert, Cmd+V, Edit menu) in card focus adds
+   * the system clipboard's plain text as one card below the focused card.
+   * Handled via the `paste` event so no clipboard-read permission is needed.
+   */
+  handlePaste = (event: ClipboardEvent) => {
+    const { focus, data } = this;
+    if (
+      focus.focusMode !== "card" ||
+      focus.showCheatsheet ||
+      focus.showSettings ||
+      focus.showKeybindings ||
+      focus.showAbout ||
+      focus.showReporters ||
+      data.deckLoadError ||
+      !this.boardAvailable ||
+      !this.focusedColumn ||
+      this.isEditableTarget(event.target as HTMLElement)
+    )
+      return;
+    const text = event.clipboardData?.getData("text/plain") ?? "";
+    if (!text.trim()) return;
+    event.preventDefault();
+    this.runTask(this.boardActions.pasteTextBelow(text));
+  };
+
   private handleCommandModeKey(event: KeyboardEvent) {
     const key = normalizeKey(event);
     if (!key) return;
@@ -180,7 +206,7 @@ export class ActionDispatcher {
     ) {
       return false;
     }
-    if (normalizeKey(event) === null) {
+    if (isModifierOnly(event)) {
       // Modifier-only press: keep the hints up.
       this.focus.linkHints = hints;
       return true;

@@ -81,6 +81,8 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "yy", action: "copyCard", modes: ["card"], description: "Copy card" },
   { sequence: "p", action: "pasteBelow", modes: ["card"], description: "Paste below" },
   { sequence: "P", action: "pasteAbove", modes: ["card"], description: "Paste above" },
+  { sequence: "Ctrl+c", action: "copyCardText", modes: ["card"], description: "Copy card text to system clipboard" },
+  { sequence: "Ctrl+x", action: "cutCardText", modes: ["card"], description: "Cut card text to system clipboard" },
 
   // Card focus - Score
   { sequence: "f", action: "scoreUp", modes: ["card"], description: "Score +1" },
@@ -134,6 +136,39 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   // Common - Reporters
   { sequence: "gr", action: "showReporters", modes: ["column", "card"], description: "Manage reporters" },
 ];
+
+/**
+ * Shortcuts driven by native browser events rather than keydown, so they are
+ * listed in the cheatsheet but cannot be remapped. Ctrl+v must stay unbound
+ * in DEFAULT_KEYBINDINGS: a keydown binding would preventDefault and suppress
+ * the `paste` event. `alsoReserves` lists other keys that fire the same
+ * native event on some platforms; they are rejected as bindings too but not
+ * shown in the cheatsheet.
+ */
+export const NATIVE_SHORTCUTS: (Omit<KeyBinding, "action"> & { alsoReserves?: string[] })[] = [
+  {
+    sequence: "Ctrl+v",
+    modes: ["card"],
+    description: "Paste system clipboard text below",
+    // Paste as plain text in Chromium / WebView2
+    alsoReserves: ["Ctrl+Shift+V"],
+  },
+];
+
+/**
+ * Whether `sequence` is held by a native shortcut in `mode`. Sequences that
+ * merely start with a reserved key count too: pressing that key would then be
+ * consumed as a prefix (preventDefault) and suppress the native event.
+ */
+function isNativeReserved(sequence: string, mode: FocusMode): boolean {
+  return NATIVE_SHORTCUTS.some(
+    (n) =>
+      n.modes.includes(mode) &&
+      [n.sequence, ...(n.alsoReserves ?? [])].some((reserved) =>
+        sequence.startsWith(reserved),
+      ),
+  );
+}
 
 /**
  * User customization is stored as a map keyed by a *default* binding's stable
@@ -266,7 +301,11 @@ export function setKeybindingOverrides(
   overrides: KeybindingOverrides,
   additions: KeyBinding[] = []
 ): void {
-  const resolved = resolveWithSignatures(overrides, additions);
+  // Saved customizations may predate a native shortcut's reservation; drop the
+  // reserved modes so a stored binding cannot suppress the native event.
+  const resolved = resolveWithSignatures(overrides, additions)
+    .map((b) => ({ ...b, modes: b.modes.filter((m) => !isNativeReserved(b.sequence, m)) }))
+    .filter((b) => b.modes.length > 0);
   activeBindings = resolved.map(toKeyBinding);
   lookupBindings = [
     ...resolved.filter((b) => b.customized),
@@ -430,6 +469,17 @@ export function findKeybindingConflicts(
 ): KeybindingConflict[] {
   const effective = resolveWithSignatures(overrides, additions);
   const conflicts: KeybindingConflict[] = [];
+  // A keydown binding on a native shortcut would preventDefault and suppress
+  // the native event (e.g. paste), so these keys are never available.
+  for (const native of NATIVE_SHORTCUTS) {
+    if (modes.some((m) => native.modes.includes(m) && isNativeReserved(candidate, m))) {
+      conflicts.push({
+        severity: "error",
+        sequence: candidate,
+        description: native.description,
+      });
+    }
+  }
   for (const b of effective) {
     if (b.signature === excludeSignature) continue;
     const sharesMode = b.modes.some((m) => modes.includes(m));

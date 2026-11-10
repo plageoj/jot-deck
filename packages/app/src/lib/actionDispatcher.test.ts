@@ -809,3 +809,60 @@ describe("ActionDispatcher while the selected deck is not loaded", () => {
     await vi.waitFor(() => expect(clamp).toHaveBeenCalled());
   });
 });
+
+describe("ActionDispatcher.handlePaste", () => {
+  let data: DeckData;
+  let focus: FocusManager;
+  let dispatcher: InstanceType<typeof ActionDispatcher>;
+
+  function paste(text: string, target: HTMLElement = document.body) {
+    const event = {
+      clipboardData: { getData: (type: string) => (type === "text/plain" ? text : "") },
+      target,
+      preventDefault: vi.fn(),
+    };
+    dispatcher.handlePaste(event as unknown as ClipboardEvent);
+    return event;
+  }
+
+  beforeEach(async () => {
+    ({ data, focus } = await threeColumnBoard());
+    dispatcher = new ActionDispatcher(data, focus);
+    focus.focusMode = "card";
+    focus.focusedColumnIndex = 0;
+    focus.focusedCardIndex = 0;
+  });
+
+  it("creates one card below the focused card from multi-line text", async () => {
+    const event = paste("line 1\nline 2");
+    await flushPromises();
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(boardState.createCardCalls).toHaveLength(1);
+    expect(boardState.createCardCalls[0]).toMatchObject({
+      column_id: "col-0",
+      content: "line 1\nline 2",
+      position: 1,
+    });
+  });
+
+  it("ignores empty text (e.g. an image-only clipboard)", async () => {
+    const event = paste("");
+    await flushPromises();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(boardState.createCardCalls).toHaveLength(0);
+  });
+
+  it("ignores pastes outside card focus", async () => {
+    focus.focusMode = "column";
+    paste("text");
+    await flushPromises();
+    expect(boardState.createCardCalls).toHaveLength(0);
+  });
+
+  it("leaves pastes into input fields alone", async () => {
+    const event = paste("text", document.createElement("input"));
+    await flushPromises();
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(boardState.createCardCalls).toHaveLength(0);
+  });
+});

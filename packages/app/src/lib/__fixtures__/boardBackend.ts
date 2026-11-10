@@ -108,8 +108,10 @@ export const mockBackend: Partial<DatabaseBackend> = {
       params.column_id,
       { content: params.content, position: params.position },
     );
-    const existing = boardState.cardsByColumn.get(params.column_id) ?? [];
-    boardState.cardsByColumn.set(params.column_id, [...existing, card]);
+    // Insert at the requested position like the real backends do.
+    const cards = [...(boardState.cardsByColumn.get(params.column_id) ?? [])];
+    cards.splice(params.position ?? cards.length, 0, card);
+    boardState.cardsByColumn.set(params.column_id, cards);
     return Promise.resolve(card);
   },
   deleteColumn: (id) => {
