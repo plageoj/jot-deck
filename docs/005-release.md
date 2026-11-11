@@ -154,6 +154,8 @@ pnpm tauri signer generate -w ~/.tauri/jot-deck-updater.key
 
 Linux は AppImage を updater 経路の主とする。
 
+Preview の Linux ビルドは `.AppImage` と `.deb` のみを生成し、`.rpm` は生成しない。RPM のバージョンには `-` を含められないため、Preview のバージョン（`1.2.3-<n>`）では RPM バンドラーが失敗する。
+
 ---
 
 ## 実装フェーズ

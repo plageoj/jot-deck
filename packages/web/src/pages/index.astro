@@ -75,7 +75,6 @@ const downloads = [
     formats: [
       { key: "linux-appimage", label: ".AppImage" },
       { key: "linux-deb", label: ".deb" },
-      { key: "linux-rpm", label: ".rpm" },
     ],
   },
 ];
@@ -346,7 +345,6 @@ const mcpSnippet = `{
         "macos-dmg": /_universal\.dmg$/,
         "linux-appimage": /_amd64\.AppImage$/,
         "linux-deb": /_amd64\.deb$/,
-        "linux-rpm": /\.x86_64\.rpm$/,
       };
       const PRIMARY: Record<string, string> = {
         windows: "windows-exe",
