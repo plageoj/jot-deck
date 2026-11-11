@@ -150,9 +150,9 @@ pnpm tauri signer generate -w ~/.tauri/jot-deck-updater.key
 |---|---|---|
 | Windows | `.msi` (WiX) | ✅ |
 | macOS | `.dmg` + `.app.tar.gz` | ✅ |
-| Linux | `.AppImage` / `.deb` | ✅ |
+| Linux | `.AppImage` / `.deb` / `.rpm`（Preview は `.rpm` なし） | ✅ |
 
-Linux は AppImage を updater 経路の主とする。`.deb` でインストールした場合も updater が `linux-x86_64-deb` のバンドルを取得し、`pkexec` 経由の `dpkg -i` で更新する。
+Linux は AppImage を updater 経路の主とする。`.deb` / `.rpm` でインストールした場合も updater が `linux-x86_64-deb` / `linux-x86_64-rpm` のバンドルを取得し、`pkexec` 経由の `dpkg -i` / `rpm -U` で更新する。
 
 Preview の Linux ビルドは `.AppImage` と `.deb` のみを生成し、`.rpm` は生成しない。RPM のバージョンには `-` を含められないため、Preview のバージョン（`1.2.3-<n>`）では RPM バンドラーが失敗する。
 
