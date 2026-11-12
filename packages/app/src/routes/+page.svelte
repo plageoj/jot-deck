@@ -175,7 +175,9 @@
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
     void data.watchExternalChanges();
     // Non-blocking and silent on failure (e.g. offline) — a check error only
-    // shows in the About dialog, never throws out of mount.
+    // shows in the About dialog, never throws out of mount. A failed check is
+    // retried when the network comes back.
+    window.addEventListener("online", updaterStore.handleOnline);
     void updaterStore.check();
   });
 
@@ -201,6 +203,7 @@
     pageMounted = false;
     window.removeEventListener("keydown", actions.handleKeydown);
     window.removeEventListener("paste", actions.handlePaste);
+    window.removeEventListener("online", updaterStore.handleOnline);
     actions.destroy();
     data.stopWatchingExternalChanges();
   });

@@ -62,6 +62,14 @@ class UpdaterStore {
     }
   }
 
+  // `online` listener: a check that failed (typically launched offline) is
+  // retried once connectivity returns. Any other state is left alone.
+  handleOnline = (): void => {
+    if (this.status.kind === "error" && this.status.phase === "check") {
+      void this.check();
+    }
+  };
+
   async installAndRelaunch(): Promise<void> {
     if (!isTauri()) return;
     const update = this.update as
