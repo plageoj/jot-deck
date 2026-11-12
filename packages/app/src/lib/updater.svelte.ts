@@ -26,6 +26,9 @@ function isTauri(): boolean {
 class UpdaterStore {
   status = $state<Status>({ kind: "idle" });
   private update: unknown = null;
+  // Set when connectivity returns while a check is in flight: that check may
+  // still fail from the outage, so its failure triggers one retry.
+  private reconnectedDuringCheck = false;
 
   async check(): Promise<void> {
     if (!isTauri()) return;
@@ -37,6 +40,7 @@ class UpdaterStore {
       return;
     }
     this.status = { kind: "checking" };
+    this.reconnectedDuringCheck = false;
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
@@ -54,6 +58,12 @@ class UpdaterStore {
         this.status = { kind: "up-to-date" };
       }
     } catch (err) {
+      if (this.reconnectedDuringCheck) {
+        // Leave "checking" without surfacing the stale error, then retry.
+        this.status = { kind: "idle" };
+        void this.check();
+        return;
+      }
       this.status = {
         kind: "error",
         phase: "check",
@@ -63,9 +73,12 @@ class UpdaterStore {
   }
 
   // `online` listener: a check that failed (typically launched offline) is
-  // retried once connectivity returns. Any other state is left alone.
+  // retried once connectivity returns, including one still in flight when the
+  // network came back. Any other state is left alone.
   handleOnline = (): void => {
-    if (this.status.kind === "error" && this.status.phase === "check") {
+    if (this.status.kind === "checking") {
+      this.reconnectedDuringCheck = true;
+    } else if (this.status.kind === "error" && this.status.phase === "check") {
       void this.check();
     }
   };
