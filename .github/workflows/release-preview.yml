@@ -77,7 +77,10 @@ jobs:
             args: '--config src-tauri/tauri.conf.preview.json --target universal-apple-darwin'
           - platform: ubuntu-latest
             staging_tag: preview-staging-linux
-            args: '--config src-tauri/tauri.conf.preview.json'
+            # No .rpm: RPM versions may not contain '-', so the bundler rejects
+            # the numeric pre-release version (e.g. 0.1.0-42) and Tauri has no
+            # RPM-only version override.
+            args: '--config src-tauri/tauri.conf.preview.json --bundles deb,appimage'
           - platform: windows-latest
             staging_tag: preview-staging-windows
             args: '--config src-tauri/tauri.conf.preview.json'
