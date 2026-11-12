@@ -49,7 +49,7 @@
   <div class="banner" role="status">
     <div class="banner-text">Installing update — app will restart…</div>
   </div>
-{:else if status.kind === "error"}
+{:else if status.kind === "error" && status.phase === "install"}
   <div class="banner error" role="alert">
     <div class="banner-text">
       <strong>Update failed:</strong>

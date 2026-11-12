@@ -174,7 +174,8 @@
     if (!pageMounted) return;
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
     void data.watchExternalChanges();
-    // Non-blocking — failures surface in the banner, never throw out of mount.
+    // Non-blocking and silent on failure (e.g. offline) — a check error only
+    // shows in the About dialog, never throws out of mount.
     void updaterStore.check();
   });
 

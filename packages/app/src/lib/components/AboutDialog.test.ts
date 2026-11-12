@@ -164,9 +164,17 @@ describe("AboutDialog update status rendering", () => {
     ).toBeTruthy();
   });
 
-  it("renders an update error", () => {
-    updaterStore.status = { kind: "error", message: "network down" };
+  it("renders an update check error", () => {
+    updaterStore.status = { kind: "error", phase: "check", message: "network down" };
     render(AboutDialog, { props: { onClose: vi.fn() } });
+    expect(screen.getByText("Update check failed:")).toBeTruthy();
     expect(screen.getByText("network down")).toBeTruthy();
+  });
+
+  it("renders an install error", () => {
+    updaterStore.status = { kind: "error", phase: "install", message: "disk full" };
+    render(AboutDialog, { props: { onClose: vi.fn() } });
+    expect(screen.getByText("Update failed:")).toBeTruthy();
+    expect(screen.getByText("disk full")).toBeTruthy();
   });
 });

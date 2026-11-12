@@ -161,7 +161,11 @@
             </p>
           {:else if status.kind === "error"}
             <p class="status-line error" role="alert">
-              <strong>Update check failed:</strong>
+              <strong
+                >{status.phase === "check"
+                  ? "Update check failed:"
+                  : "Update failed:"}</strong
+              >
               {status.message}
             </p>
           {/if}

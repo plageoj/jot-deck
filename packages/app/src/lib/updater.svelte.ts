@@ -15,7 +15,9 @@ type Status =
   | { kind: "up-to-date" }
   | { kind: "downloading"; downloaded: number; contentLength?: number }
   | { kind: "installing" }
-  | { kind: "error"; message: string };
+  // "check" errors are shown only in the About dialog (a background check
+  // must not alarm an offline user); "install" errors also reach the banner.
+  | { kind: "error"; phase: "check" | "install"; message: string };
 
 function isTauri(): boolean {
   return globalThis.window !== undefined && "__TAURI_INTERNALS__" in globalThis;
@@ -54,6 +56,7 @@ class UpdaterStore {
     } catch (err) {
       this.status = {
         kind: "error",
+        phase: "check",
         message: err instanceof Error ? err.message : String(err),
       };
     }
@@ -85,6 +88,7 @@ class UpdaterStore {
     } catch (err) {
       this.status = {
         kind: "error",
+        phase: "install",
         message: err instanceof Error ? err.message : String(err),
       };
     }
