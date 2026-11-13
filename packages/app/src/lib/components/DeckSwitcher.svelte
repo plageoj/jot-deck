@@ -49,8 +49,8 @@
     }
   }
 
-  /** Copy the deck's ULID, e.g. for JOT_DECK_DECK_ID, which pins an MCP
-   * connection to this deck (docs/008-mcp-server.md §4.5). */
+  /** Copy the deck's ULID, e.g. for JOT_DECK_DECK_ID, whose comma list limits
+   * an MCP connection to the decks it names (docs/008-mcp-server.md §4.5). */
   async function copyDeckId() {
     if (!currentDeck) return;
     if (await writeClipboard(currentDeck.id)) {

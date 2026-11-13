@@ -4,6 +4,7 @@ import type { FocusManager } from "#lib/focusManager.svelte.ts";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
 import { boardState } from "./__fixtures__/boardBackend";
 import { setupBoard } from "./__fixtures__/boardHarness";
+import { threeColumnBoard } from "./__fixtures__/boards";
 import { updaterStore } from "./updater.svelte";
 import { setKeybindingOverrides } from "./keybindings";
 
@@ -41,22 +42,6 @@ function makeKeyEvent(opts: {
     value: opts.target ?? document.body,
   });
   return event;
-}
-
-/** Three columns (col-2 empty), as used by most routing tests. */
-function threeColumnBoard() {
-  return setupBoard({
-    columns: [
-      makeColumn("col-0", "deck-1", { position: 0 }),
-      makeColumn("col-1", "deck-1", { position: 1 }),
-      makeColumn("col-2", "deck-1", { position: 2 }),
-    ],
-    cards: {
-      "col-0": [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")],
-      "col-1": [makeCard("c-1-a", "col-1")],
-      "col-2": [],
-    },
-  });
 }
 
 describe("ActionDispatcher with no columns loaded", () => {
