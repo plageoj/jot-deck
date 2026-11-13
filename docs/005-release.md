@@ -35,28 +35,31 @@ packages/app/src-tauri/
 ├── tauri.conf.preview.json      # preview チャンネル上書き
 └── ...
 .github/workflows/
-├── ci.yml                       # 既存
+├── ci.yml                       # main push / PR の検査
 ├── release-production.yml       # タグ push 用
 └── release-preview.yml          # main push 用
 ```
 
-### `tauri.conf.preview.json`（上書き例）
+### `tauri.conf.preview.json`（上書き内容）
 
 ```jsonc
 {
   "productName": "Jot Deck Preview",
   "identifier": "com.jot-deck.app.preview",
+  "app": {
+    "windows": [{ "title": "Jot Deck Preview" }]
+  },
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/<owner>/jot-deck/releases/download/preview/latest.json"
+        "https://github.com/plageoj/jot-deck/releases/download/preview/latest-preview.json"
       ]
     }
   }
 }
 ```
 
-ビルド時に `tauri build --config src-tauri/tauri.conf.preview.json` でマージ上書きする。
+ビルド時に `tauri build --config src-tauri/tauri.conf.preview.json` でマージ上書きする。Production の updater endpoint は `tauri.conf.json` の `https://github.com/plageoj/jot-deck/releases/latest/download/latest.json`。
 
 ---
 
@@ -68,24 +71,25 @@ packages/app/src-tauri/
 
 その後 `assemble` ジョブが 3 つの staging から生成された**プラットフォーム完結の `latest.json`** を回収し、`.platforms` をマージ + URL のタグ部分を本番タグへ書き換えて 1 本のマニフェストにまとめ、バンドルとともに本番リリースへ昇格させてから staging draft を削除する。プラットフォームキーの対応表は `tauri-action` の出力をそのまま使うため手書きしない。
 
-これにより直列（各 OS を順番にビルド）だった待ち時間が、最も遅い 1 プラットフォーム分 + assemble のみに短縮される。
+これによりリリースの待ち時間は、最も遅い 1 プラットフォーム分 + assemble で済む。
 
 ### Production (`release-production.yml`)
 
 * **トリガ**: `push: tags: ['v*.*.*']`
-* **matrix**: `windows-latest` / `macos-latest` / `ubuntu-latest`（並列、staging draft へ出力）
+* **matrix**: `windows-latest` / `macos-latest`（`--target universal-apple-darwin`）/ `ubuntu-latest`（並列、staging draft へ出力）
+* **バージョン**: タグから先頭の `v` を除いた値を `node scripts/sync-version.mjs` で各ファイルへ書き込んでからビルドする（タグ前にバージョン更新コミットは不要）
 * **action**: `tauri-apps/tauri-action`（`includeUpdaterJson: true`, `prerelease: false`）
 * **assemble**: staging を本番タグ（= バージョン）の draft release へ昇格し `latest.json` を合成
 * **publish**: 全ビルド + assemble 成功時のみ draft を publish（`--latest`）。1 プラットフォームでも失敗すれば publish されない
 
 ### Preview (`release-preview.yml`)
 
-* **トリガ**: `push: branches: [main]`, `paths-ignore: ['docs/**', '*.md']`
-* **matrix**: 並列、`<preview-staging-os>` draft へ出力
+* **トリガ**: `push: branches: [main]`, `paths-ignore: ['docs/**', '**/*.md', '.github/ISSUE_TEMPLATE/**']`
+* **matrix**: 並列、`preview-staging-<os>` draft へ出力。Linux は `--bundles deb,appimage`（`.rpm` なし。「バンドルターゲット」参照）
 * **タグ運用**: rolling tag 方式（固定タグ `preview` を force-update）。タグの移動は assemble の昇格が完全成功したときのみ行い、部分ビルドを指さない
 * **assemble**: staging を `preview` リリースへ昇格。`latest.json` ではなく `latest-preview.json` として配置（production と URL を分離）。1 プラットフォームでも失敗した場合は昇格をスキップし、直近の完全ビルドを配信し続ける。旧バージョンのバンドルはこのジョブで掃除する
-* **オプション**: `prerelease: true`, `make_latest: false`
-* **バージョン採番**: base バージョンに `-<n>`（`base-version.txt` 最終更新からのコミット数）を付与。Windows MSI/WiX は pre-release 識別子が数字のみであることを要求するため、`-preview.<n>` のような非数値接頭辞は使えない
+* **オプション**: `preview` リリースは `--prerelease` で作成し、Latest 扱いにしない
+* **バージョン採番**: `packages/app/preview-base-version.txt` の base バージョンに `-<n>`（同ファイル最終更新からのコミット数、`git rev-list --count`）を付与し、`node scripts/sync-version.mjs --preview <n>` で書き込む。`<n>` が 65535 を超えるとジョブは失敗する。Windows MSI/WiX は pre-release 識別子が数字のみであることを要求するため、`-preview.<n>` のような非数値接頭辞は使えない
 
 ### 共通シークレット
 
@@ -95,7 +99,7 @@ packages/app/src-tauri/
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 同上パスワード |
 | `GITHUB_TOKEN` | Release 作成（標準提供） |
 
-OS の code signing 証明書（Windows EV / Apple Developer ID）は初期は導入せず、SmartScreen / Gatekeeper の警告は受容する。導入時に追加シークレットを定義する。
+OS の code signing 証明書（Windows EV / Apple Developer ID）は導入しておらず、SmartScreen / Gatekeeper の警告は受容する。導入時に追加シークレットを定義する。
 
 ---
 
@@ -141,8 +145,8 @@ pnpm tauri signer generate -w ~/.tauri/jot-deck-updater.key
 ## バージョニング規約
 
 * Production: [Semantic Versioning](https://semver.org/) を採用。`v1.2.3`
-* Preview: `1.2.3-<n>` 形式（`<n>` は base バージョンファイル最終更新からのコミット数）。`1.2.3` が次の production リリース予定であることを示す。pre-release 識別子を数字のみにするのは Windows MSI/WiX の制約（非数値・>65535 の pre-release を拒否する）に従うため
-* `package.json` / `Cargo.toml` / `tauri.conf.json` の version を統一する仕組み（`pnpm version` + 同期スクリプト）は別途整備
+* Preview: `1.2.3-<n>` 形式（`<n>` は `packages/app/preview-base-version.txt` 最終更新からのコミット数）。`1.2.3` が次の production リリース予定であることを示す。pre-release 識別子を数字のみにするのは Windows MSI/WiX の制約（非数値・>65535 の pre-release を拒否する）に従うため
+* `package.json` / `Cargo.toml` / `tauri.conf.json` の version は `scripts/sync-version.mjs` で統一する。base バージョンを上げるときは `node scripts/sync-version.mjs <new-version>` を実行してコミットする（`preview-base-version.txt` も同時に更新され、Preview の `<n>` は 0 から数え直しになる）
 
 ---
 
@@ -162,22 +166,22 @@ Preview の Linux ビルドは `.AppImage` と `.deb` のみを生成し、`.rpm
 
 ## 実装フェーズ
 
-### Phase R.1: Updater 機構の組み込み
+### Phase R.1: Updater 機構の組み込み（完了）
 * `tauri-plugin-updater` 追加
 * 署名鍵生成 + GH Secrets 登録
 * フロント側で起動時チェック + 通知 UI
 
 ### Phase R.2: Production リリース workflow
-* `release-production.yml` 作成
-* 初回 `v0.0.0` タグで動作確認
+* `release-production.yml` 作成（完了）
+* 初回 `v*.*.*` タグで動作確認（未実施。Production リリースはまだない）
 
-### Phase R.3: Preview チャンネル分離
+### Phase R.3: Preview チャンネル分離（完了）
 * `tauri.conf.preview.json` 追加
 * `release-preview.yml` 作成
-* rolling `preview` タグ運用開始
+* rolling `preview` タグ運用
 
-### Phase R.4: バージョン同期ツール
-* `package.json` / `Cargo.toml` / `tauri.conf.json` の version を一括更新するスクリプト
+### Phase R.4: バージョン同期ツール（完了）
+* `package.json` / `Cargo.toml` / `tauri.conf.json` の version を一括更新するスクリプト（`scripts/sync-version.mjs`）
 
 ### Phase R.5（将来）: OS code signing
 * Windows EV 証明書 or Apple Developer ID 取得
@@ -188,6 +192,6 @@ Preview の Linux ビルドは `.AppImage` と `.deb` のみを生成し、`.rpm
 ## 既知の制約と運用上の注意
 
 * **チャンネル間移行は手動**: Preview から Production へ「乗り換える」場合、ユーザーは手動で Production をインストールし、必要なら手動でデータを移行する必要がある（自動データ移行は提供しない）
-* **CI コスト**: macOS runner は分単価が高い。`paths-ignore` で docs / 設定変更は除外する
+* **CI コスト**: macOS runner は分単価が高い。Preview は `paths-ignore` で docs / Markdown / Issue テンプレートのみの変更を除外する
 * **Release 一覧の肥大化**: Preview は rolling tag なので 1 件に収まるが、過去の preview を保持したい場合は別運用が必要
 * **updater 鍵の漏洩リスク**: 漏洩した場合は新鍵を発行して全ユーザーに手動再インストールを促す必要がある（updater の信頼チェーンが切れるため）
