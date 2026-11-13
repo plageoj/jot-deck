@@ -603,10 +603,9 @@ export class DeckData {
     return card;
   }
 
-  /** Raw mutation, no error swallowing and no recording — used both by the
-   * public wrapper below and directly by undo/redo effects, so a failure
-   * rejects instead of leaving the history stack advanced past an operation
-   * that never actually happened. */
+  /** Raw mutation, no error swallowing and no recording — used by the undo/redo
+   * effects of a GUI edit, so a failure rejects instead of leaving the history
+   * stack advanced past an operation that never actually happened. */
   private async saveCardImpl(cardId: string, content: string): Promise<void> {
     const updatedCard = await this.db.updateCardContent(cardId, content);
     for (const columnId of Object.keys(this.cardsByColumn)) {
@@ -739,25 +738,6 @@ export class DeckData {
         ];
         return;
       }
-    }
-  }
-
-  async saveCard(cardId: string, content: string, record = true) {
-    const previousContent = this.findCardContent(cardId);
-    const generation = this.history.currentGeneration;
-    try {
-      await this.saveCardImpl(cardId, content);
-      if (record && previousContent !== null && previousContent !== content) {
-        this.history.push(
-          {
-            undo: () => this.saveCardImpl(cardId, previousContent),
-            redo: () => this.saveCardImpl(cardId, content),
-          },
-          generation,
-        );
-      }
-    } catch (e) {
-      this.error = `Failed to save card: ${e}`;
     }
   }
 

@@ -525,11 +525,17 @@ describe("ActionDispatcher.selectColumnFromPalette", () => {
 });
 
 describe("ActionDispatcher destroy", () => {
-  it("destroy resets the key processor and does not throw", async () => {
-    const { data, focus } = await setupBoard();
+  it("destroy drops a pending key sequence", async () => {
+    const { data, focus } = await threeColumnBoard();
     const dispatcher = new ActionDispatcher(data, focus);
+    focus.focusMode = "column";
 
-    expect(() => dispatcher.destroy()).not.toThrow();
+    dispatcher.handleKeydown(makeKeyEvent({ key: "d" }));
+    dispatcher.destroy();
+    dispatcher.handleKeydown(makeKeyEvent({ key: "d" }));
+    await flushPromises();
+
+    expect(boardState.deleteColumnCalls).toEqual([]);
   });
 });
 
@@ -601,11 +607,16 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     expect(focus.focusMode).toBe("edit");
   });
 
-  it("processes a palette trigger while a palette is open (command mode)", () => {
+  it("switches palettes when a palette trigger is pressed while one is open", () => {
+    focus.focusMode = "card";
     focus.openPalette("deck"); // focusMode -> command
     const event = makeKeyEvent({ key: "P", ctrl: true, shift: true });
     dispatcher.handleKeydown(event);
     expect(event.defaultPrevented).toBe(true);
+    expect(focus.activePalette).toBe("command");
+
+    focus.closePalette();
+    expect(focus.focusMode).toBe("card");
   });
 
   it("ignores non-trigger keys while a palette is open", () => {

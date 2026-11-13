@@ -247,9 +247,9 @@ mod tests {
         )
         .unwrap();
 
-        // 初回同期
-        let tags = sync_card_tags(&conn, &c.id, "#tag1 #tag2").unwrap();
-        assert_eq!(tags.len(), 2);
+        // card::create が作成時にタグを同期している
+        let created_tags = get_tags_by_card(&conn, &c.id).unwrap();
+        assert_eq!(created_tags.len(), 2);
 
         // タグを変更
         let tags = sync_card_tags(&conn, &c.id, "#tag2 #tag3").unwrap();
@@ -281,7 +281,7 @@ mod tests {
             },
         )
         .unwrap();
-        let c1 = card::create(
+        card::create(
             &conn,
             NewCard {
                 column_id: col.id.clone(),
@@ -289,7 +289,7 @@ mod tests {
             },
         )
         .unwrap();
-        let c2 = card::create(
+        card::create(
             &conn,
             NewCard {
                 column_id: col.id.clone(),
@@ -297,9 +297,6 @@ mod tests {
             },
         )
         .unwrap();
-
-        sync_card_tags(&conn, &c1.id, &c1.content).unwrap();
-        sync_card_tags(&conn, &c2.id, &c2.content).unwrap();
 
         let tags = get_tags_by_deck(&conn, &d.id).unwrap();
         assert_eq!(tags.len(), 3);
@@ -328,7 +325,7 @@ mod tests {
             },
         )
         .unwrap();
-        let c = card::create(
+        card::create(
             &conn,
             NewCard {
                 column_id: col.id.clone(),
@@ -336,8 +333,6 @@ mod tests {
             },
         )
         .unwrap();
-
-        sync_card_tags(&conn, &c.id, &c.content).unwrap();
 
         let suggestions = get_tag_suggestions(&conn, &d.id, "pro").unwrap();
         assert_eq!(suggestions.len(), 2);

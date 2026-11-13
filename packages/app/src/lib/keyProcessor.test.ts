@@ -137,10 +137,20 @@ describe("KeySequenceProcessor", () => {
     }
   });
 
-  it("reset and destroy clear pending state without throwing", () => {
-    const p = new KeySequenceProcessor();
-    p.process("d", "column"); // arm the timer
-    expect(() => p.reset()).not.toThrow();
-    expect(() => p.destroy()).not.toThrow();
-  });
+  it.each(["reset", "destroy"] as const)(
+    "%s drops a pending prefix and its timeout",
+    (method) => {
+      vi.useFakeTimers();
+      try {
+        const p = new KeySequenceProcessor();
+        p.process("d", "column"); // pending prefix, timer armed
+        p[method]();
+        expect(vi.getTimerCount()).toBe(0);
+        // The next "d" starts a new sequence instead of completing "dd".
+        expect(p.process("d", "column")).toEqual({ type: "prefix" });
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });

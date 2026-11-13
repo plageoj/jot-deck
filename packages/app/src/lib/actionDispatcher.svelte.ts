@@ -36,7 +36,8 @@ export class ActionDispatcher {
   onDeleteDeck: (() => void) | null = null;
   onRenameColumn: (() => void) | null = null;
   onDeleteColumn: (() => void) | null = null;
-  onStartEdit: ((cardId: string, entry?: EditEntry) => void | Promise<void>) | null = null;
+  onStartEdit: (cardId: string, entry?: EditEntry) => void | Promise<void> = (cardId) =>
+    this.focus.startEdit(cardId);
 
   constructor(data: DeckData, focus: FocusManager) {
     this.data = data;

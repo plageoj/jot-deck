@@ -58,11 +58,23 @@ describe("DeckData deck lifecycle", () => {
   });
 
   it("creates a Getting Started deck with seed columns and cards when no decks exist", async () => {
+    const createColumn = vi.spyOn(mockBackend, "createColumn").mockClear();
+    const createCard = vi.spyOn(mockBackend, "createCard").mockClear();
     const fresh = new DeckData();
     await fresh.init();
 
     expect(fresh.decks).toHaveLength(1);
     expect(fresh.decks[0].name).toBe("Getting Started");
+    expect(createColumn.mock.calls.map(([params]) => params.name)).toEqual([
+      "Welcome",
+      "Navigation",
+      "Tips",
+    ]);
+    // Every seed column gets at least one card.
+    const seededColumns = new Set(createCard.mock.calls.map(([params]) => params.column_id));
+    expect(seededColumns.size).toBe(3);
+    createColumn.mockRestore();
+    createCard.mockRestore();
   });
 
   it("restoreOnboardingDeck prepends and selects a fresh deck without removing existing decks", async () => {
@@ -250,8 +262,11 @@ describe("DeckData CRUD", () => {
   });
 
   it("createColumnAtPosition reloads columns and returns the new column", async () => {
+    const reload = vi.spyOn(mockBackend, "getColumnsByDeck").mockClear();
     const col = await data.createColumnAtPosition(0);
     expect(col).not.toBeNull();
+    expect(reload).toHaveBeenCalledOnce();
+    reload.mockRestore();
   });
 
   it("createColumnAtPosition still records the created column when the refresh fails", async () => {
@@ -300,6 +315,8 @@ describe("DeckData CRUD", () => {
     await expect(creating).resolves.toEqual(createdColumn);
     expect(data.columns).toEqual([otherColumn]);
     expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
+    // The create belongs to deck-1's history generation, not the new deck's.
+    expect(data.history.canUndo).toBe(false);
   });
 
   it("createCard without position appends and returns the new card", async () => {
@@ -308,23 +325,13 @@ describe("DeckData CRUD", () => {
     expect(data.cardsByColumn["col-active"].at(-1)?.id).toBe(card!.id);
   });
 
-  it("createCard with position triggers a card reload", async () => {
+  it("createCard with position reloads the board to pick up the shifted positions", async () => {
+    const reload = vi.spyOn(mockBackend, "getCardsByColumn").mockClear();
     const card = await data.createCard("col-active", "with position", 0);
     expect(card).not.toBeNull();
-  });
-
-  it("saveCard replaces the card content for the matching id", async () => {
-    state.cardsByColumn = new Map([
-      ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
-    ]);
-    await data.refreshDeck();
-
-    await data.saveCard("card-1", "new content");
-
-    const stored = data.cardsByColumn["col-active"].find(
-      (c) => c.id === "card-1",
-    );
-    expect(stored?.content).toBe("new content");
+    expect(reload).toHaveBeenCalledWith("col-active");
+    expect(data.cardsByColumn["col-active"].map((c) => c.id)).toContain(card!.id);
+    reload.mockRestore();
   });
 
   it("updateCardScore forwards delta to the backend and is not undoable", async () => {
@@ -384,13 +391,14 @@ describe("DeckData CRUD", () => {
     expect(state.deleteColumnCalls).toEqual(["col-active", "col-active"]);
   });
 
-  it("saveCard undo restores the previous content, redo re-applies the new content", async () => {
+  it("saveCardEdit undo restores the previous content, redo re-applies the new content", async () => {
     state.cardsByColumn = new Map([
       ["col-active", [makeCard("card-1", "col-active", { content: "old" })]],
     ]);
     await data.refreshDeck();
 
-    await data.saveCard("card-1", "new content");
+    const session = await data.startCardEdit("card-1");
+    expect(await data.saveCardEdit(session!, "new content", true)).toBe(true);
     expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
 
     await data.history.undo();
@@ -481,16 +489,17 @@ describe("DeckData CRUD", () => {
     state.columns = [makeColumn("col-2", "deck-2")];
     state.cardsByColumn = new Map([["col-2", []]]);
 
-    // Hold up saveCard's DB round-trip until after the deck switch completes.
+    // Hold up the edit save's DB round-trip until after the deck switch completes.
     let releaseSave: () => void = () => {};
     const gate = new Promise<void>((resolve) => (releaseSave = resolve));
-    const original = mockBackend.updateCardContent!;
-    mockBackend.updateCardContent = async (id, content) => {
+    const original = mockBackend.updateCardContentCasOwned!;
+    mockBackend.updateCardContentCasOwned = async (...args) => {
       await gate;
-      return original(id, content);
+      return original(...args);
     };
 
-    const savePromise = data.saveCard("card-1", "edited while switching");
+    const session = await data.startCardEdit("card-1");
+    const savePromise = data.saveCardEdit(session!, "edited while switching");
     await data.selectDeck(state.decks[1]);
     expect(data.history.canUndo).toBe(false);
 
@@ -500,7 +509,7 @@ describe("DeckData CRUD", () => {
     // The stale save must not have pushed onto deck-2's fresh history.
     expect(data.history.canUndo).toBe(false);
 
-    mockBackend.updateCardContent = original;
+    mockBackend.updateCardContentCasOwned = original;
   });
 
   it("undo surfaces a rejected effect and restores the entry for a retry", async () => {
@@ -544,10 +553,23 @@ describe("DeckData card edit sessions", () => {
 
     const session = await data.startCardEdit("card-1");
     expect(session).not.toBeNull();
+    const releaseAndSave = vi
+      .spyOn(mockBackend, "updateCardContentCasAndRelease")
+      .mockClear();
+
     expect(await data.saveCardEdit(session!, "new content")).toBe(true);
     expect(data.cardsByColumn["col-active"][0].content).toBe("new content");
+    expect(releaseAndSave).not.toHaveBeenCalled();
+    // :w keeps the session, so the same session can save again.
     expect(await data.saveCardEdit(session!, "final content", true)).toBe(true);
     expect(data.cardsByColumn["col-active"][0].content).toBe("final content");
+    expect(releaseAndSave).toHaveBeenCalledOnce();
+
+    // :wq released the lock: the session can no longer save.
+    expect(await data.saveCardEdit(session!, "after release")).toBe(false);
+    expect(data.error).toContain("edit lock is not held");
+    expect(data.cardsByColumn["col-active"][0].content).toBe("final content");
+    releaseAndSave.mockRestore();
   });
 
   it("GUI edit cancellation releases the lock without changing content", async () => {

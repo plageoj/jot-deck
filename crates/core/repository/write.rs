@@ -790,13 +790,14 @@ mod tests {
 
     #[test]
     fn idempotency_key_is_purged_when_card_is_physically_deleted() {
-        let f = setup();
+        let mut f = setup();
         let a = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", Some("k"), &sc(), &au()).unwrap();
-        // Simulate the 30-day cleanup physically removing the card; the ON DELETE
+        // The physical-deletion batch removes the expired card; the ON DELETE
         // CASCADE FK drops the idempotency key with it.
-        f.conn
-            .execute("DELETE FROM cards WHERE id = ?1", params![a.id])
-            .unwrap();
+        card::soft_delete(&f.conn, &a.id).unwrap();
+        let after_everything = (chrono::Utc::now() + chrono::Duration::days(1)).to_rfc3339();
+        let purged = crate::cleanup::cleanup_with_threshold(&mut f.conn, &after_everything).unwrap();
+        assert_eq!(purged.deleted_cards, 1);
         // The same key now creates a fresh card instead of resolving to the gone one.
         let b = append_card(&f.conn, &f.deck_id, &f.public_col, "again", Some("k"), &sc(), &au()).unwrap();
         assert_ne!(a.id, b.id);
@@ -1004,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_column_creates_when_allowed() {
+    fn ensure_column_creates_when_unrestricted() {
         let f = setup();
         let r = ensure_column(&f.conn, &f.deck_id, "Research", "papers to read", false, &sc(), &au()).unwrap();
         assert!(r.created);
@@ -1223,7 +1224,7 @@ mod tests {
         let f = setup();
         column::update(&f.conn, &f.public_col, Some("Inbox"), None, None).unwrap();
         let scope = only(&f.public_col);
-        // allow_create=false (bridge derives it from the allowlist); in-scope get works.
+        // A write allowlist disables creation; an in-scope get still works.
         let got = ensure_column(&f.conn, &f.deck_id, "Inbox", "d", false, &scope, &au()).unwrap();
         assert!(!got.created);
         assert_eq!(got.column.id, f.public_col);

@@ -156,12 +156,13 @@ export class FocusManager {
     return null;
   }
 
-  cancelEdit() {
-    this.editingCardId = null;
-  }
-
   openPalette(type: PaletteType) {
-    if (this.focusMode === "command") return;
+    if (this.focusMode === "command") {
+      // A palette trigger while another palette is open switches to it;
+      // previousFocusMode still points at the board mode to return to.
+      if (this.activePalette) this.activePalette = type;
+      return;
+    }
     this.showCheatsheet = false;
     this.linkHints = null;
     this.previousFocusMode = this.focusMode;
