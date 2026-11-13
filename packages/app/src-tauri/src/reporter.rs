@@ -178,8 +178,13 @@ fn load_configs(conn: &Connection) -> CommandResult<Vec<ReporterConfig>> {
     for (key, json) in &legacy {
         let deck_id = &key[LEGACY_KEY_PREFIX.len()..];
         for mut config in parse_configs(key, json)? {
-            if configs.iter().any(|c| c.reporter_id == config.reporter_id) {
-                continue;
+            // Ids were only unique within one Deck (and a caller could supply
+            // one), so a clash across Decks gets a fresh id instead of being
+            // dropped — every registration keeps its Deck.
+            if config.reporter_id.is_empty()
+                || configs.iter().any(|c| c.reporter_id == config.reporter_id)
+            {
+                config.reporter_id = ulid::Ulid::generate().to_string();
             }
             config.deck_ids = Some(vec![deck_id.to_string()]);
             configs.push(config);
@@ -655,5 +660,35 @@ mod tests {
         let err = load_configs(&conn).unwrap_err();
         assert!(err.message.contains("reporters:deck-a"), "{}", err.message);
         assert!(setting::get(&conn, "reporters:deck-a").unwrap().is_some());
+    }
+
+    #[test]
+    fn migration_keeps_registrations_whose_ids_clash_across_decks() {
+        let conn = jot_deck_core::create_in_memory().unwrap();
+        setting::set(
+            &conn,
+            "reporters:deck-a",
+            r#"[{"reporter_id":"same","name":"A","command":"/bin/a"}]"#,
+        )
+        .unwrap();
+        setting::set(
+            &conn,
+            "reporters:deck-b",
+            r#"[{"reporter_id":"same","name":"B","command":"/bin/b"},{"reporter_id":"","name":"C","command":"/bin/c"}]"#,
+        )
+        .unwrap();
+
+        let loaded = load_configs(&conn).unwrap();
+        let by_name = |name: &str| loaded.iter().find(|c| c.name == name).unwrap();
+        assert_eq!(loaded.len(), 3);
+        // The first keeps its id; the clash and the empty id get fresh ones.
+        assert_eq!(by_name("A").reporter_id, "same");
+        assert_ne!(by_name("B").reporter_id, "same");
+        assert!(!by_name("C").reporter_id.is_empty());
+        assert_ne!(by_name("B").reporter_id, by_name("C").reporter_id);
+        // Each keeps the Deck it was registered under.
+        assert_eq!(by_name("A").deck_ids, Some(vec!["deck-a".to_string()]));
+        assert_eq!(by_name("B").deck_ids, Some(vec!["deck-b".to_string()]));
+        assert_eq!(by_name("C").deck_ids, Some(vec!["deck-b".to_string()]));
     }
 }

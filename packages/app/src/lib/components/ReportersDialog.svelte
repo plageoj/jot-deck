@@ -45,6 +45,9 @@
   // Columns per deck id, loaded with the list: row summaries name allowlisted
   // columns of any deck, and the form offers the columns of the decks in scope.
   let columnsByDeck = $state<Record<string, Column[]>>({});
+  // Decks whose columns failed to load, keyed by deck id. Loaded apart from the
+  // reporter list so one failing deck never hides the Start / Stop controls.
+  let columnErrors = $state<Record<string, string>>({});
   // Ids of Reporters currently running. Plain array (not Set) so reassignment
   // drives Svelte reactivity predictably.
   let running = $state<string[]>([]);
@@ -104,31 +107,40 @@
     draftAllDecks ? decks : decks.filter((d) => draftDecks.includes(d.id)),
   );
 
-  async function loadAllColumns(): Promise<Record<string, Column[]>> {
-    const entries = await Promise.all(
-      decks.map(async (d) => [d.id, await loadColumns(d.id)] as const),
-    );
-    return Object.fromEntries(entries);
+  /** Every deck's columns; a deck that fails lands in `errors`, never throws. */
+  async function loadAllColumns(): Promise<{
+    columns: Record<string, Column[]>;
+    errors: Record<string, string>;
+  }> {
+    const results = await Promise.allSettled(decks.map((d) => loadColumns(d.id)));
+    const columns: Record<string, Column[]> = {};
+    const errors: Record<string, string> = {};
+    results.forEach((result, i) => {
+      const id = decks[i].id;
+      if (result.status === "fulfilled") columns[id] = result.value;
+      else errors[id] = `${result.reason}`;
+    });
+    return { columns, errors };
   }
 
   async function load() {
     loading = true;
     loadError = null;
+    const columnsTask = loadAllColumns();
     try {
-      const [list, run, cols] = await Promise.all([
-        listReporters(),
-        listRunning(),
-        loadAllColumns(),
-      ]);
+      const [list, run] = await Promise.all([listReporters(), listRunning()]);
       configs = list;
       running = run;
-      columnsByDeck = cols;
     } catch (e) {
       loadError = `Failed to load reporters: ${e}`;
-    } finally {
-      loading = false;
     }
+    const loaded = await columnsTask;
+    columnsByDeck = loaded.columns;
+    columnErrors = loaded.errors;
+    loading = false;
   }
+
+  const columnsIncomplete = $derived(Object.keys(columnErrors).length > 0);
 
   onMount(async () => {
     dialogRef?.showModal();
@@ -251,9 +263,10 @@
       r.max_writes_per_min === null ? "" : String(r.max_writes_per_min);
     draftRestrictColumns = r.allowed_columns !== null;
     // Ids of columns that no longer exist are dropped: the allowlist only ever
-    // holds columns the user can see and confirm here.
-    draftColumns = (r.allowed_columns ?? []).filter((id) =>
-      allColumns.some((c) => c.id === id),
+    // holds columns the user can see and confirm here. While some deck's
+    // columns failed to load, unknown ids may just be unseen, so they stay.
+    draftColumns = (r.allowed_columns ?? []).filter(
+      (id) => columnsIncomplete || allColumns.some((c) => c.id === id),
     );
     formError = null;
     formMode = "edit";
@@ -297,7 +310,9 @@
     let cols = "All columns";
     if (r.allowed_columns !== null) {
       const names = r.allowed_columns.map(
-        (id) => allColumns.find((c) => c.id === id)?.name ?? "(removed column)",
+        (id) =>
+          allColumns.find((c) => c.id === id)?.name ??
+          (columnsIncomplete ? "(unavailable column)" : "(removed column)"),
       );
       cols = `Columns: ${names.join(", ")}`;
     }
@@ -357,6 +372,15 @@
     }
     if (!draftAllDecks && draftDecks.length === 0) {
       formError = "Select at least one deck, or allow all decks.";
+      return;
+    }
+    // Saving a restricted allowlist rebuilds it from the loaded columns, so a
+    // deck whose columns didn't load would silently lose its entries.
+    const unloaded = scopeDecks.filter((d) => d.id in columnErrors);
+    if (draftRestrictColumns && unloaded.length > 0) {
+      formError = `Couldn't load the columns of ${unloaded
+        .map((d) => d.name)
+        .join(", ")}. Reopen this dialog to retry, or allow all columns.`;
       return;
     }
     // Only columns of the decks in scope: one outside it could never be written.
@@ -673,6 +697,11 @@
                     {#if scopeDecks.length > 1}
                       <span class="deck-group-name">{d.name}</span>
                     {/if}
+                    {#if columnErrors[d.id]}
+                      <span class="error-text"
+                        >Couldn't load columns: {columnErrors[d.id]}</span
+                      >
+                    {/if}
                     {#each columnsByDeck[d.id] ?? [] as col (col.id)}
                       <label class="check" class:disabled={col.private}>
                         <input
@@ -685,7 +714,9 @@
                         {col.name}{col.private ? " (private)" : ""}
                       </label>
                     {:else}
-                      <span class="hint">This deck has no columns yet.</span>
+                      {#if !columnErrors[d.id]}
+                        <span class="hint">This deck has no columns yet.</span>
+                      {/if}
                     {/each}
                   {:else}
                     <span class="hint">Select a deck first.</span>

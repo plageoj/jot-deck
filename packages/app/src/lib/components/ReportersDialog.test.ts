@@ -172,6 +172,55 @@ describe("ReportersDialog listing", () => {
       screen.queryByText("No reporters registered yet."),
     ).toBeNull();
   });
+
+  /** Columns load for deck-1 but fail for deck-2. */
+  const failingColumns = vi.fn(async (deckId: string) => {
+    if (deckId === "deck-2") throw new Error("deck locked");
+    return COLUMNS_BY_DECK[deckId] ?? [];
+  });
+
+  it("keeps the reporter controls when a deck's columns fail to load", async () => {
+    await renderDialog({
+      loadColumns: failingColumns,
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", { deck_ids: ["deck-2"], allowed_columns: ["col-9"] }),
+      ]),
+    });
+
+    expect(screen.queryByText(/Failed to load reporters/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Start" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    // An allowlisted column it couldn't look up isn't called "removed".
+    expect(screen.getByText(/Columns: \(unavailable column\)/)).toBeTruthy();
+  });
+
+  it("blocks saving a column allowlist for a deck whose columns didn't load", async () => {
+    const props = await renderDialog({
+      loadColumns: failingColumns,
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", { deck_ids: ["deck-2"], allowed_columns: ["col-9"] }),
+      ]),
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByText(/Couldn't load columns: .*deck locked/)).toBeTruthy();
+    expect(screen.queryByText("This deck has no columns yet.")).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      screen.getByText(
+        "Couldn't load the columns of Work. Reopen this dialog to retry, or allow all columns.",
+      ),
+    ).toBeTruthy();
+    expect(props.onUpdate).not.toHaveBeenCalled();
+
+    // Widening to all columns needs no column list, so it saves.
+    await fireEvent.click(screen.getByLabelText("All columns"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ deck_ids: ["deck-2"], allowed_columns: null }),
+    );
+  });
 });
 
 describe("ReportersDialog start/stop", () => {
