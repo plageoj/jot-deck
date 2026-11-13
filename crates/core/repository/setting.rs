@@ -35,6 +35,23 @@ pub fn set(conn: &Connection, key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// キーが `prefix` で始まる設定を (key, value) のキー順で返す。
+pub fn list_by_prefix(conn: &Connection, prefix: &str) -> Result<Vec<(String, String)>> {
+    let mut stmt = conn.prepare(
+        "SELECT key, value FROM settings WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+    )?;
+    let rows = stmt
+        .query_map(params![prefix], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// 指定キーの設定を削除する（無ければ何もしない）。
+pub fn delete(conn: &Connection, key: &str) -> Result<()> {
+    conn.execute("DELETE FROM settings WHERE key = ?1", params![key])?;
+    Ok(())
+}
+
 /// GUI の直近アクティブ Deck ID を取得する。未保存・不正な値なら `None`。
 pub fn get_active_deck_id(conn: &Connection) -> Result<Option<String>> {
     Ok(get(conn, ACTIVE_DECK_KEY)?
@@ -98,5 +115,28 @@ mod tests {
         let conn = create_in_memory().unwrap();
         set(&conn, ACTIVE_DECK_KEY, "not json").unwrap();
         assert_eq!(get_active_deck_id(&conn).unwrap(), None);
+    }
+
+    #[test]
+    fn lists_by_prefix_literally_and_deletes() {
+        let conn = create_in_memory().unwrap();
+        set(&conn, "reporters:b", "2").unwrap();
+        set(&conn, "reporters:a", "1").unwrap();
+        set(&conn, "reporters", "[]").unwrap();
+        // `_` and `%` are not wildcards here.
+        set(&conn, "reportersXa", "x").unwrap();
+        assert_eq!(
+            list_by_prefix(&conn, "reporters:").unwrap(),
+            vec![
+                ("reporters:a".to_string(), "1".to_string()),
+                ("reporters:b".to_string(), "2".to_string()),
+            ]
+        );
+        assert!(list_by_prefix(&conn, "reporters_").unwrap().is_empty());
+
+        delete(&conn, "reporters:a").unwrap();
+        delete(&conn, "missing").unwrap();
+        assert_eq!(get(&conn, "reporters:a").unwrap(), None);
+        assert_eq!(get(&conn, "reporters:b").unwrap(), Some("2".to_string()));
     }
 }

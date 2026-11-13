@@ -465,27 +465,29 @@ export class DeckData {
   // dialog can surface failures inline per Reporter row rather than as a
   // board-wide error banner.
 
-  listReporters(deckId: string): Promise<ReporterConfig[]> {
-    return this.db.listReporters(deckId);
+  listReporters(): Promise<ReporterConfig[]> {
+    return this.db.listReporters();
   }
 
-  addReporter(deckId: string, config: ReporterConfig): Promise<ReporterConfig> {
-    return this.db.addReporter(deckId, config);
+  /** Any deck's columns, for a Reporter's column allowlist (it may span decks). */
+  listDeckColumns(deckId: string): Promise<Column[]> {
+    return this.db.getColumnsByDeck(deckId);
   }
 
-  updateReporter(
-    deckId: string,
-    config: ReporterConfig,
-  ): Promise<ReporterConfig> {
-    return this.db.updateReporter(deckId, config);
+  addReporter(config: ReporterConfig): Promise<ReporterConfig> {
+    return this.db.addReporter(config);
   }
 
-  removeReporter(deckId: string, reporterId: string): Promise<void> {
-    return this.db.removeReporter(deckId, reporterId);
+  updateReporter(config: ReporterConfig): Promise<ReporterConfig> {
+    return this.db.updateReporter(config);
   }
 
-  startReporter(deckId: string, reporterId: string): Promise<void> {
-    return this.db.startReporter(deckId, reporterId);
+  removeReporter(reporterId: string): Promise<void> {
+    return this.db.removeReporter(reporterId);
+  }
+
+  startReporter(reporterId: string): Promise<void> {
+    return this.db.startReporter(reporterId);
   }
 
   stopReporter(reporterId: string): Promise<void> {

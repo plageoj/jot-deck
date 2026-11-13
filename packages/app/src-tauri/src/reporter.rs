@@ -1,16 +1,15 @@
-//! Reporter host layer (007-reporter-protocol.md §2.2, Phase 1).
+//! Reporter host layer (007-reporter-protocol.md §2.2).
 //!
 //! Jot Deck spawns each configured Reporter as a child process and **owns the
 //! stdio pipe** (the inverse of the MCP bridge, which Claude spawns). This module
 //! is the thin Tauri half: it spawns children, pumps the bidirectional stdio, and
 //! turns committed writes into a frontend change event. The transport-agnostic
-//! core — JSON-RPC dispatch onto `jot_deck_core::write`/`query` and the
-//! per-Reporter scope — lives in the `jot-deck-reporter-host` crate.
+//! core — JSON-RPC dispatch onto `jot_deck_core::access` and the per-Reporter
+//! scope — lives in the `jot-deck-reporter-host` crate.
 //!
 //! Lifecycle is subordinate to the parent (007 §2.2): children spawn with
 //! `kill_on_drop`, and a stop aborts the pump task, which drops the child and
-//! kills the process. The confirmed channel only (Phase 1); the ephemeral stream
-//! (`card.stream.*`) is Phase 2.
+//! kills the process.
 
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -18,6 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use jot_deck_core::repository::setting;
+use jot_deck_core::Connection;
 use jot_deck_reporter_host::{
     handle_message, peek_ephemeral, Capabilities, Committed, ReporterScope,
 };
@@ -48,10 +48,12 @@ const REPORTER_STREAM_EVENT: &str = "reporter-stream";
 /// "Running" badge without polling.
 const REPORTER_EXIT_EVENT: &str = "reporter-exit";
 
-/// Persisted registration for one Reporter, stored as a JSON array under the
-/// settings key `reporters:{deck_id}`. `command` is the absolute binary path the
-/// power-user registers (007 §2.2); `deny`/`max_writes_per_min`/`allowed_columns`
-/// carry the per-Reporter auth scope (007 §10).
+/// Persisted registration for one Reporter, stored in a JSON array under the
+/// settings key `reporters`. `command` is the absolute binary path the
+/// power-user registers (007 §2.2); `deck_ids` / `deny` / `max_writes_per_min` /
+/// `allowed_columns` carry the per-Reporter auth scope (007 §2.3) — the same
+/// limits `JOT_DECK_DECK_ID` / `JOT_DECK_DENY` / `JOT_DECK_MAX_WRITES_PER_MIN` /
+/// `JOT_DECK_WRITE_COLUMNS` put on an MCP connection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReporterConfig {
     /// Stable id (ULID) assigned on add; also the occupancy-lock holder in Phase 2.
@@ -59,6 +61,10 @@ pub struct ReporterConfig {
     pub reporter_id: String,
     /// Human-readable label shown in the registration UI.
     pub name: String,
+    /// Decks the Reporter may address; `None` = every Deck (then Deck-level
+    /// calls must name a `deck_id`). One Deck lets calls omit it.
+    #[serde(default)]
+    pub deck_ids: Option<Vec<String>>,
     /// Absolute path to the Reporter binary.
     pub command: String,
     #[serde(default)]
@@ -71,7 +77,8 @@ pub struct ReporterConfig {
     /// Per-Reporter write rate cap; `None` uses the host default.
     #[serde(default)]
     pub max_writes_per_min: Option<usize>,
-    /// Optional write allowlist by column ULID; `None` = the whole Deck.
+    /// Optional write allowlist by column ULID (any of its Decks); `None` =
+    /// every visible column.
     #[serde(default)]
     pub allowed_columns: Option<Vec<String>>,
 }
@@ -79,16 +86,28 @@ pub struct ReporterConfig {
 impl ReporterConfig {
     /// Build the runtime auth scope this registration authorizes. Fail-closed:
     /// a scope that can't be honored exactly (unknown capability, zero rate,
-    /// empty allowlist) is an error rather than a silently wider grant.
+    /// empty Deck list, empty allowlist) is an error rather than a silently
+    /// wider grant.
     fn to_scope(&self) -> CommandResult<ReporterScope> {
-        let capabilities = Capabilities::try_from_deny(&self.deny).map_err(|unknown| {
-            CommandError {
+        let (capabilities, unknown) =
+            Capabilities::from_deny(self.deny.iter().map(String::as_str));
+        if !unknown.is_empty() {
+            return Err(CommandError {
                 message: format!(
                     "Unknown capability in deny list: {} (expected append/edit/delete/structure)",
                     unknown.join(", ")
                 ),
-            }
-        })?;
+            });
+        }
+        if self
+            .deck_ids
+            .as_ref()
+            .is_some_and(|ids| ids.iter().all(|id| id.trim().is_empty()))
+        {
+            return Err(CommandError {
+                message: "Deck list must name at least one Deck.".to_string(),
+            });
+        }
         if self.max_writes_per_min == Some(0) {
             return Err(CommandError {
                 message: "Max writes per minute must be at least 1.".to_string(),
@@ -103,6 +122,7 @@ impl ReporterConfig {
             .max_writes_per_min
             .unwrap_or(jot_deck_reporter_host::DEFAULT_MAX_WRITES_PER_MIN);
         Ok(ReporterScope::new(
+            self.deck_ids.clone(),
             capabilities,
             max,
             self.allowed_columns.clone(),
@@ -129,59 +149,83 @@ pub struct ReporterRegistry {
     next_run_id: AtomicU64,
 }
 
-/// The settings key holding a deck's Reporter registrations.
-fn config_key(deck_id: &str) -> String {
-    format!("reporters:{}", deck_id)
+/// The settings key holding every Reporter registration.
+const REPORTERS_KEY: &str = "reporters";
+
+/// Prefix of the per-Deck keys (`reporters:{deck_id}`) registrations were kept
+/// under before they spanned Decks; `load_configs` folds them into
+/// `REPORTERS_KEY`.
+const LEGACY_KEY_PREFIX: &str = "reporters:";
+
+fn parse_configs(key: &str, json: &str) -> CommandResult<Vec<ReporterConfig>> {
+    serde_json::from_str(json).map_err(|e| CommandError {
+        message: format!("Corrupt reporter config under '{}': {}", key, e),
+    })
 }
 
-/// Load a deck's Reporter registrations (empty when unset).
-fn load_configs(state: &State<AppState>, deck_id: &str) -> CommandResult<Vec<ReporterConfig>> {
-    let conn = get_conn(state)?;
-    let raw = setting::get(&conn, &config_key(deck_id)).map_err(CommandError::from)?;
-    match raw {
-        None => Ok(Vec::new()),
-        Some(json) => serde_json::from_str(&json).map_err(|e| CommandError {
-            message: format!("Corrupt reporter config for deck {}: {}", deck_id, e),
-        }),
+/// Load every Reporter registration (empty when unset). Registrations still
+/// under a per-Deck key are moved into the global list first, limited to that
+/// Deck so a Reporter never reaches more than it did before.
+fn load_configs(conn: &Connection) -> CommandResult<Vec<ReporterConfig>> {
+    let mut configs = match setting::get(conn, REPORTERS_KEY).map_err(CommandError::from)? {
+        None => Vec::new(),
+        Some(json) => parse_configs(REPORTERS_KEY, &json)?,
+    };
+    let legacy = setting::list_by_prefix(conn, LEGACY_KEY_PREFIX).map_err(CommandError::from)?;
+    if legacy.is_empty() {
+        return Ok(configs);
     }
+    for (key, json) in &legacy {
+        let deck_id = &key[LEGACY_KEY_PREFIX.len()..];
+        for mut config in parse_configs(key, json)? {
+            if configs.iter().any(|c| c.reporter_id == config.reporter_id) {
+                continue;
+            }
+            config.deck_ids = Some(vec![deck_id.to_string()]);
+            configs.push(config);
+        }
+    }
+    let tx = conn.unchecked_transaction().map_err(|e| CommandError {
+        message: format!("Failed to migrate reporter config: {}", e),
+    })?;
+    save_configs(&tx, &configs)?;
+    for (key, _) in &legacy {
+        setting::delete(&tx, key).map_err(CommandError::from)?;
+    }
+    tx.commit().map_err(|e| CommandError {
+        message: format!("Failed to migrate reporter config: {}", e),
+    })?;
+    Ok(configs)
 }
 
-/// Persist a deck's Reporter registrations.
-fn save_configs(
-    state: &State<AppState>,
-    deck_id: &str,
-    configs: &[ReporterConfig],
-) -> CommandResult<()> {
+/// Persist every Reporter registration.
+fn save_configs(conn: &Connection, configs: &[ReporterConfig]) -> CommandResult<()> {
     let json = serde_json::to_string(configs).map_err(|e| CommandError {
         message: format!("Failed to serialize reporter config: {}", e),
     })?;
-    let conn = get_conn(state)?;
-    setting::set(&conn, &config_key(deck_id), &json).map_err(CommandError::from)
+    setting::set(conn, REPORTERS_KEY, &json).map_err(CommandError::from)
 }
 
-/// List a deck's registered Reporters.
+/// List every registered Reporter.
 #[tauri::command]
-pub fn list_reporters(
-    state: State<AppState>,
-    deck_id: String,
-) -> CommandResult<Vec<ReporterConfig>> {
-    load_configs(&state, &deck_id)
+pub fn list_reporters(state: State<AppState>) -> CommandResult<Vec<ReporterConfig>> {
+    load_configs(&*get_conn(&state)?)
 }
 
-/// Register a new Reporter for a deck; assigns and returns a `reporter_id`.
+/// Register a new Reporter; assigns and returns a `reporter_id`.
 #[tauri::command]
 pub fn add_reporter(
     state: State<AppState>,
-    deck_id: String,
     mut config: ReporterConfig,
 ) -> CommandResult<ReporterConfig> {
     if config.reporter_id.is_empty() {
         config.reporter_id = ulid::Ulid::generate().to_string();
     }
     config.to_scope()?;
-    let mut configs = load_configs(&state, &deck_id)?;
+    let conn = get_conn(&state)?;
+    let mut configs = load_configs(&conn)?;
     configs.push(config.clone());
-    save_configs(&state, &deck_id, &configs)?;
+    save_configs(&conn, &configs)?;
     Ok(config)
 }
 
@@ -192,11 +236,11 @@ pub fn add_reporter(
 #[tauri::command]
 pub fn update_reporter(
     state: State<AppState>,
-    deck_id: String,
     config: ReporterConfig,
 ) -> CommandResult<ReporterConfig> {
     config.to_scope()?;
-    let mut configs = load_configs(&state, &deck_id)?;
+    let conn = get_conn(&state)?;
+    let mut configs = load_configs(&conn)?;
     let slot = configs
         .iter_mut()
         .find(|c| c.reporter_id == config.reporter_id)
@@ -204,12 +248,11 @@ pub fn update_reporter(
             message: format!("No reporter registered with id {}", config.reporter_id),
         })?;
     *slot = config.clone();
-    save_configs(&state, &deck_id, &configs)?;
+    save_configs(&conn, &configs)?;
     Ok(config)
 }
 
-/// List the ids of Reporters currently running. The registry spans decks, so the
-/// caller intersects this with its own deck's registrations.
+/// List the ids of Reporters currently running.
 #[tauri::command]
 pub fn list_running_reporters(registry: State<ReporterRegistry>) -> CommandResult<Vec<String>> {
     let running = registry.running.lock().unwrap_or_else(|e| e.into_inner());
@@ -222,14 +265,14 @@ pub fn remove_reporter(
     app: AppHandle,
     state: State<AppState>,
     registry: State<ReporterRegistry>,
-    deck_id: String,
     reporter_id: String,
 ) -> CommandResult<()> {
     stop_running(&registry, &reporter_id);
     let _ = app; // reserved for future teardown signalling
-    let mut configs = load_configs(&state, &deck_id)?;
+    let conn = get_conn(&state)?;
+    let mut configs = load_configs(&conn)?;
     configs.retain(|c| c.reporter_id != reporter_id);
-    save_configs(&state, &deck_id, &configs)
+    save_configs(&conn, &configs)
 }
 
 /// Abort a running Reporter's pump task (dropping the child → `kill_on_drop`).
@@ -256,7 +299,6 @@ pub fn start_reporter(
     app: AppHandle,
     state: State<AppState>,
     registry: State<ReporterRegistry>,
-    deck_id: String,
     reporter_id: String,
 ) -> CommandResult<()> {
     {
@@ -269,7 +311,7 @@ pub fn start_reporter(
         }
     }
 
-    let config = load_configs(&state, &deck_id)?
+    let config = load_configs(&*get_conn(&state)?)?
         .into_iter()
         .find(|c| c.reporter_id == reporter_id)
         .ok_or_else(|| CommandError {
@@ -278,7 +320,6 @@ pub fn start_reporter(
 
     let scope = std::sync::Arc::new(config.to_scope()?);
     let handle = app.clone();
-    let deck_id_task = deck_id.clone();
     let reporter_id_task = reporter_id.clone();
 
     // The child is spawned *inside* the async task (tokio::process needs the
@@ -373,7 +414,6 @@ pub fn start_reporter(
             // spawn_blocking needs a 'static owned message (it can't borrow `buf`).
             let line_owned = line.to_string();
             let handle_blocking = handle.clone();
-            let deck_blocking = deck_id_task.clone();
             let scope_blocking = scope.clone();
             // The DB call is synchronous rusqlite behind a std Mutex; run it on a
             // blocking thread so the async worker isn't stalled while it holds the
@@ -381,7 +421,7 @@ pub fn start_reporter(
             let handled = tauri::async_runtime::spawn_blocking(move || {
                 let state = handle_blocking.state::<AppState>();
                 let conn = state.conn.lock().unwrap_or_else(|e| e.into_inner());
-                handle_message(&conn, &deck_blocking, &scope_blocking, &line_owned)
+                handle_message(&conn, &scope_blocking, &line_owned)
             })
             .await;
 
@@ -511,6 +551,7 @@ mod tests {
         ReporterConfig {
             reporter_id: "r1".to_string(),
             name: "Minutes".to_string(),
+            deck_ids: None,
             command: "/opt/whisper".to_string(),
             args: Vec::new(),
             env: HashMap::new(),
@@ -561,5 +602,58 @@ mod tests {
             ..config()
         };
         assert!(empty_allowlist.to_scope().is_err());
+        let no_decks = ReporterConfig {
+            deck_ids: Some(vec![" ".to_string()]),
+            ..config()
+        };
+        assert!(no_decks.to_scope().is_err());
+    }
+
+    #[test]
+    fn load_configs_moves_per_deck_registrations_into_the_global_list() {
+        let conn = jot_deck_core::create_in_memory().unwrap();
+        let mut global = config();
+        global.reporter_id = "g".to_string();
+        save_configs(&conn, &[global]).unwrap();
+        // Older per-Deck entries carry no `deck_ids` field.
+        setting::set(
+            &conn,
+            "reporters:deck-a",
+            r#"[{"reporter_id":"a","name":"A","command":"/bin/a"}]"#,
+        )
+        .unwrap();
+        setting::set(
+            &conn,
+            "reporters:deck-b",
+            r#"[{"reporter_id":"b","name":"B","command":"/bin/b","allowed_columns":["c1"]}]"#,
+        )
+        .unwrap();
+
+        let loaded = load_configs(&conn).unwrap();
+        let decks: Vec<(&str, Option<Vec<String>>)> = loaded
+            .iter()
+            .map(|c| (c.reporter_id.as_str(), c.deck_ids.clone()))
+            .collect();
+        assert_eq!(
+            decks,
+            vec![
+                ("g", None),
+                ("a", Some(vec!["deck-a".to_string()])),
+                ("b", Some(vec!["deck-b".to_string()])),
+            ]
+        );
+        assert_eq!(loaded[2].allowed_columns, Some(vec!["c1".to_string()]));
+        // Migrated once: the per-Deck keys are gone and a reload is stable.
+        assert!(setting::list_by_prefix(&conn, LEGACY_KEY_PREFIX).unwrap().is_empty());
+        assert_eq!(load_configs(&conn).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn corrupt_legacy_config_is_reported_and_kept() {
+        let conn = jot_deck_core::create_in_memory().unwrap();
+        setting::set(&conn, "reporters:deck-a", "not json").unwrap();
+        let err = load_configs(&conn).unwrap_err();
+        assert!(err.message.contains("reporters:deck-a"), "{}", err.message);
+        assert!(setting::get(&conn, "reporters:deck-a").unwrap().is_some());
     }
 }
