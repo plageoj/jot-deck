@@ -53,7 +53,7 @@ cargo run -p jot-deck-mcp
 ```
 Optional environment variables (all unset by default):
 - `JOT_DECK_DECK_ID` — comma list of Deck ids the connection is limited to (with one, calls may omit `deck_id`); unset, any local Deck is addressed via a `deck_id` argument per call
-- `JOT_DECK_DB_PATH` — overrides the DB path
+- `JOT_DECK_DB_PATH` — overrides the DB path (unset: the Production app data dir `com.jot-deck.app`)
 - `JOT_DECK_DENY` — comma list of write capabilities to disable (`append`, `edit`, `delete`, `structure`)
 - `JOT_DECK_MAX_WRITES_PER_MIN` — per-connection write rate cap (default 120)
 - `JOT_DECK_WRITE_COLUMNS` — comma list of column ids writes are restricted to (also disables `ensure_column` creation)
@@ -62,10 +62,11 @@ Speaks JSON-RPC 2.0 over stdio. Read tools: `list_decks`, `describe_deck`, `list
 `read_card`, `search_cards`, `recent_cards`; write tools: `append_card`, `patch_card`,
 `move_card`, `delete_card`, `ensure_column`, `update_column`, `move_column`.
 Spawned by an MCP host (Claude Desktop / Claude Code)
-via its `mcpServers` config. The bridge derives the DB path from the fixed app data
-dir (same as the GUI), so no environment variables are required. In production the bridge ships
-as a Tauri sidecar (`externalBin`); the GUI Deck switcher generates a paste-ready config
-snippet ("Copy MCP server config") and can also copy just the deck id ("Deck id").
+via its `mcpServers` config. In production the bridge ships as a Tauri sidecar
+(`externalBin`); the GUI Deck switcher generates a paste-ready config snippet ("Copy MCP
+server config") that sets `JOT_DECK_DB_PATH` to the DB the GUI itself opened (so the Preview
+channel's `com.jot-deck.app.preview` DB is reached too) under a per-channel server name
+(`jot-deck` / `jot-deck-preview`), and can also copy just the deck id ("Deck id").
 
 The sidecar is staged by `scripts/build-mcp-sidecar.mjs` (run via `pnpm --filter app
 build:mcp-sidecar`, and automatically from `beforeBuildCommand`). **Run it once before

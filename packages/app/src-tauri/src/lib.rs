@@ -6,6 +6,7 @@ use jot_deck_core::{
     Card, Column, Connection, Deck, NewCard, NewColumn, NewDeck, SortOrder, Tag,
 };
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 use tauri::{Emitter, Manager, State};
 
@@ -18,6 +19,8 @@ const EXTERNAL_DB_CHANGE_EVENT: &str = "external-db-change";
 /// アプリケーションの状態
 struct AppState {
     conn: Mutex<Connection>,
+    /// 本体が開いている DB ファイル。MCP 設定スニペットにそのまま埋める。
+    db_path: PathBuf,
 }
 
 /// エラーをシリアライズ可能な形式に変換する
@@ -369,21 +372,30 @@ fn set_settings(state: State<AppState>, key: String, value: String) -> CommandRe
 // ========== MCP Commands ==========
 
 /// MCP ホスト（Claude Desktop / Claude Code）の `mcpServers` に貼り付けられる
-/// 設定スニペットを生成する。ブリッジのバイナリパスはアプリだけが正確に知って
-/// いるので生成側で埋める。DB パスは本体と同じ固定の app data dir をブリッジが
-/// 自力で導出するため env には出さない。`JOT_DECK_DECK_ID` も含めない全 Deck
-/// 対象の最小構成とし、対象 Deck を限定したいユーザは「Deck id」をカンマ区切りで足す
-/// （008-mcp-server.md §4.5）。
+/// 設定スニペットを生成する。ブリッジのバイナリパスと DB パスはアプリだけが正確に
+/// 知っているので生成側で埋める。DB パスは identifier がチャネルごとに異なる
+/// （Preview は `com.jot-deck.app.preview`）ため、ブリッジの既定導出に任せず
+/// 本体が実際に開いているファイルを `JOT_DECK_DB_PATH` で渡す。サーバー名も
+/// productName から導き（`jot-deck` / `jot-deck-preview`）、両チャネルを同じ
+/// ホストに登録しても衝突させない。`JOT_DECK_DECK_ID`
+/// は含めない全 Deck 対象の最小構成とし、対象 Deck を限定したいユーザは「Deck id」を
+/// カンマ区切りで足す（008-mcp-server.md §4.5）。
 #[tauri::command]
-fn generate_mcp_config() -> CommandResult<String> {
+fn generate_mcp_config(app: tauri::AppHandle, state: State<AppState>) -> CommandResult<String> {
     let bridge_path = mcp_sidecar_path().ok_or_else(|| CommandError {
         message: "Could not resolve the bundled MCP bridge path".to_string(),
     })?;
 
+    let product_name = app.config().product_name.as_deref().unwrap_or("Jot Deck");
+    let server_name = mcp_server_name(product_name);
+
     let config = serde_json::json!({
         "mcpServers": {
-            "jot-deck": {
+            server_name: {
                 "command": bridge_path,
+                "env": {
+                    "JOT_DECK_DB_PATH": state.db_path.to_string_lossy(),
+                },
             }
         }
     });
@@ -391,6 +403,15 @@ fn generate_mcp_config() -> CommandResult<String> {
     serde_json::to_string_pretty(&config).map_err(|e| CommandError {
         message: format!("Failed to serialize MCP config: {}", e),
     })
+}
+
+/// productName を `mcpServers` のキーにする（"Jot Deck Preview" → "jot-deck-preview"）。
+fn mcp_server_name(product_name: &str) -> String {
+    product_name
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect::<Vec<_>>()
+        .join("-")
 }
 
 /// バンドルされた MCP ブリッジの絶対パスを解決する。Tauri は externalBin を本体
@@ -475,6 +496,7 @@ pub fn run() {
 
             app.manage(AppState {
                 conn: Mutex::new(conn),
+                db_path,
             });
             app.manage(reporter::ReporterRegistry::default());
 
@@ -535,4 +557,15 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mcp_server_name;
+
+    #[test]
+    fn mcp_server_name_differs_per_channel() {
+        assert_eq!(mcp_server_name("Jot Deck"), "jot-deck");
+        assert_eq!(mcp_server_name("Jot Deck Preview"), "jot-deck-preview");
+    }
 }

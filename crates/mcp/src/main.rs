@@ -8,9 +8,10 @@
 //!   limited to (copy each from the GUI's "Deck id"); with exactly one, calls may
 //!   omit `deck_id`. Unset, every local Deck is reachable and each call names its
 //!   Deck via a `deck_id` argument (008 §4.5).
-//! - `JOT_DECK_DB_PATH`  — optional override of the `jot-deck.db` path. The DB
-//!   lives at a fixed, identifier-based location (same as the GUI), so this is
-//!   only for dev or non-standard installs; normally it is not set.
+//! - `JOT_DECK_DB_PATH`  — optional override of the `jot-deck.db` path. Unset,
+//!   the bridge uses the Production app data dir (`com.jot-deck.app`). The GUI's
+//!   generated config always sets it, so other channels (Preview) reach their
+//!   own DB.
 //! - `JOT_DECK_DENY`     — optional comma list of write capabilities to disable
 //!   (`append`, `edit`, `delete`, `structure`); all are enabled by default (008 §5).
 //! - `JOT_DECK_MAX_WRITES_PER_MIN` — optional per-connection write rate cap.
@@ -30,8 +31,8 @@ use jot_deck_core::create_file_db;
 use jot_deck_mcp::{resolve_db_path, Bridge, BridgeConfig};
 
 fn main() -> ExitCode {
-    // DB path is not required config: default to the fixed app data dir, allow
-    // JOT_DECK_DB_PATH as a dev override (008-mcp-server.md §4.6).
+    // JOT_DECK_DB_PATH if set (the GUI's snippet always sets it), else the
+    // Production app data dir (008-mcp-server.md §4.5).
     let db_path = match resolve_db_path() {
         Some(p) => p,
         None => {
