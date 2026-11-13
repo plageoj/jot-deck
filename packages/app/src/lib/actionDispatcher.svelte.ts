@@ -14,6 +14,8 @@ const ACTIONS_WITHOUT_LOADED_DECK = new Set([
   "showCommandPalette",
   "showDeckPalette",
   "showSettings",
+  "toggleTheme",
+  "newDeck",
   "showKeybindings",
   "showAbout",
   "showReporters",
@@ -292,6 +294,8 @@ export class ActionDispatcher {
       action === "showDeckPalette" ||
       action === "showCommandPalette" ||
       action === "showSettings" ||
+      action === "toggleTheme" ||
+      action === "newDeck" ||
       action === "renameDeck" ||
       action === "undo" ||
       action === "redo"
@@ -404,9 +408,6 @@ export class ActionDispatcher {
     this.focus.closePalette();
     if (!this.boardAvailable && BOARD_COMMANDS.has(action)) return;
     switch (action) {
-      case "newDeck":
-        this.runTask(this.data.createDeck());
-        break;
       case "restoreOnboarding":
         this.runTask(this.data.restoreOnboardingDeck());
         break;

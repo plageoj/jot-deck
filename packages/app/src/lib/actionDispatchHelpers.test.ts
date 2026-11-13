@@ -4,9 +4,10 @@ import type { FocusManager } from "#lib/focusManager.svelte.ts";
 import { makeColumn } from "./__fixtures__/models";
 import { setupBoard } from "./__fixtures__/boardHarness";
 import { executeGlobalAction } from "./actionDispatchHelpers";
+import { settingsStore } from "./settings.svelte";
 
 // Global (focus-mode independent) actions: palettes, dialogs, tag filter,
-// deck reload, and undo/redo.
+// new deck, theme toggle, deck reload, and undo/redo.
 
 vi.mock("#lib/db/index.ts", async () => {
   const { mockBackend } = await import("./__fixtures__/boardBackend");
@@ -41,6 +42,18 @@ describe("executeGlobalAction", () => {
       expect(focus.focusMode).not.toBe("command");
     },
   );
+
+  it("newDeck creates a deck through data", async () => {
+    const create = vi.spyOn(data, "createDeck").mockResolvedValue(null);
+    expect(await executeGlobalAction("newDeck", data, focus)).toBe(true);
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it("toggleTheme flips the theme setting", async () => {
+    const toggle = vi.spyOn(settingsStore, "toggleTheme").mockImplementation(() => {});
+    expect(await executeGlobalAction("toggleTheme", data, focus)).toBe(true);
+    expect(toggle).toHaveBeenCalledOnce();
+  });
 
   it("clearTagFilter clears the active filter on data", async () => {
     data.activeTagFilter = "todo";
