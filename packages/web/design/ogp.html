@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  /* App dark theme tokens (packages/app/src/lib/styles/theme.css) */
+  :root {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f3460;
+    --text: #eee;
+    --text-muted: #999;
+    --accent: #e94560;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    background: var(--bg-primary);
+    color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    position: relative;
+  }
+  .copy {
+    position: absolute;
+    left: 88px;
+    top: 0;
+    bottom: 0;
+    width: 560px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .eyebrow {
+    font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+    font-size: 20px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: 112px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 32px;
+  }
+  .lead {
+    font-size: 30px;
+    font-weight: 600;
+    margin-bottom: 14px;
+  }
+  .sub {
+    font-size: 24px;
+    color: var(--text-muted);
+  }
+
+  /* Simplified board: columns of cards, one focused card */
+  .board {
+    position: absolute;
+    left: 668px;
+    top: 70px;
+    display: flex;
+    gap: 16px;
+  }
+  .column {
+    width: 230px;
+    height: 490px;
+    background: var(--bg-secondary);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .column-header {
+    height: 44px;
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+  }
+  .column-header span {
+    display: block;
+    height: 10px;
+    border-radius: 5px;
+    background: rgba(238, 238, 238, 0.55);
+  }
+  .cards { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    background: var(--bg-primary);
+    border: 2px solid var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .card.focused { border-color: var(--accent); }
+  .line {
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(238, 238, 238, 0.28);
+  }
+  .card.focused .line { background: rgba(238, 238, 238, 0.5); }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <p class="eyebrow">Jot Down. Shape Up.</p>
+    <h1>Jot Deck</h1>
+    <p class="lead">Speed-of-thought drafting tool</p>
+    <p class="sub">Keyboard-driven. Local-first. AI-ready.</p>
+  </div>
+
+  <div class="board">
+    <div class="column">
+      <div class="column-header"><span style="width: 90px"></span></div>
+      <div class="cards">
+        <div class="card"><div class="line" style="width: 92%"></div><div class="line" style="width: 64%"></div></div>
+        <div class="card focused"><div class="line" style="width: 88%"></div><div class="line" style="width: 95%"></div><div class="line" style="width: 40%"></div></div>
+        <div class="card"><div class="line" style="width: 76%"></div></div>
+        <div class="card"><div class="line" style="width: 94%"></div><div class="line" style="width: 58%"></div></div>
+        <div class="card"><div class="line" style="width: 82%"></div><div class="line" style="width: 70%"></div></div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="column-header"><span style="width: 70px"></span></div>
+      <div class="cards">
+        <div class="card"><div class="line" style="width: 85%"></div><div class="line" style="width: 92%"></div><div class="line" style="width: 50%"></div></div>
+        <div class="card"><div class="line" style="width: 68%"></div></div>
+        <div class="card"><div class="line" style="width: 90%"></div><div class="line" style="width: 62%"></div></div>
+        <div class="card"><div class="line" style="width: 78%"></div><div class="line" style="width: 88%"></div></div>
+      </div>
+    </div>
+    <div class="column">
+      <div class="column-header"><span style="width: 80px"></span></div>
+      <div class="cards">
+        <div class="card"><div class="line" style="width: 90%"></div><div class="line" style="width: 60%"></div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
