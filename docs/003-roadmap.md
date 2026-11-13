@@ -21,6 +21,7 @@ Reporter（外部ストリーミング入力アダプタ）と汎用エージェ
 * Reporter 基盤: ホスト spawn ＋ stdio のローカル書き込み口（`crates/reporter-host`）、committed / ephemeral の 2 チャネル、カード単位のストリーミングオーバーレイ（4000 字で表示打ち切り）、Reporter 登録・認証スコープ編集 UI（`g r`）
 * MCP 書き込み面: カード書き込み・構造再編 tool、capability opt-out・レート制限・論理削除のみ公開の安全域（`008` §5）
 * `JOT_DECK_DECK_ID` の複数指定: カンマ区切りで列挙した Deck に接続を限定（`008` §4.5）
+* MCP と Reporter の接続ポリシー共通化: Deck スコープ・capability・レート制限・カラム allowlist と各操作の引数解釈・返り値を `jot_deck_core::access` に一本化。Reporter も登録ごとに複数 Deck / 全 Deck を扱える（`007` §2.3）
 * 変更履歴の記録: 外部書き込みを `jot_deck_core::write` で書き込みと同じトランザクションに記録（書き込み主・変更前後、30 日保持）（`008` §5.1）
 * `move_card` / `move_column` はアンカー指定の並べ替えを 1 トランザクションで行う（カラムを跨ぐ `move_card` の中間の末尾位置は他から観測されない）
 

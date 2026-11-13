@@ -135,7 +135,7 @@ flowchart LR
 - **意味**: カードを**論理削除**（`deleted_at` を打つ）。物理削除・カラム連動削除・復元はエージェントに公開しない ―― 30 日後の物理削除は本体の cleanup が担い、復元はユーザの削除スタック（`u` / ゴミ箱）に委ねる。誤削除しても失われないことを安全域（§5）の前提にする。この tool は書き込みスコープに `delete` 権限が含まれる場合のみ有効（§5）。
 
 #### `ensure_column`
-- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string, 必須 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
+- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`。inputSchema では必須として示し、エージェントに必ず書かせる。省略された呼び出しは空の説明として受け付ける）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
 - **返り値**: `{ deck_id, column_id, name, position, created }`（`created` は新規作成なら true / 既存ヒットなら false）
 - **意味**: **名前キーで get-or-create するべき等な作成**（`name` は前後の空白を除いてキーにし、空名は拒否）。同名カラムが**指定 Deck の書き込みスコープ内（可視 ∩ write allowlist）に**あればその ULID を返し（get）、無ければ末尾に作成する（create）。自由な `create` を避けることで、再送での重複列と、既存列を見落としたニアデュープ（`ToDo`/`Tasks` 乱立）を同時に抑える。
 - **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続では `ensure_column` 自体が使えない（`tools/list` から外れ、呼び出しは名前 lookup の前に capability エラーになる）。allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし書き込みスコープ内の同名カラムがあれば get として id を返す ―― **既存カラムの取得は妨げない**。名前 lookup は指定 Deck の書き込みスコープ内のみを探索し、private / allowlist 外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
@@ -211,6 +211,8 @@ flowchart LR
 **設定（`mcpServers`）**: **DB パスは本体と同じ固定の app data dir（identifier `com.jot-deck.app`）をブリッジが自力で導出する**ため env には出さない（`JOT_DECK_DB_PATH` は dev / 非標準インストール向けの任意オーバーライドに留める）。`JOT_DECK_DECK_ID` は省略可能で、省略時は前述の「全 Deck 対象・呼び出しごとに `deck_id` 明示」モードになる。ブリッジ本体は本番では Tauri サイドカー（`externalBin`）として同梱し、パスを本体だけが知る。deck id はユーザが直接目にしない ULID なので、**本体 GUI が deck id の表示/コピーに加え、貼り付け可能な設定スニペットを生成する**（Deck スイッチャーの「Copy MCP server config」/「Deck id」）。既定で生成するスニペットは `JOT_DECK_DECK_ID` を含めない全 Deck 対象の最小構成とし、対象 Deck を限定したいユーザは「Deck id」でコピーした ULID を自分でそこへカンマ区切りで足す。バイナリパスも DB パスも本体だけが正確に知るため、ユーザに OS 別パスを推測させない。
 
 **フィルタは必ず本体（Card Repository のクエリ）側で行う。** ブリッジは spawn される補助プロセスで、その先のエージェントはプロンプトインジェクションで操作され得る。信頼境界は本体であり、ブリッジに絞り込みを委ねない。`deck_id` の妥当性検証（存在確認・`JOT_DECK_DECK_ID` 設定時の列挙内確認）も本体側で行う。
+
+**Reporter と同じ実装で適用する。** 本節の Deck スコープ・capability・write allowlist と §5 のレート制限は、接続ポリシーとして `jot_deck_core::access` にまとまっており、各 tool の引数解釈と返り値の組み立てもそこで行う。Reporter ホスト（`007`）も同じポリシーと操作を使い、Reporter 登録の `deck_ids` / `deny` / `max_writes_per_min` / `allowed_columns` は本節の `JOT_DECK_DECK_ID` / `JOT_DECK_DENY` / `JOT_DECK_MAX_WRITES_PER_MIN` / `JOT_DECK_WRITE_COLUMNS` と同じ意味を持つ。ブリッジが持つのは MCP の枠組み（tool スキーマ・resource・stderr への帰属ログ）だけである。
 
 除外カラムに対する各 tool の挙動（存在を漏らさない）：
 

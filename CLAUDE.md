@@ -100,7 +100,7 @@ Each worktree keeps its own `target/`, so Rust build artifacts do not collide. P
 ### Backend (crates/core)
 - `models.rs` - Data models: Deck, Column, Card, Tag with ULID IDs
 - `db.rs` - SQLite connection setup (file-based or in-memory)
-- `repository/` - CRUD operations for each entity (deck, column, card, tag, setting), plus the deck-scoped `query` (reads) / `write` (writes) layer and `deck_scope` resolution shared by the MCP bridge and the Reporter host
+- `repository/` - CRUD operations for each entity (deck, column, card, tag, setting), plus the deck-scoped `query` (reads) / `write` (writes) layer, `deck_scope` resolution, and the `access` layer (connection policy + every agent operation) shared by the MCP bridge and the Reporter host
 - `cleanup.rs` - Physical deletion of soft-deleted items after 30 days
 
 ### Tauri Bridge (packages/app/src-tauri)

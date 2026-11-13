@@ -73,7 +73,7 @@ flowchart TB
 
 ### 2.2 ホストが Reporter を spawn する
 
-Jot Deck 本体がホストとなり、登録された各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。登録は Deck ごとに Reporters ダイアログで行い（名前・バイナリの絶対パス・引数・環境変数と §2.3 のスコープ。共有 `settings` テーブルのキー `reporters:{deck_id}` に保存）、同ダイアログの Start / Stop で起動・停止する。Reporter の stdin/stdout は JSON-RPC 用にホストが握り、stderr はホストの stderr にそのまま流す。この形により：
+Jot Deck 本体がホストとなり、登録された各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。登録は Reporters ダイアログで行い（名前・バイナリの絶対パス・引数・環境変数と §2.3 のスコープ。全 Reporter の登録を共有 `settings` テーブルのキー `reporters` に 1 つの一覧として保存）、同ダイアログの Start / Stop で起動・停止する。Reporter の stdin/stdout は JSON-RPC 用にホストが握り、stderr はホストの stderr にそのまま流す。この形により：
 
 - ライフサイクルが親に従属（子は `kill_on_drop` で spawn し、本体が死ねば Reporter も畳む。孤児プロセスなし）。
 - 採番・INSERT を本体 Repository に一元化する。Reporter のプロトコルには DB を直接触る手段がなく、ホストが GUI と同じコネクションで Reporter の要求を処理する。ただし Reporter は OS サンドボックスなしでユーザー権限の子プロセスとして動くため、DB ファイルを直接開くことはできる。§2.3 のスコープが制限するのはプロトコル経由の要求だけであり、登録する Reporter バイナリは信頼できるものでなければならない。
@@ -86,9 +86,10 @@ Jot Deck 本体がホストとなり、登録された各 Reporter を**子プ�
 
 本体 spawn は「自分が起動した」ことしか保証せず、登録バイナリの良性はユーザ登録に依存する（§2.2 の power-user 割り切り）。悪意ある登録 Reporter が任意カラムへ書けるのを防ぐため、**Reporter ごとに書き込みを制限するスコープ**を持つ。
 
-- **スコープは Deck ごとの登録に紐づく**（＝デッキ単位）。Reporter 登録 UI で編集する。
-- **3 項目で構成する**: `deny`（capability `append` / `edit` / `delete` / `structure` の個別拒否）・`max_writes_per_min`（未指定はホスト既定 120）・`allowed_columns`（書き込み可能カラムの allowlist。指定時は `column.ensure` の新規作成も不可）。
-- **fail-closed**: ホストは不明な capability・レート 0・空 allowlist を登録/起動時に拒否する。
+- **スコープは Reporter ごとの登録に紐づく**。Reporter 登録 UI で編集する。
+- **4 項目で構成する**: `deck_ids`（扱える Deck の一覧。未指定は全 Deck。新規登録は開いている Deck だけで始まる）・`deny`（capability `append` / `edit` / `delete` / `structure` の個別拒否）・`max_writes_per_min`（未指定はホスト既定 120）・`allowed_columns`（書き込み可能カラムの allowlist。複数 Deck のカラムを含められる。指定時は `column.ensure` の新規作成も不可）。
+- **MCP 接続の制約と同じものである。** 4 項目はそれぞれ `008` の `JOT_DECK_DECK_ID` / `JOT_DECK_DENY` / `JOT_DECK_MAX_WRITES_PER_MIN` / `JOT_DECK_WRITE_COLUMNS` と同じ意味を持ち、ホストは MCP ブリッジと同じ実装（`jot_deck_core::access` の接続ポリシー）で適用する。Deck の解決規則（§6.1）も MCP と同じ（`008` §4.5）。
+- **fail-closed**: ホストは不明な capability・レート 0・空の Deck 一覧・空 allowlist を登録/起動時に拒否する。
 - **`private=true` カラムは読み書きとも常に拒否する**（`002` の `private` カラム定義 / `008` §4.5 と同じ不変条件）。**読み取りの除外は `private` のみ**で、スコープは読み取り用の絞り込みを持たない ―― Reporter に見せたくないカラムは `private` にする。
 
 ---
@@ -163,16 +164,19 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 | メソッド | 方向 | 説明 |
 |:---|:---|:---|
-| `initialize` / `ping` | Reporter → 本体 | ハンドシェイク / 死活確認。`initialize` はこの Reporter の capability と制約値（`max_card_length` / `max_writes_per_min`）を返す。 |
+| `initialize` / `ping` | Reporter → 本体 | ハンドシェイク / 死活確認。`initialize` はこの Reporter の実効スコープ（`capabilities`。`deck.describe` と同じく `write_columns` / `pinned_deck_ids` を含む）と制約値（`max_card_length` / `max_writes_per_min`）を返す。 |
 | `card.append` | Reporter → 本体 | カード新規作成（`column_id`, `content`, 任意の `idempotency_key`）。本体が採番し **ULID を返す**（`{ card_id, column_id, position, created_at }`）。Reporter は以降この id を握る。 |
 | `card.patch` / `card.commit` | Reporter → 本体 | 確定 edit（`card_id`, `content`, `expected_updated_at`。`002` §5.3 の楽観ロック）。永続 + 同期に乗る。 |
-| `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先は接続 Deck 内のカラムに限る。 |
+| `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先はカードと同じ Deck 内のカラムに限る。 |
 | `card.delete` | Reporter → 本体 | カードを論理削除（復元可能）。物理削除・復元はユーザの削除スタックと cleanup に委ねる。 |
 | `card.read` | Reporter → 本体 | 既存カードの読み返し（文脈把握・過去カードの更新対象特定）。 |
-| `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` / `deck.describe` | Reporter → 本体 | カラム構成・直近カード・検索・Deck の実行時実体の問い合わせ。引数は `008` §4.2 の同名 tool と同じ（`deck_id` は取らず、Reporter が登録された Deck に固定）。返り値は同名 tool から接続単位の項目を除いたもの: `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` は `deck_id` を返さず、`deck.describe` の `capabilities` は `write_columns` / `pinned_deck_ids` を含まない。 |
-| `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等。`name` 必須、`description` / `private` は任意）。書き込みスコープ内に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ column_id, name, position, created }`）。 |
+| `deck.list` | Reporter → 本体 | この Reporter が扱える Deck の一覧（`008` §4.2 の `list_decks` と同じ返り値 `{ decks: [{ deck_id, name, active }] }`）。 |
+| `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` / `deck.describe` | Reporter → 本体 | カラム構成・直近カード・検索・Deck の実行時実体の問い合わせ。引数と返り値は `008` §4.2 の同名 tool と同じ。 |
+| `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等。`name` 必須、`deck_id` / `description` / `private` は任意）。書き込みスコープ内に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ deck_id, column_id, name, position, created }`）。 |
 | `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ）。 |
 | `column.move` | Reporter → 本体 | カラムの並べ替え。アンカー（`before_column_id` / `after_column_id`、どちらか一方。省略時は末尾）で意図を表明し、position は本体が採番。 |
+
+**対象 Deck の決め方は MCP と同じ**（`008` §4.5）。Deck 単位のメソッド（`deck.*` と `column.ensure`）は任意引数 `deck_id` で対象を指定し、スコープが 1 Deck だけなら省略できる。カード / カラムを ID で指すメソッドは、その ID の所属 Deck が対象になる。スコープ外の Deck・カード・カラムは見えない。
 
 `card.*` / `column.*` はいずれも request/response で、**ID / position の採番は本体が一元化**（§7）。カード・カラムの順序は生の position ではなく「どのカード/カラムの前/後」という**アンカー**で表明する。Reporter は append を主としつつ（§1.3 の append-mostly）、既存カードの再配置（`card.move`）と論理削除（`card.delete`）も行える ―― これらは姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `move_card` / `delete_card` と**同じ core を 007 トランスポートで叩く**（§2.1 の共有 core）。書き込みスコープ（§2.3）は `card.delete` を独立の権限として扱える。
 
