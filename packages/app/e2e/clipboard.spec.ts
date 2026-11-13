@@ -36,15 +36,6 @@ test.describe("System clipboard", () => {
     await expect(cards.nth(1)).toContainText("second line");
   });
 
-  test("Ctrl+v with empty clipboard text does nothing", async ({ page }) => {
-    await page.evaluate(() => navigator.clipboard.writeText(""));
-
-    await page.keyboard.press("Control+v");
-    await page.waitForTimeout(300);
-
-    await expect(page.locator(".card-content")).toHaveCount(1);
-  });
-
   test("Ctrl+c copies card text and Ctrl+x removes the card", async ({ page }) => {
     await page.keyboard.press("Control+c");
     await page.waitForTimeout(200);

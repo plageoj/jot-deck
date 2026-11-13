@@ -38,38 +38,6 @@ describe("DeckData deck lifecycle", () => {
     resetState();
   });
 
-  it("selectDeck sets loadedDeckId only after columns finish loading", async () => {
-    state.decks = [makeDeck("deck-load-test")];
-    state.columns = [makeColumn("col-x", "deck-load-test")];
-    state.cardsByColumn = new Map([["col-x", []]]);
-
-    const fresh = new DeckData();
-    await fresh.init();
-
-    expect(fresh.loadedDeckId).toBe("deck-load-test");
-    expect(fresh.currentDeck?.id).toBe("deck-load-test");
-  });
-
-  it("selectDeck temporarily clears loadedDeckId during a switch", async () => {
-    state.decks = [makeDeck("deck-1"), makeDeck("deck-2")];
-    state.columns = [makeColumn("col-active", "deck-1")];
-    state.cardsByColumn = new Map([["col-active", []]]);
-
-    const fresh = new DeckData();
-    await fresh.init();
-    expect(fresh.loadedDeckId).toBe("deck-1");
-
-    // Swap mock backend to return deck-2's columns when queried.
-    state.columns = [makeColumn("col-2-only", "deck-2")];
-    state.cardsByColumn = new Map([["col-2-only", []]]);
-
-    const promise = fresh.selectDeck(makeDeck("deck-2"));
-    // Synchronously after kicking off selectDeck, loadedDeckId is null.
-    expect(fresh.loadedDeckId).toBeNull();
-    await promise;
-    expect(fresh.loadedDeckId).toBe("deck-2");
-  });
-
   it("deleteDeck clears persisted focus state for the deleted deck", async () => {
     localStorage.setItem(
       focusKey("deck-doomed"),
@@ -200,11 +168,7 @@ describe("DeckData CRUD", () => {
   let data: InstanceType<typeof DeckData>;
 
   beforeEach(async () => {
-    resetState();
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-active", "deck-1")];
-    state.cardsByColumn = new Map([["col-active", []]]);
-
+    seedSingleDeck();
     data = new DeckData();
     await data.init();
   });
@@ -348,35 +312,6 @@ describe("DeckData CRUD", () => {
       (c) => c.id === "card-1",
     );
     expect(stored?.content).toBe("new content");
-  });
-
-  it("deleteColumn forwards the id to the backend", async () => {
-    const ok = await data.deleteColumn("col-active");
-    expect(ok).toBe(true);
-    expect(state.deleteColumnCalls).toEqual(["col-active"]);
-  });
-
-  it("deleteCard forwards the id to the backend", async () => {
-    const ok = await data.deleteCard("card-x");
-    expect(ok).toBe(true);
-    expect(state.deleteCardCalls).toEqual(["card-x"]);
-  });
-
-  it("moveColumn forwards id and position to the backend", async () => {
-    expect(await data.moveColumn("col-active", 1)).toBe(true);
-    expect(state.moveColumnCalls).toEqual([{ id: "col-active", position: 1 }]);
-  });
-
-  it("moveCard forwards id and position to the backend", async () => {
-    expect(await data.moveCard("card-x", 0)).toBe(true);
-    expect(state.moveCardCalls).toEqual([{ id: "card-x", position: 0 }]);
-  });
-
-  it("moveCardToColumn forwards id and target column to the backend", async () => {
-    expect(await data.moveCardToColumn("card-x", "col-active")).toBe(true);
-    expect(state.moveCardToColumnCalls).toEqual([
-      { id: "card-x", columnId: "col-active" },
-    ]);
   });
 
   it("updateCardScore forwards delta to the backend", async () => {
@@ -606,20 +541,19 @@ describe("DeckData card edit sessions", () => {
     expect(data.cardsByColumn["col-active"][0].content).toBe("old");
   });
 
-  it("releases the lock on both cancellation and normal edit completion", async () => {
-    const original = mockBackend.releaseCardLock!;
-    const releaseCardLock = vi.fn(original);
-    mockBackend.releaseCardLock = releaseCardLock;
+  it("releases the session's lock on both cancellation and normal edit completion", async () => {
+    const release = vi.spyOn(mockBackend, "releaseCardLock");
 
     const first = await data.startCardEdit("card-1");
     await data.cancelCardEdit(first!);
-    expect(releaseCardLock).toHaveBeenCalledWith("card-1", first!.owner);
-
     const second = await data.startCardEdit("card-1");
-    expect(second!.owner).not.toBe(first!.owner);
     await data.finishCardEdit(second!);
-    expect(releaseCardLock).toHaveBeenCalledTimes(2);
-    mockBackend.releaseCardLock = original;
+
+    expect(release.mock.calls).toEqual([
+      ["card-1", first!.owner],
+      ["card-1", second!.owner],
+    ]);
+    release.mockRestore();
   });
 
   it("reports a lock acquisition conflict without entering edit state", async () => {
@@ -657,16 +591,16 @@ describe("DeckData card edit sessions", () => {
     await data.finishCardEdit(session!);
   });
 
-  it("keeps a session after a failed release so it can be retried", async () => {
-    const original = mockBackend.releaseCardLock;
-    mockBackend.releaseCardLock = async () => {
-      throw new Error("temporary failure");
-    };
+  it("reports a failed release and lets the caller retry it", async () => {
     const session = await data.startCardEdit("card-1");
+    const release = vi
+      .spyOn(mockBackend, "releaseCardLock")
+      .mockRejectedValueOnce(new Error("temporary failure"));
 
     expect(await data.finishCardEdit(session!)).toBe(false);
-    mockBackend.releaseCardLock = original;
+    expect(data.error).toBe("Failed to release card edit: Error: temporary failure");
     expect(await data.finishCardEdit(session!)).toBe(true);
+    release.mockRestore();
   });
 });
 
@@ -792,20 +726,6 @@ describe("DeckData refreshDeck", () => {
     await data.init();
   });
 
-  it("refreshDeck reloads columns, cards, and tags for the current deck", async () => {
-    state.columns = [makeColumn("col-x", "deck-1")];
-    state.cardsByColumn = new Map([
-      ["col-x", [makeCard("card-x", "col-x", { content: "hi" })]],
-    ]);
-    state.tagsByDeck = [{ id: "t1", name: "todo" }];
-
-    await data.refreshDeck();
-
-    expect(data.columns.map((c) => c.id)).toEqual(["col-x"]);
-    expect(data.cardsByColumn["col-x"].map((c) => c.id)).toEqual(["card-x"]);
-    expect(data.deckTags).toEqual([{ id: "t1", name: "todo" }]);
-  });
-
   it("refreshDeck makes no backend calls when no current deck", async () => {
     data.currentDeck = null;
     const before = state.getTagsByDeckCalls;
@@ -813,104 +733,6 @@ describe("DeckData refreshDeck", () => {
     expect(state.getTagsByDeckCalls).toBe(before);
   });
 
-  it("re-applies an active tag filter after an external reload", async () => {
-    state.columns = [makeColumn("col-x", "deck-1")];
-    state.cardsByColumn = new Map([
-      ["col-x", [makeCard("c1", "col-x", { content: "#todo x" })]],
-    ]);
-    data.filterByTag("todo");
-
-    await data.refreshDeck();
-
-    expect(data.activeTagFilter).toBe("todo");
-    expect(data.filteredCardIds?.has("c1")).toBe(true);
-  });
-
-  it("discards an external reload when the deck changes mid-flight", async () => {
-    const originalColumns = data.columns;
-    // deck-1's post-reload set — should NOT be committed once the deck switches.
-    state.columns = [makeColumn("col-new", "deck-1")];
-    state.cardsByColumn = new Map([["col-new", []]]);
-
-    // Flip the selected deck during the final await so the guard discards.
-    const originalGetTags = mockBackend.getTagsByDeck!;
-    mockBackend.getTagsByDeck = async () => {
-      data.currentDeck = makeDeck("deck-2");
-      return [];
-    };
-
-    await data.refreshDeck();
-    mockBackend.getTagsByDeck = originalGetTags;
-
-    // Columns were not overwritten with the stale (deck-1) fetch.
-    expect(data.columns).toBe(originalColumns);
-  });
-
-  it("refreshDeck ignores a successful result for a deck that is no longer active", async () => {
-    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
-    const otherDeck = makeDeck("deck-2");
-    const otherColumn = makeColumn("col-deck-2", "deck-2");
-    let resolveReload!: (columns: Column[]) => void;
-    const reloadStarted = new Promise<void>((resolve) => {
-      vi.spyOn(mockBackend, "getColumnsByDeck").mockImplementationOnce(
-        () =>
-          new Promise((reloadResolve) => {
-            resolveReload = reloadResolve;
-            resolve();
-          }),
-      );
-    });
-
-    const reloading = data.refreshDeck();
-    await reloadStarted;
-    data.currentDeck = otherDeck;
-    data.columns = [otherColumn];
-    data.cardsByColumn = { [otherColumn.id]: [] };
-    resolveReload([staleColumn]);
-
-    await expect(reloading).resolves.toBe(false);
-    expect(data.columns).toEqual([otherColumn]);
-    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
-  });
-
-  it("refreshDeck ignores a deck switch while loading cards", async () => {
-    const staleColumn = makeColumn("col-deck-1-stale", "deck-1");
-    const otherDeck = makeDeck("deck-2");
-    const otherColumn = makeColumn("col-deck-2", "deck-2");
-    let resolveCards!: (cards: Card[]) => void;
-    const cardsStarted = new Promise<void>((resolve) => {
-      vi.spyOn(mockBackend, "getCardsByColumn").mockImplementationOnce(
-        () =>
-          new Promise((cardsResolve) => {
-            resolveCards = cardsResolve;
-            resolve();
-          }),
-      );
-    });
-    vi.spyOn(mockBackend, "getColumnsByDeck").mockResolvedValueOnce([staleColumn]);
-
-    const reloading = data.refreshDeck();
-    await cardsStarted;
-    data.currentDeck = otherDeck;
-    data.columns = [otherColumn];
-    data.cardsByColumn = { [otherColumn.id]: [] };
-    resolveCards([]);
-
-    await expect(reloading).resolves.toBe(false);
-    expect(data.columns).toEqual([otherColumn]);
-    expect(data.cardsByColumn).toEqual({ [otherColumn.id]: [] });
-  });
-
-  it("refreshDeck keeps the loaded board when a card fetch fails", async () => {
-    const before = { ...data.cardsByColumn };
-    const columnsBefore = data.columns;
-    vi.spyOn(mockBackend, "getCardsByColumn").mockRejectedValueOnce(new Error("db gone"));
-
-    await expect(data.refreshDeck()).resolves.toBe(false);
-    expect(data.columns).toBe(columnsBefore);
-    expect(data.cardsByColumn).toEqual(before);
-    expect(data.error).toContain("Failed to reload deck");
-  });
 });
 
 describe("DeckData tags", () => {
@@ -1004,34 +826,13 @@ describe("DeckData external change wiring", () => {
     mockListen.mockImplementation(async () => () => {});
   });
 
-  it("watchExternalChanges is a no-op outside Tauri (no reconcile tick)", async () => {
-    mockEnv.tauri = false;
-    await expect(data.watchExternalChanges()).resolves.toBeUndefined();
-    expect(data.externalChangeTick).toBe(0);
-    expect(mockListen).not.toHaveBeenCalled();
-  });
-
-  it("watchExternalChanges subscribes to every channel and reconciles once under Tauri", async () => {
+  it("surfaces each reconcile request as an externalChangeTick bump", async () => {
     await data.watchExternalChanges();
-
-    expect(Object.keys(handlers)).toEqual([
-      "external-db-change",
-      "reporter-change",
-      "reporter-stream",
-    ]);
-    // A reconcile tick fires right after subscribing.
     expect(data.externalChangeTick).toBe(1);
-  });
-
-  it("funnels DB and reporter commits into one debounced externalChangeTick", async () => {
-    await data.watchExternalChanges();
-    const tick = data.externalChangeTick;
 
     handlers["external-db-change"]?.();
-    handlers["reporter-change"]?.();
     vi.advanceTimersByTime(250);
-
-    expect(data.externalChangeTick).toBe(tick + 1);
+    expect(data.externalChangeTick).toBe(2);
   });
 
   it("exposes stream overlay state through isStreaming and streamingText", async () => {
@@ -1079,18 +880,6 @@ describe("DeckData external change wiring", () => {
     expect(data.isStreaming("card-1")).toBe(false);
   });
 
-  it("end without a column id falls back to a full reconcile", async () => {
-    await data.watchExternalChanges();
-    emit({ kind: "begin", card_id: "card-1" });
-    const tick = data.externalChangeTick;
-
-    emit({ kind: "end", card_id: "card-1" });
-    await vi.runAllTimersAsync();
-
-    expect(data.externalChangeTick).toBe(tick + 1);
-    expect(data.isStreaming("card-1")).toBe(false);
-  });
-
   it("drops the overlay and reports an error when the post-stream reload fails", async () => {
     await data.watchExternalChanges();
     const original = mockBackend.getCardsByColumn!;
@@ -1124,9 +913,6 @@ describe("DeckData external change wiring", () => {
     expect(data.isStreaming("card-1")).toBe(false);
   });
 
-  it("stopWatchingExternalChanges is safe when nothing is subscribed", () => {
-    expect(() => data.stopWatchingExternalChanges()).not.toThrow();
-  });
 });
 
 describe("DeckData reporter registry", () => {

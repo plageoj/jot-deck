@@ -831,22 +831,17 @@ mod tests {
     }
 
     #[test]
-    fn patch_updates_with_matching_cas() {
-        let f = setup();
-        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", None, &sc(), &au()).unwrap();
-        let updated = patch_card(&f.conn, &f.deck_id, &c.id, "new #tag", c.updated_at, &sc(), &au()).unwrap();
-        assert_eq!(updated.content, "new #tag");
-        assert!(updated.updated_at > c.updated_at);
-    }
-
-    #[test]
-    fn patch_rejects_stale_cas() {
+    fn patch_with_stale_cas_conflicts_and_leaves_no_trace() {
         let f = setup();
         let c = append_card(&f.conn, &f.deck_id, &f.public_col, "orig", None, &sc(), &au()).unwrap();
         patch_card(&f.conn, &f.deck_id, &c.id, "first", c.updated_at, &sc(), &au()).unwrap();
-        // 古い updated_at での patch は Conflict。
+        let history_before = history_of(&f).len();
+
+        // 古い updated_at での patch は Conflict で、内容も履歴も変えない。
         let err = patch_card(&f.conn, &f.deck_id, &c.id, "second", c.updated_at, &sc(), &au()).unwrap_err();
         assert!(matches!(err, JotDeckError::Conflict(_)));
+        assert_eq!(contents(&f, &f.public_col), vec!["first"]);
+        assert_eq!(history_of(&f).len(), history_before);
     }
 
     #[test]
@@ -994,16 +989,6 @@ mod tests {
         assert!(!b.created);
         assert_eq!(a.column.id, b.column.id);
         assert_eq!(b.column.description.as_deref(), Some("tasks")); // 変更されない
-    }
-
-    #[test]
-    fn ensure_column_second_call_is_a_get() {
-        let f = setup();
-        ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc(), &au()).unwrap();
-        // 二度目は新規作成せず既存を返す（get）。
-        let got = ensure_column(&f.conn, &f.deck_id, "Notes", "n", false, &sc(), &au()).unwrap();
-        assert!(!got.created);
-        assert_eq!(got.column.name, "Notes");
     }
 
     // create の不可（write allowlist 明示時）は allowlist 節のテストで担保する

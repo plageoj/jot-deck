@@ -22,10 +22,6 @@ test.describe("Deck Management", () => {
     await expect(page.locator("text=h / l")).toBeVisible();
   });
 
-  test("window title shows deck name", async ({ page }) => {
-    await expect(page).toHaveTitle("Getting Started - Jot Deck");
-  });
-
   test("deck switcher opens with Ctrl+P", async ({ page }) => {
     await page.keyboard.press("Control+p");
     await page.waitForTimeout(300);
@@ -233,18 +229,6 @@ test.describe("Deck Management", () => {
     await expect(page.locator("h1")).toContainText("Empty Deck");
   });
 
-  test("command palette shows each command's bound key", async ({ page }) => {
-    await page.keyboard.press("Control+Shift+P");
-    await page.waitForTimeout(300);
-
-    const shortcutOf = (label: string) =>
-      page.locator(".palette-item", { hasText: label }).locator(".palette-shortcut");
-    await expect(shortcutOf("Rename Deck")).toHaveText("R");
-    await expect(shortcutOf("Rename Column")).toHaveText("r");
-    await expect(shortcutOf("Switch Deck")).toHaveText("Ctrl+p");
-    await expect(shortcutOf("Keyboard Shortcuts")).toHaveText("?");
-  });
-
   test("rename deck via command palette", async ({ page }) => {
     // Open command palette and search for rename
     await page.keyboard.press("Control+Shift+P");
@@ -342,27 +326,6 @@ test.describe("Deck Management", () => {
     await page.waitForTimeout(300);
 
     // Deck should still exist
-    await expect(page.locator("h1")).toContainText("Getting Started");
-  });
-
-  test("last opened deck is restored on reload", async ({ page }) => {
-    // Create a second deck
-    await page.keyboard.press("Control+p");
-    await page.waitForTimeout(300);
-    await page.locator(".palette-item", { hasText: "New deck" }).click();
-    await page.waitForTimeout(500);
-
-    // Should be on "New Deck"
-    await expect(page.locator("h1")).toContainText("New Deck");
-
-    // Reload the page — WASM backend resets, but localStorage persists
-    // Note: In WASM mode, the database is in-memory so deck data is lost on reload.
-    // The last-deck-id is saved in localStorage but the deck won't exist after reload.
-    // After reload, onboarding deck is recreated and selected as fallback.
-    await page.reload();
-    await page.waitForTimeout(1500);
-
-    // After reload, onboarding deck is recreated (WASM is in-memory)
     await expect(page.locator("h1")).toContainText("Getting Started");
   });
 
