@@ -316,18 +316,11 @@ mod tests {
         assert!(tables.contains(&"card_tags".to_string()));
         assert!(tables.contains(&"settings".to_string()));
         assert!(tables.contains(&"idempotency_keys".to_string()));
-    }
+        assert!(tables.contains(&"change_history".to_string()));
 
-    #[test]
-    fn test_columns_have_private_and_description() {
-        let conn = create_in_memory().unwrap();
+        // 後付けの列も新規 DB には最初から揃っている
         assert!(column_exists(&conn, "columns", "private").unwrap());
         assert!(column_exists(&conn, "columns", "description").unwrap());
-    }
-
-    #[test]
-    fn test_cards_have_lock_columns() {
-        let conn = create_in_memory().unwrap();
         assert!(column_exists(&conn, "cards", "locked_by").unwrap());
         assert!(column_exists(&conn, "cards", "locked_at").unwrap());
     }

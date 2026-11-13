@@ -26,6 +26,17 @@ describe("ReporterStreamController", () => {
     vi.advanceTimersByTime(20);
   }
 
+  /** Open a stream on `cardId` and paint it up to the length cap. */
+  function fill(cardId: string): void {
+    streams.handle({ kind: "begin", card_id: cardId });
+    streams.handle({
+      kind: "delta",
+      card_id: cardId,
+      chunk: "x".repeat(MAX_CARD_LENGTH + 1),
+    });
+    flushFrame();
+  }
+
   beforeEach(() => {
     vi.useFakeTimers();
     streamingText = {};
@@ -169,11 +180,6 @@ describe("ReporterStreamController", () => {
     expect(streamingText["card-1"]).toBe(
       "a".repeat(MAX_CARD_LENGTH - 2) + "bc",
     );
-
-    // A full overlay ignores further deltas but stays open.
-    streams.handle({ kind: "delta", card_id: "card-1", chunk: "more" });
-    flushFrame();
-    expect(streamingText["card-1"]).toHaveLength(MAX_CARD_LENGTH);
   });
 
   it("caps an oversized burst before it is painted", () => {
@@ -211,7 +217,7 @@ describe("ReporterStreamController", () => {
     );
   });
 
-  it("begin discards text a previous stream left unflushed", () => {
+  it("begin discards a previous stream's unflushed text", () => {
     streams.handle({ kind: "begin", card_id: "card-1" });
     streams.handle({
       kind: "delta",
@@ -225,59 +231,23 @@ describe("ReporterStreamController", () => {
 
     expect(streamingText["card-1"]).toBe("new");
   });
-});
-
-describe("ReporterStreamController at the cap", () => {
-  let streamingText: Record<string, string>;
-  let setStreamingText: ReturnType<
-    typeof vi.fn<(value: Record<string, string>) => void>
-  >;
-  let streams: ReporterStreamController;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-    streamingText = {};
-    setStreamingText = vi.fn((value) => {
-      streamingText = value;
-    });
-    streams = new ReporterStreamController({
-      getStreamingText: () => streamingText,
-      setStreamingText,
-      reloadColumn: vi.fn(async () => {}),
-      scheduleReload: vi.fn(),
-    });
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  function fill(cardId: string): void {
-    streams.handle({ kind: "begin", card_id: cardId });
-    streams.handle({
-      kind: "delta",
-      card_id: cardId,
-      chunk: "x".repeat(MAX_CARD_LENGTH + 1),
-    });
-    vi.advanceTimersByTime(20);
-  }
 
   it("drops deltas for a full card without scheduling a repaint", () => {
     fill("card-1");
     setStreamingText.mockClear();
 
     streams.handle({ kind: "delta", card_id: "card-1", chunk: "more" });
-    vi.advanceTimersByTime(20);
+    flushFrame();
 
     expect(setStreamingText).not.toHaveBeenCalled();
     expect(streamingText["card-1"]).toHaveLength(MAX_CARD_LENGTH);
   });
 
-  it("a fresh stream on the same card accepts text again", () => {
+  it("begin on a card that hit the cap accepts text again", () => {
     fill("card-1");
     streams.handle({ kind: "begin", card_id: "card-1" });
     streams.handle({ kind: "delta", card_id: "card-1", chunk: "new" });
-    vi.advanceTimersByTime(20);
+    flushFrame();
 
     expect(streamingText["card-1"]).toBe("new");
   });

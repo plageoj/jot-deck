@@ -358,9 +358,9 @@ describe("ActionDispatcher board operation routing", () => {
     });
   });
 
-  it("undo clamps a focus index left past the last column", async () => {
-    // Undoing a column create shrinks the list under the focused index; the
-    // next createColumn must not insert past the end (issue #81).
+  it("createColumn after an undo that shrank the board appends at the end", async () => {
+    // The clamp itself is covered in actionDispatchHelpers.test.ts; this checks
+    // the next createColumn uses the clamped index (issue #81).
     focus.focusedColumnIndex = 2;
     data.history.push({
       undo: async () => {
@@ -370,8 +370,6 @@ describe("ActionDispatcher board operation routing", () => {
     });
 
     await dispatcher.executeAction("undo");
-    expect(focus.focusedColumnIndex).toBe(1);
-
     await dispatcher.executeColumnAction("createColumn");
     expect(boardState.createColumnCalls[0].position).toBe(2);
   });
@@ -594,7 +592,12 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     expect(renameColumn).not.toHaveBeenCalled();
   });
 
-  it.each(["column", "card"] as const)("renames the column with `F2` in %s focus", async (mode) => {
+  it.each([
+    ["r", "column"],
+    ["r", "card"],
+    ["F2", "column"],
+    ["F2", "card"],
+  ] as const)("renames the column with `%s` in %s focus", async (key, mode) => {
     focus.focusMode = mode;
     focus.focusedCardIndex = 0;
     const renameDeck = vi.fn();
@@ -602,7 +605,7 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     dispatcher.onRenameDeck = renameDeck;
     dispatcher.onRenameColumn = renameColumn;
 
-    const event = makeKeyEvent({ key: "F2" });
+    const event = makeKeyEvent({ key });
     dispatcher.handleKeydown(event);
     await flushPromises();
 

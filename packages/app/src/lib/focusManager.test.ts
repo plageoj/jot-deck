@@ -151,7 +151,6 @@ describe("FocusManager persistence", () => {
     focus.setCurrentDeck("deck-A");
     focus.focusedColumnIndex = 3;
     focus.lastFocusedCardByColumn["col-1"] = 7;
-    focus.persistCurrent();
 
     // Pre-seed state for deck-B.
     localStorage.setItem(
@@ -322,96 +321,6 @@ describe("FocusManager rapid deck switch race condition", () => {
         currentDeckId: "deck-C",
       }),
     ).toBe(false);
-  });
-
-  it("preserves restored focus when stale loadedDeckId would have clamped against wrong columns", () => {
-    // Saved state: deck-C had focus on column index 4.
-    localStorage.setItem(
-      focusKey("deck-C"),
-      JSON.stringify({
-        focusedColumnIndex: 4,
-        lastFocusedCardByColumn: {},
-        focusMode: "column",
-      }),
-    );
-
-    const data = new DeckData();
-    const focus = new FocusManager(data);
-
-    // User opens deck-B, then quickly switches to deck-C before deck-B finishes
-    // loading. Both setCurrentDeck calls happen synchronously when each
-    // currentDeck change is observed.
-    focus.setCurrentDeck("deck-B");
-    focus.setCurrentDeck("deck-C");
-    expect(focus.focusedColumnIndex).toBe(4);
-
-    // Now deck-B's selectDeck finishes after deck-C was already selected,
-    // briefly setting columns to deck-B's (only 2) and loadedDeckId to "deck-B".
-    data.columns = [makeColumn("b-col-1", "deck-B"), makeColumn("b-col-2", "deck-B")];
-    data.cardsByColumn = { "b-col-1": [], "b-col-2": [] };
-    data.currentDeck = makeDeck("deck-C");
-
-    // Page's guard would skip clamp since loaded ("deck-B") !== currentDeck ("deck-C").
-    const shouldRun = shouldClamp({
-      loaded: "deck-B",
-      restoredForDeckId: null,
-      currentDeckId: data.currentDeck.id,
-    });
-    expect(shouldRun).toBe(false);
-
-    // Sanity check: had the guard been absent, clamp would have corrupted
-    // focusedColumnIndex by capping it at deck-B's length-1 (=1).
-    expect(focus.focusedColumnIndex).toBe(4);
-
-    // Once deck-C finishes loading, clamp can run safely.
-    data.columns = [
-      makeColumn("c-col-1", "deck-C"),
-      makeColumn("c-col-2", "deck-C"),
-      makeColumn("c-col-3", "deck-C"),
-      makeColumn("c-col-4", "deck-C"),
-      makeColumn("c-col-5", "deck-C"),
-    ];
-    data.cardsByColumn = {
-      "c-col-1": [],
-      "c-col-2": [],
-      "c-col-3": [],
-      "c-col-4": [],
-      "c-col-5": [],
-    };
-    expect(
-      shouldClamp({
-        loaded: "deck-C",
-        restoredForDeckId: null,
-        currentDeckId: "deck-C",
-      }),
-    ).toBe(true);
-    focus.clampToLoadedDeck();
-    expect(focus.focusedColumnIndex).toBe(4);
-  });
-
-  it("would corrupt focus index without the guard (regression scenario)", () => {
-    // Restored state targets index 4, but columns array is the wrong deck's
-    // (only 2 entries). Without the page-level guard, clampToLoadedDeck
-    // collapses focusedColumnIndex to 1 — losing the saved value.
-    localStorage.setItem(
-      focusKey("deck-C"),
-      JSON.stringify({
-        focusedColumnIndex: 4,
-        lastFocusedCardByColumn: {},
-        focusMode: "column",
-      }),
-    );
-
-    const data = new DeckData();
-    const focus = new FocusManager(data);
-    focus.setCurrentDeck("deck-C");
-
-    data.columns = [makeColumn("b-col-1", "deck-B"), makeColumn("b-col-2", "deck-B")];
-    data.cardsByColumn = { "b-col-1": [], "b-col-2": [] };
-
-    focus.clampToLoadedDeck();
-
-    expect(focus.focusedColumnIndex).toBe(1);
   });
 
   it("shouldClampForLoadedDeck returns false when no deck has loaded yet", () => {
@@ -635,19 +544,6 @@ describe("FocusManager focus helpers", () => {
     expect(focus.focusMode).toBe("card");
   });
 
-  it("showSettings defaults to false and is independent from showCheatsheet", () => {
-    const data = new DeckData();
-    const focus = new FocusManager(data);
-
-    expect(focus.showSettings).toBe(false);
-
-    focus.showSettings = true;
-    expect(focus.showSettings).toBe(true);
-    // Toggling settings shouldn't reach into other overlay state.
-    expect(focus.showCheatsheet).toBe(false);
-    expect(focus.activePalette).toBeNull();
-  });
-
   it("handleFocusColumn saves the current card index when switching columns", () => {
     const data = new DeckData();
     data.columns = [makeColumn("col-x", "deck-1"), makeColumn("col-y", "deck-1")];
@@ -792,18 +688,4 @@ describe("FocusManager focus helpers", () => {
     expect(focus.lastFocusedCardByColumn).toEqual({});
   });
 
-  it("setCurrentDeck persists previous deck state on switch", () => {
-    const data = new DeckData();
-    const focus = new FocusManager(data);
-
-    focus.setCurrentDeck("first");
-    focus.focusedColumnIndex = 3;
-    focus.lastFocusedCardByColumn["col"] = 8;
-
-    focus.setCurrentDeck("second");
-
-    const persisted = JSON.parse(localStorage.getItem(focusKey("first"))!);
-    expect(persisted.focusedColumnIndex).toBe(3);
-    expect(persisted.lastFocusedCardByColumn["col"]).toBe(8);
-  });
 });

@@ -1,5 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
+import {
+  DEFAULT_KEYBINDINGS,
+  setKeybindingOverrides,
+  signatureOf,
+} from "./keybindings";
 
 function key(
   k: string,
@@ -73,31 +78,41 @@ describe("normalizeKey", () => {
 });
 
 describe("KeySequenceProcessor", () => {
+  // Run against a fixed test table so changes to the default keymap (covered
+  // in keybindings.test.ts) cannot break the sequencing logic tested here.
+  beforeEach(() => {
+    const disableDefaults = Object.fromEntries(
+      DEFAULT_KEYBINDINGS.map((b) => [signatureOf(b), null]),
+    );
+    setKeybindingOverrides(disableDefaults, [
+      { sequence: "j", action: "single", modes: ["column"], description: "" },
+      { sequence: "dd", action: "double", modes: ["column"], description: "" },
+    ]);
+  });
+
+  afterEach(() => setKeybindingOverrides({}));
+
   it("resolves an exact single-key binding to an action", () => {
     const p = new KeySequenceProcessor();
-    expect(p.process("j", "column")).toEqual({
-      type: "action",
-      action: "enterCardFocusFirst",
-    });
+    expect(p.process("j", "column")).toEqual({ type: "action", action: "single" });
   });
 
   it("waits on a valid prefix then resolves the full sequence", () => {
     const p = new KeySequenceProcessor();
     expect(p.process("d", "column")).toEqual({ type: "prefix" });
-    expect(p.process("d", "column")).toEqual({
-      type: "action",
-      action: "deleteColumn",
-    });
+    expect(p.process("d", "column")).toEqual({ type: "action", action: "double" });
   });
 
   it("falls back to the single key when the accumulated sequence fails", () => {
     const p = new KeySequenceProcessor();
     // "d" is a prefix; "dj" is not a binding, so it retries "j" alone.
     p.process("d", "column");
-    expect(p.process("j", "column")).toEqual({
-      type: "action",
-      action: "enterCardFocusFirst",
-    });
+    expect(p.process("j", "column")).toEqual({ type: "action", action: "single" });
+  });
+
+  it("only matches bindings for the given mode", () => {
+    const p = new KeySequenceProcessor();
+    expect(p.process("j", "card")).toEqual({ type: "none" });
   });
 
   it("returns none for keys with no binding or prefix", () => {

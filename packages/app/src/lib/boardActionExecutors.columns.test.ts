@@ -90,14 +90,6 @@ describe("column operations from column focus", () => {
     await actions.executeColumnAction("reorderColumnRight");
     expect(boardState.moveColumnCalls).toHaveLength(0);
   });
-
-  it("renameColumn requests a rename from column and card focus", async () => {
-    const renameColumn = vi.fn();
-    actions = createBoardActions(data, focus, { renameColumn });
-    await actions.executeColumnAction("renameColumn");
-    await actions.executeCardAction("renameColumn");
-    expect(renameColumn).toHaveBeenCalledTimes(2);
-  });
 });
 
 describe("column creation from card focus", () => {

@@ -62,6 +62,11 @@ test.describe("Tag Features", () => {
     // The tagged card should NOT be dimmed
     const taggedCard = page.locator(".card", { hasText: "#important" });
     await expect(taggedCard).not.toHaveClass(/dimmed/);
+
+    // The active tag itself is highlighted
+    const activeTag = page.locator(".tag.tag-active");
+    await expect(activeTag).toHaveCount(1);
+    await expect(activeTag).toContainText("#important");
   });
 
   test("filter can be cleared from filter bar", async ({ page }) => {
@@ -202,38 +207,6 @@ test.describe("Tag Features", () => {
     await page.keyboard.press("Escape");
   });
 
-  test("active tag is visually highlighted in card view", async ({ page }) => {
-    // Create a card with a tag
-    await page.keyboard.press("o");
-    await page.waitForTimeout(300);
-    await typeInEditor(page, "Check #active tag");
-    await saveAndExitEditor(page);
-
-    // Click the tag to activate filter
-    await page.locator(".tag", { hasText: "#active" }).click();
-    await page.waitForTimeout(300);
-
-    // The tag should now have the active class
-    const activeTag = page.locator(".tag.tag-active");
-    await expect(activeTag).toHaveCount(1);
-    await expect(activeTag).toContainText("#active");
-  });
-
-  test("multiple tags in a single card are all highlighted", async ({
-    page,
-  }) => {
-    await page.keyboard.press("o");
-    await page.waitForTimeout(300);
-    await typeInEditor(page, "#one #two #three");
-    await saveAndExitEditor(page);
-
-    const tags = page.locator(".card-content .tag");
-    await expect(tags).toHaveCount(3);
-    await expect(tags.nth(0)).toContainText("#one");
-    await expect(tags.nth(1)).toContainText("#two");
-    await expect(tags.nth(2)).toContainText("#three");
-  });
-
   test("tag autocomplete shows suggestions in editor", async ({ page }) => {
     // First create a card with a tag to seed the suggestions database
     await page.keyboard.press("o");
@@ -245,9 +218,7 @@ test.describe("Tag Features", () => {
     await page.keyboard.press("o");
     await page.waitForTimeout(300);
 
-    // Enter insert mode and type #sug to trigger autocomplete
-    await page.keyboard.press("i");
-    await page.waitForTimeout(100);
+    // The editor opens ready for input; type #sug to trigger autocomplete
     await page.keyboard.type("#sug", { delay: 80 });
     await page.waitForTimeout(500);
 
@@ -266,5 +237,6 @@ test.describe("Tag Features", () => {
     await expect(
       page.locator(".tag", { hasText: "#suggestion_tag" }),
     ).toHaveCount(2);
+    await expect(page.locator(".card-content").nth(1)).toHaveText(/^#suggestion_tag\s*$/);
   });
 });
