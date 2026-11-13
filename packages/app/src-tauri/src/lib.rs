@@ -11,6 +11,7 @@ use std::sync::{Mutex, MutexGuard};
 use tauri::{Emitter, Manager, State};
 
 mod reporter;
+pub mod startup_trace;
 
 /// Tauri event emitted when another process (CLI / MCP bridge) commits to the
 /// shared DB, so the GUI can re-read the visible cards (008-mcp-server.md §3).
@@ -474,12 +475,18 @@ fn spawn_external_change_watcher(handle: tauri::AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    startup_trace::mark("run");
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
+        .on_page_load(|_webview, payload| match payload.event() {
+            tauri::webview::PageLoadEvent::Started => startup_trace::mark("page_load_started"),
+            tauri::webview::PageLoadEvent::Finished => startup_trace::mark("page_load_finished"),
+        })
         .setup(|app| {
+            startup_trace::mark("setup_start");
             // データベースのパスを設定
             let app_data_dir = app.path().app_data_dir().expect("Failed to get app data dir");
             std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data dir");
@@ -487,12 +494,14 @@ pub fn run() {
 
             let mut conn = create_file_db(db_path.to_str().unwrap())
                 .expect("Failed to create database");
+            startup_trace::mark("db_opened");
 
             // 起動時に 30 日を過ぎた論理削除データと変更履歴を物理削除する
             // （002 §3 / 008 §5.1）。失敗しても起動は止めない（次回起動で再試行）。
             if let Err(e) = run_cleanup_batch(&mut conn) {
                 eprintln!("[jot-deck] cleanup failed: {}", e);
             }
+            startup_trace::mark("cleanup_done");
 
             app.manage(AppState {
                 conn: Mutex::new(conn),
@@ -502,6 +511,7 @@ pub fn run() {
 
             spawn_external_change_watcher(app.handle().clone());
 
+            startup_trace::mark("setup_end");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -554,6 +564,8 @@ pub fn run() {
             reporter::start_reporter,
             reporter::stop_reporter,
             reporter::list_running_reporters,
+            // Opt-in startup timing (JOT_DECK_STARTUP_TRACE)
+            startup_trace::report_startup_trace,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

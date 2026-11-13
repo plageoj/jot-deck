@@ -35,6 +35,17 @@ pnpm build            # Build only the frontend (Vite)
 pnpm web:build        # Build landing page
 ```
 
+### Measuring startup time
+```powershell
+pnpm tauri build --no-bundle                  # Release exe at target/release/jot-deck-tauri.exe
+pwsh scripts/measure-startup.ps1 -Runs 10     # Launch N times, print per-stage ms since spawn + median
+```
+Setting `JOT_DECK_STARTUP_TRACE=<file>` makes the app append one JSON line per launch with
+epoch-ms marks for each stage (Rust `main` → setup → page load → frontend mount → data loaded
+→ first board paint). Unset, tracing is a no-op. The script uses your real app data DB and
+opens the last-used deck. Tauri builds the config window (WebView2 on Windows) before the
+`setup` hook runs, so `main` → `setup_start` is dominated by window/WebView creation.
+
 ### Type Checking
 ```bash
 pnpm --filter app check       # Run svelte-check
