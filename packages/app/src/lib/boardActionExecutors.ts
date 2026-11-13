@@ -11,7 +11,7 @@ interface BoardActionContext {
   focusedColumn: Column | undefined;
   focusedCards: Card[];
   focusedCard: Card | undefined;
-  startEdit: ((cardId: string, entry?: EditEntry) => void | Promise<void>) | null;
+  startEdit: (cardId: string, entry?: EditEntry) => void | Promise<void>;
   renameColumn: (() => void) | null;
   runTask: (task: Promise<unknown>) => void;
 }
@@ -213,8 +213,7 @@ export class BoardActionExecutors {
     const cards = data.cardsByColumn[focusedColumn.id] ?? [];
     focus.focusedCardIndex = cards.findIndex((candidate) => candidate.id === card.id);
     focus.focusMode = "card";
-    if (startEdit) await startEdit(card.id);
-    else focus.editingCardId = card.id;
+    await startEdit(card.id);
   }
 
   async createColumnFromPalette(): Promise<void> {
@@ -327,13 +326,9 @@ export class BoardActionExecutors {
   }
 
   private cardStartEdit(entry: EditEntry): void {
-    const { data, focus, focusedCard, startEdit, runTask } = this.context();
+    const { data, focusedCard, startEdit, runTask } = this.context();
     if (!focusedCard || data.isStreaming(focusedCard.id)) return;
-    if (startEdit) {
-      runTask(Promise.resolve().then(() => startEdit(focusedCard.id, entry)));
-    } else {
-      focus.startEdit(focusedCard.id);
-    }
+    runTask(Promise.resolve().then(() => startEdit(focusedCard.id, entry)));
   }
 
   private async cardCreate(position: number): Promise<void> {
@@ -347,8 +342,7 @@ export class BoardActionExecutors {
     focus.focusedCardIndex = updated.findIndex((candidate) => candidate.id === card.id);
     if (focus.focusedCardIndex === -1) focus.focusedCardIndex = 0;
     focus.focusMode = "card";
-    if (startEdit) await startEdit(card.id);
-    else focus.startEdit(card.id);
+    await startEdit(card.id);
   }
 
   private async cardDelete(card = this.context().focusedCard): Promise<void> {

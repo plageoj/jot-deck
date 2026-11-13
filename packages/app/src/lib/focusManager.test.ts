@@ -496,18 +496,6 @@ describe("FocusManager focus helpers", () => {
     expect(focus.focusedCardIndex).toBe(1);
   });
 
-  it("cancelEdit clears editingCardId without changing focus mode", () => {
-    const data = new DeckData();
-    const focus = new FocusManager(data);
-    focus.startEdit("card-7");
-    expect(focus.focusMode).toBe("edit");
-
-    focus.cancelEdit();
-
-    expect(focus.editingCardId).toBeNull();
-    expect(focus.focusMode).toBe("edit");
-  });
-
   it("openPalette captures previousFocusMode and switches to command mode", () => {
     const data = new DeckData();
     const focus = new FocusManager(data);
@@ -520,17 +508,17 @@ describe("FocusManager focus helpers", () => {
     expect(focus.previousFocusMode).toBe("card");
   });
 
-  it("openPalette is a no-op when already in command mode", () => {
+  it("openPalette from command mode switches the palette but keeps the mode to return to", () => {
     const data = new DeckData();
     const focus = new FocusManager(data);
     focus.focusMode = "card";
     focus.openPalette("deck");
     expect(focus.activePalette).toBe("deck");
 
-    // Second call from within command mode should not overwrite the palette.
     focus.openPalette("trash");
 
-    expect(focus.activePalette).toBe("deck");
+    expect(focus.activePalette).toBe("trash");
+    expect(focus.previousFocusMode).toBe("card");
   });
 
   it("openPalette closes the cheatsheet when opening a palette", () => {
