@@ -279,6 +279,16 @@ fn non_empty<'de, D: Deserializer<'de>>(de: D) -> Result<Option<String>, D::Erro
     Ok(Option::<String>::deserialize(de)?.filter(|s| !s.is_empty()))
 }
 
+/// 既定値のある任意引数。`null` は省略と同じに扱う（LLM クライアントは任意の欄に
+/// `null` を送りがち）。`default` と組で使う。
+fn null_as_default<'de, D, T>(de: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(de)?.unwrap_or_default())
+}
+
 /// 省略（変更しない）と、`null` / 空文字（クリア）を区別する。`default` と組で使う
 /// ―― serde はキーがあるときだけこの関数を呼ぶ。
 fn clearable<'de, D: Deserializer<'de>>(de: D) -> Result<Option<Option<String>>, D::Error> {
@@ -304,7 +314,7 @@ struct SearchArgs {
     query: Option<String>,
     #[serde(default, deserialize_with = "non_empty")]
     column_id: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     tags: Vec<String>,
     #[serde(default)]
     min_score: Option<i32>,
@@ -359,9 +369,9 @@ struct EnsureColumnArgs {
     #[serde(default, deserialize_with = "non_empty")]
     deck_id: Option<String>,
     name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     description: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     private: bool,
 }
 
@@ -935,6 +945,34 @@ mod tests {
         assert_eq!(kept.result["description"], "papers");
         let cleared = update_column(&f.conn, &p, &author(), &json!({ "column_id": f.col_a, "description": null })).unwrap();
         assert!(cleared.result["description"].is_null());
+    }
+
+    #[test]
+    fn null_optional_arguments_count_as_omitted() {
+        let f = fixture();
+        let p = policy(DeckScope::AnyDeck);
+        let found = search_cards(
+            &f.conn,
+            &p,
+            &json!({ "deck_id": f.deck_a, "query": null, "column_id": null, "tags": null, "min_score": null, "limit": null }),
+        )
+        .unwrap();
+        assert_eq!(found["cards"].as_array().unwrap().len(), 1);
+        let ensured = ensure_column(
+            &f.conn,
+            &p,
+            &author(),
+            &json!({ "deck_id": f.deck_a, "name": "Todo", "description": null, "private": null }),
+        )
+        .unwrap();
+        assert_eq!(ensured.result["created"], true);
+        assert!(move_card(
+            &f.conn,
+            &p,
+            &author(),
+            &json!({ "card_id": f.card_a, "to_column_id": null, "before_card_id": null, "after_card_id": null }),
+        )
+        .is_ok());
     }
 
     #[test]

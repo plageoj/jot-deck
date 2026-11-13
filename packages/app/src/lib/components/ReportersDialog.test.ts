@@ -866,6 +866,34 @@ describe("ReportersDialog under Tauri", () => {
     expect(await screen.findByText("Stopped")).toBeTruthy();
   });
 
+  it("shows a reporter that exited during the load as Stopped", async () => {
+    let emitExit: ((e: { payload: { reporter_id: string } }) => void) | undefined;
+    mockListen.mockImplementation(async (_event: string, handler: unknown) => {
+      emitExit = handler as (e: { payload: { reporter_id: string } }) => void;
+      return () => {};
+    });
+    const pendingColumns: ((cols: Column[]) => void)[] = [];
+    const finishColumns = (cols: Column[]) => pendingColumns.forEach((resolve) => resolve(cols));
+    const listRunning = vi.fn(async () => ["r1"]);
+
+    render(ReportersDialog, {
+      props: makeProps({
+        listReporters: vi.fn(async () => [makeReporter("r1")]),
+        listRunning,
+        // Columns stay pending while the running snapshot has already landed.
+        loadColumns: vi.fn(
+          () => new Promise<Column[]>((resolve) => pendingColumns.push(resolve)),
+        ),
+      }),
+    });
+    await waitFor(() => expect(listRunning).toHaveBeenCalled());
+    expect(emitExit).toBeDefined();
+    emitExit?.({ payload: { reporter_id: "r1" } });
+    finishColumns(COLUMNS);
+
+    expect(await screen.findByText("Stopped")).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
+  });
 
   it("drops a subscription that resolves after the dialog is closed", async () => {
     const unlisten = vi.fn();

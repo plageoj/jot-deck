@@ -123,14 +123,19 @@
     return { columns, errors };
   }
 
+  // Reporters that exited while a load was in flight, so the `listRunning`
+  // snapshot it returns can't show one that already stopped as Running.
+  let exitedDuringLoad: string[] = [];
+
   async function load() {
     loading = true;
     loadError = null;
+    exitedDuringLoad = [];
     const columnsTask = loadAllColumns();
     try {
       const [list, run] = await Promise.all([listReporters(), listRunning()]);
       configs = list;
-      running = run;
+      running = run.filter((id) => !exitedDuringLoad.includes(id));
     } catch (e) {
       loadError = `Failed to load reporters: ${e}`;
     }
@@ -145,19 +150,24 @@
   onMount(async () => {
     dialogRef?.showModal();
     if (!desktop) return;
-    await load();
     // A child process ending on its own emits `reporter-exit`; drop its badge.
+    // Subscribe before loading so an exit during the load isn't missed.
     const { listen } = await import("@tauri-apps/api/event");
     const unlisten = await listen<{ reporter_id: string }>(
       "reporter-exit",
       ({ payload }) => {
+        exitedDuringLoad = [...exitedDuringLoad, payload.reporter_id];
         running = running.filter((id) => id !== payload.reporter_id);
       },
     );
     // Closed while we were subscribing: drop it immediately instead of
     // handing it to a component that will never run onDestroy again.
-    if (destroyed) unlisten();
-    else reporterExitUnlisten = unlisten;
+    if (destroyed) {
+      unlisten();
+      return;
+    }
+    reporterExitUnlisten = unlisten;
+    await load();
   });
 
   onDestroy(() => {
