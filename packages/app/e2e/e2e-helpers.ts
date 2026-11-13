@@ -32,14 +32,11 @@ export async function createFreshDeck(page: Page) {
 
   // Select the "New deck" action row
   await page.locator(".palette-item", { hasText: "New deck" }).click();
-  await page.waitForTimeout(500);
 
-  // Now on the new deck with no columns — create one
-  const noColumnsMessage = page.locator("text=No columns in this deck");
-  if (await noColumnsMessage.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await page.click("text=Create Column");
-    await page.waitForTimeout(500);
-  }
+  // A new deck always starts without columns — create one
+  await expect(page.locator("text=No columns in this deck")).toBeVisible();
+  await page.click("text=Create Column");
+  await expect(page.locator(".column")).toHaveCount(1);
 }
 
 // Helper to ensure a deck and column exist (idempotent setup)

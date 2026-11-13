@@ -417,6 +417,17 @@ mod tests {
     fn list_columns_excludes_private_and_deleted() {
         let f = setup();
         add_card(&f, &f.public_col, "hello");
+        let deleted_card = add_card(&f, &f.public_col, "gone");
+        card::soft_delete(&f.conn, &deleted_card).unwrap();
+        let deleted_col = column::create(
+            &f.conn,
+            NewColumn {
+                deck_id: f.deck_id.clone(),
+                name: "Deleted".to_string(),
+            },
+        )
+        .unwrap();
+        column::soft_delete(&f.conn, &deleted_col.id).unwrap();
 
         let cols = list_columns(&f.conn, &f.deck_id).unwrap();
         assert_eq!(cols.len(), 1);

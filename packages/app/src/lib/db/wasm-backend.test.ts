@@ -53,17 +53,30 @@ describe("WasmBackend GUI card edit surface", () => {
     });
 
     const locked = await backend.acquireCardLock(card.id, "user");
-    expect(locked.id).toBe(card.id);
+    expect(locked.locked_by).toBe("user");
 
+    // :w saves under the lease and keeps it.
+    const saved = await backend.updateCardContentCasOwned(
+      card.id,
+      "user",
+      "middle #mid",
+      locked.updated_at,
+    );
+    expect(saved.content).toBe("middle #mid");
+    expect(saved.locked_by).toBe("user");
+
+    // :wq saves and releases in one write.
     const updated = await backend.updateCardContentCasAndRelease(
       card.id,
       "user",
       "after #new",
-      locked.updated_at,
+      saved.updated_at,
     );
     expect(updated.content).toBe("after #new");
     expect(updated.locked_by).toBeNull();
     expect(updated.locked_at).toBeNull();
+    // Tags follow the content inside the same transaction.
+    expect((await backend.getTagsByDeck(deck.id)).map((tag) => tag.name)).toEqual(["new"]);
   });
 
   it("does not let a non-owner save or release another editor's lease", async () => {
@@ -104,17 +117,22 @@ describe("WasmBackend GUI card edit surface", () => {
     const column = await backend.createColumn({ deck_id: deck.id, name: "Inbox" });
     const filled = await backend.createCard({ column_id: column.id, content: "keep" });
     await backend.acquireCardLock(filled.id, "owner");
-    await expect(backend.discardEmptyCard(filled.id, "owner")).rejects.toThrow();
+    await expect(backend.discardEmptyCard(filled.id, "owner")).rejects.toThrow(
+      "Cannot discard a card with content",
+    );
 
     const empty = await backend.createCard({ column_id: column.id, content: "" });
     await backend.acquireCardLock(empty.id, "other");
-    await expect(backend.discardEmptyCard(empty.id, "owner")).rejects.toThrow();
+    await expect(backend.discardEmptyCard(empty.id, "owner")).rejects.toThrow(
+      "Card edit lock is not held",
+    );
 
-    await backend.acquireCardLock(empty.id, "owner").catch(() => {});
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
       vi.setSystemTime(Date.now() + 121_000);
-      await expect(backend.discardEmptyCard(empty.id, "other")).rejects.toThrow();
+      await expect(backend.discardEmptyCard(empty.id, "other")).rejects.toThrow(
+        "Card edit lock is not held",
+      );
     } finally {
       vi.useRealTimers();
     }
@@ -122,7 +140,7 @@ describe("WasmBackend GUI card edit surface", () => {
     expect(await backend.getCardsByColumn(column.id)).toHaveLength(2);
   });
 
-  it("rejects a stale CAS update without changing the card", async () => {
+  it("rejects a stale owned CAS update without changing the card", async () => {
     const backend = new WasmBackend();
     const deck = await backend.createDeck({ name: "Test deck" });
     const column = await backend.createColumn({
@@ -134,9 +152,13 @@ describe("WasmBackend GUI card edit surface", () => {
       content: "before",
     });
 
+    await backend.acquireCardLock(card.id, "owner");
+
     await expect(
-      backend.updateCardContentCas(card.id, "after", "stale-version"),
-    ).rejects.toThrow("Card was modified since it was read");
-    expect((await backend.getCard(card.id)).content).toBe("before");
+      backend.updateCardContentCasOwned(card.id, "owner", "after", "stale-version"),
+    ).rejects.toThrow("Card edit lock is not held, has expired, or the card was modified");
+    const unchanged = await backend.getCard(card.id);
+    expect(unchanged.content).toBe("before");
+    expect(unchanged.locked_by).toBe("owner");
   });
 });

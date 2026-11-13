@@ -72,7 +72,7 @@ mod tests {
     use super::*;
     use crate::db::create_in_memory;
     use crate::models::{NewCard, NewColumn, NewDeck, SortOrder};
-    use crate::repository::{card, column, deck, tag};
+    use crate::repository::{card, column, deck};
     use chrono::Duration;
 
     #[test]
@@ -106,9 +106,6 @@ mod tests {
             },
         )
         .unwrap();
-
-        // タグを同期
-        tag::sync_card_tags(&conn, &c.id, &c.content).unwrap();
 
         // Card を論理削除
         card::soft_delete(&conn, &c.id).unwrap();
@@ -162,45 +159,59 @@ mod tests {
             },
         )
         .unwrap();
-
-        card::create(
-            &conn,
-            NewCard {
-                column_id: col.id.clone(),
-                content: "Card 1".to_string(),
-            },
-        )
-        .unwrap();
-
-        card::create(
-            &conn,
-            NewCard {
-                column_id: col.id.clone(),
-                content: "Card 2".to_string(),
-            },
-        )
-        .unwrap();
+        for content in ["Card 1", "Card 2"] {
+            card::create(
+                &conn,
+                NewCard {
+                    column_id: col.id.clone(),
+                    content: content.to_string(),
+                },
+            )
+            .unwrap();
+        }
 
         // Column を論理削除（Card も連動削除される）
         column::soft_delete(&conn, &col.id).unwrap();
+        let cascaded: Vec<(String, bool)> = conn
+            .prepare("SELECT deleted_at, deleted_with_column FROM cards WHERE column_id = ?1")
+            .unwrap()
+            .query_map(params![&col.id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<std::result::Result<_, _>>()
+            .unwrap();
+        assert_eq!(cascaded.len(), 2);
+        assert!(cascaded.iter().all(|(_, with_column)| *with_column));
 
-        // deleted_at を 31 日前に更新
-        let old_date = (Utc::now() - Duration::days(31)).to_rfc3339();
-        conn.execute(
-            "UPDATE columns SET deleted_at = ?1 WHERE id = ?2",
-            params![&old_date, &col.id],
+        // 後から単独で論理削除した Card
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let other_col = column::create(
+            &conn,
+            NewColumn {
+                deck_id: d.id.clone(),
+                name: "Other".to_string(),
+            },
         )
         .unwrap();
-        conn.execute(
-            "UPDATE cards SET deleted_at = ?1 WHERE column_id = ?2",
-            params![&old_date, &col.id],
+        let standalone = card::create(
+            &conn,
+            NewCard {
+                column_id: other_col.id.clone(),
+                content: "Card 3".to_string(),
+            },
         )
         .unwrap();
+        card::soft_delete(&conn, &standalone.id).unwrap();
+        let standalone_deleted_at = card::get_by_id(&conn, &standalone.id)
+            .unwrap()
+            .deleted_at
+            .unwrap();
 
-        // cleanup 実行
-        let result = cleanup_old_deleted(&mut conn).unwrap();
+        // 閾値を単独削除の時刻に置く: 連動削除分だけが期限切れになる
+        let result = cleanup_with_threshold(&mut conn, &standalone_deleted_at.to_rfc3339()).unwrap();
         assert_eq!(result.deleted_columns, 1);
         assert_eq!(result.deleted_cards, 2);
+        assert!(column::get_by_id(&conn, &col.id).is_err());
+        assert!(card::get_by_id(&conn, &standalone.id).unwrap().deleted_at.is_some());
     }
 
     #[test]
