@@ -135,7 +135,7 @@ flowchart LR
 - **意味**: カードを**論理削除**（`deleted_at` を打つ）。物理削除・カラム連動削除・復元はエージェントに公開しない ―― 30 日後の物理削除は本体の cleanup が担い、復元はユーザの削除スタック（`u` / ゴミ箱）に委ねる。誤削除しても失われないことを安全域（§5）の前提にする。この tool は書き込みスコープに `delete` 権限が含まれる場合のみ有効（§5）。
 
 #### `ensure_column`
-- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`。inputSchema では必須として示し、エージェントに必ず書かせる。省略された呼び出しは空の説明として受け付ける）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
+- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string, 任意 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`。新規作成時だけ使い、既存カラムの取得では無視する）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
 - **返り値**: `{ deck_id, column_id, name, position, created }`（`created` は新規作成なら true / 既存ヒットなら false）
 - **意味**: **名前キーで get-or-create するべき等な作成**（`name` は前後の空白を除いてキーにし、空名は拒否）。同名カラムが**指定 Deck の書き込みスコープ内（可視 ∩ write allowlist）に**あればその ULID を返し（get）、無ければ末尾に作成する（create）。自由な `create` を避けることで、再送での重複列と、既存列を見落としたニアデュープ（`ToDo`/`Tasks` 乱立）を同時に抑える。
 - **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続では `ensure_column` 自体が使えない（`tools/list` から外れ、呼び出しは名前 lookup の前に capability エラーになる）。allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし書き込みスコープ内の同名カラムがあれば get として id を返す ―― **既存カラムの取得は妨げない**。名前 lookup は指定 Deck の書き込みスコープ内のみを探索し、private / allowlist 外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。

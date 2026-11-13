@@ -605,16 +605,16 @@ fn delete_card_def() -> Value {
 fn ensure_column_def() -> Value {
     json!({
         "name": "ensure_column",
-        "description": "Get-or-create a column by name in a Deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. Give a one-line `description` of what belongs in the column — it sharpens where cards get routed. Prefer this over guessing a column id.",
+        "description": "Get-or-create a column by name in a Deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. A one-line `description` of what belongs in the column is optional but sharpens where cards get routed. Prefer this over guessing a column id.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "deck_id": deck_id_prop(),
                 "name": { "type": "string", "description": "Column name (the get-or-create key)." },
-                "description": { "type": "string", "description": "One-line description of what belongs in this column (classification axis)." },
+                "description": { "type": "string", "description": "Optional one-line description of what belongs in this column (classification axis). Used only when the column is created." },
                 "private": { "type": "boolean", "description": "Create it hidden from all connections (default false)." }
             },
-            "required": ["name", "description"],
+            "required": ["name"],
             "additionalProperties": false,
         },
     })
