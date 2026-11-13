@@ -528,6 +528,52 @@ mod tests {
     }
 
     #[test]
+    fn test_restore_brings_back_only_cascaded_cards_and_appends_at_end() {
+        use crate::models::NewCard;
+        use crate::repository::card;
+
+        let (conn, deck_id) = setup();
+        let new_column = |name: &str| NewColumn {
+            deck_id: deck_id.clone(),
+            name: name.to_string(),
+        };
+        let target = create(&conn, new_column("Target")).unwrap();
+        create(&conn, new_column("Other")).unwrap();
+        let new_card = |content: &str| NewCard {
+            column_id: target.id.clone(),
+            content: content.to_string(),
+        };
+        let standalone = card::create(&conn, new_card("deleted on its own")).unwrap();
+        let cascaded_a = card::create(&conn, new_card("cascaded a")).unwrap();
+        let cascaded_b = card::create(&conn, new_card("cascaded b")).unwrap();
+
+        card::soft_delete(&conn, &standalone.id).unwrap();
+        soft_delete(&conn, &target.id).unwrap();
+
+        // A card deleted with its column comes back only through the column.
+        assert!(matches!(
+            card::restore(&conn, &cascaded_a.id),
+            Err(JotDeckError::InvalidOperation(_))
+        ));
+        create(&conn, new_column("Added later")).unwrap();
+
+        let restored = restore(&conn, &target.id).unwrap();
+        assert_eq!(restored.position, 2, "restored column goes after the live ones");
+
+        let live: Vec<String> = card::get_by_column_id(&conn, &target.id)
+            .unwrap()
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(live, vec![cascaded_a.id.clone(), cascaded_b.id.clone()]);
+        assert!(!card::get_by_id(&conn, &cascaded_a.id).unwrap().deleted_with_column);
+
+        let still_deleted = card::get_by_id(&conn, &standalone.id).unwrap();
+        assert!(still_deleted.deleted_at.is_some());
+        assert!(!still_deleted.deleted_with_column);
+    }
+
+    #[test]
     fn test_update_description_and_private() {
         let (conn, deck_id) = setup();
 

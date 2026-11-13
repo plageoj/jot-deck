@@ -1,26 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { columnRenameToCommit, type ColumnRename } from "./columnRename";
 import type { Column } from "./types";
+import { makeColumn } from "./__fixtures__/models";
 
-function makeColumn(id: string, name: string): Column {
-  return {
-    id,
-    deck_id: "deck-a",
-    name,
-    position: 0,
-    description: null,
-    private: false,
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    deleted_at: null,
-  };
+function namedColumn(id: string, deckId: string, name: string): Column {
+  return { ...makeColumn(id, deckId), name };
 }
 
 function makeRename(draft: string): ColumnRename {
   return { deckId: "deck-a", columnId: "col-1", originalName: "Inbox", draft, focusRequest: 1 };
 }
 
-const deckAColumns = [makeColumn("col-1", "Inbox")];
+const deckAColumns = [namedColumn("col-1", "deck-a", "Inbox")];
 
 describe("columnRenameToCommit", () => {
   it("returns the trimmed draft", () => {
@@ -36,7 +27,7 @@ describe("columnRenameToCommit", () => {
   });
 
   it("still saves a draft from another deck after a deck switch", () => {
-    const deckBColumns = [makeColumn("col-9", "Elsewhere")];
+    const deckBColumns = [namedColumn("col-9", "deck-b", "Elsewhere")];
     expect(columnRenameToCommit(makeRename("Later"), "deck-b", deckBColumns)).toBe("Later");
   });
 });

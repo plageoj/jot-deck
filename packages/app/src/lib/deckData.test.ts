@@ -217,6 +217,19 @@ describe("DeckData CRUD", () => {
     expect(fresh.decks.find((d) => d.id === "deck-2")).toBeUndefined();
   });
 
+  it("deleteDeck on the current deck switches to the first remaining deck", async () => {
+    state.decks = [makeDeck("deck-1"), makeDeck("deck-2"), makeDeck("deck-3")];
+    const fresh = new DeckData();
+    await fresh.init();
+    await fresh.selectDeck(fresh.decks[1]);
+    expect(fresh.currentDeck?.id).toBe("deck-2");
+
+    expect(await fresh.deleteDeck("deck-2")).toBe(true);
+    expect(fresh.decks.map((d) => d.id)).toEqual(["deck-1", "deck-3"]);
+    expect(fresh.currentDeck?.id).toBe("deck-1");
+    expect(fresh.loadedDeckId).toBe("deck-1");
+  });
+
   it("renameColumn updates the column entry", async () => {
     const updated = await data.renameColumn("col-active", "Renamed Col");
     expect(updated?.name).toBe("Renamed Col");
@@ -321,9 +334,17 @@ describe("DeckData CRUD", () => {
     reload.mockRestore();
   });
 
-  it("updateCardScore forwards delta to the backend", async () => {
+  it("updateCardScore forwards delta to the backend and is not undoable", async () => {
+    await data.renameColumn("col-active", "Renamed Col");
     await data.updateCardScore("card-x", 1);
     expect(state.updateCardScoreCalls).toEqual([{ id: "card-x", delta: 1 }]);
+
+    // docs/001: score changes stay out of the undo history, so undo skips
+    // past the score and reverts the rename before it.
+    await data.history.undo();
+    expect(state.updateCardScoreCalls).toHaveLength(1);
+    expect(data.columns.find((c) => c.id === "col-active")?.name).not.toBe("Renamed Col");
+    expect(data.history.canUndo).toBe(false);
   });
 
   it("createCard undo deletes the new card, redo restores it", async () => {

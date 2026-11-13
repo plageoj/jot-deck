@@ -1,27 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import type { Card, Column, Deck } from "#lib/types.ts";
-import type { DatabaseBackend } from "#lib/db/index.ts";
 import { makeCard, makeColumn, makeDeck } from "./__fixtures__/models";
+import { boardState, resetBoardState } from "./__fixtures__/boardBackend";
 
-const state = {
-  decks: [] as Deck[],
-  columns: [] as Column[],
-  cardsByColumn: new Map<string, Card[]>(),
-  tagsByDeck: [] as { id: string; name: string }[],
-};
-
-const mockBackend: Partial<DatabaseBackend> = {
-  getAllDecks: async () => state.decks,
-  setSettings: async () => {},
-  getColumnsByDeck: async () => state.columns,
-  getCardsByColumn: async (columnId: string) =>
-    state.cardsByColumn.get(columnId) ?? [],
-  getTagsByDeck: async () => state.tagsByDeck,
-};
-
-vi.mock("#lib/db/index.ts", () => ({
-  getDatabase: async () => mockBackend,
-}));
+vi.mock("#lib/db/index.ts", async () => {
+  const { mockBackend } = await import("./__fixtures__/boardBackend");
+  return { getDatabase: async () => mockBackend };
+});
 
 const { DeckData } = await import("./deckData.svelte");
 const { FocusManager, FOCUS_STATE_PREFIX } = await import("./focusManager.svelte");
@@ -31,10 +15,7 @@ const focusKey = (deckId: string) => FOCUS_STATE_PREFIX + deckId;
 describe("FocusManager persistence", () => {
   beforeEach(() => {
     localStorage.clear();
-    state.decks = [];
-    state.columns = [];
-    state.cardsByColumn = new Map();
-    state.tagsByDeck = [];
+    resetBoardState();
   });
 
   it("persists focusedColumnIndex and lastFocusedCardByColumn per deck", async () => {
@@ -72,9 +53,9 @@ describe("FocusManager persistence", () => {
   });
 
   it("clampToLoadedDeck restores card mode when the focused column has cards", async () => {
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-x", "deck-1")];
-    state.cardsByColumn = new Map([
+    boardState.decks = [makeDeck("deck-1")];
+    boardState.columns = [makeColumn("col-x", "deck-1")];
+    boardState.cardsByColumn = new Map([
       ["col-x", [makeCard("c1", "col-x"), makeCard("c2", "col-x")]],
     ]);
 
@@ -100,9 +81,9 @@ describe("FocusManager persistence", () => {
   });
 
   it("clampToLoadedDeck falls back to column mode when restored card column is empty", async () => {
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-empty", "deck-1")];
-    state.cardsByColumn = new Map([["col-empty", []]]);
+    boardState.decks = [makeDeck("deck-1")];
+    boardState.columns = [makeColumn("col-empty", "deck-1")];
+    boardState.cardsByColumn = new Map([["col-empty", []]]);
 
     localStorage.setItem(
       focusKey("deck-1"),
@@ -123,9 +104,9 @@ describe("FocusManager persistence", () => {
   });
 
   it("includes the current focused card index for the focused column when persisting", async () => {
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-x", "deck-1", { position: 0 }), makeColumn("col-y", "deck-1", { position: 1 })];
-    state.cardsByColumn = new Map([
+    boardState.decks = [makeDeck("deck-1")];
+    boardState.columns = [makeColumn("col-x", "deck-1", { position: 0 }), makeColumn("col-y", "deck-1", { position: 1 })];
+    boardState.cardsByColumn = new Map([
       ["col-x", [makeCard("c1", "col-x"), makeCard("c2", "col-x")]],
       ["col-y", [makeCard("c3", "col-y"), makeCard("c4", "col-y"), makeCard("c5", "col-y")]],
     ]);
@@ -165,7 +146,7 @@ describe("FocusManager persistence", () => {
     expect(focus.focusedColumnIndex).toBe(1);
     expect(focus.lastFocusedCardByColumn["col-2"]).toBe(4);
 
-    // Switching back restores deck-A state.
+    // Switching back restores deck-A boardState.
     focus.setCurrentDeck("deck-A");
     expect(focus.focusedColumnIndex).toBe(3);
     expect(focus.lastFocusedCardByColumn["col-1"]).toBe(7);
@@ -186,9 +167,9 @@ describe("FocusManager persistence", () => {
   });
 
   it("clampToLoadedDeck applies saved card index for the restored column", async () => {
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-x", "deck-1", { position: 0 }), makeColumn("col-y", "deck-1", { position: 1 })];
-    state.cardsByColumn = new Map([
+    boardState.decks = [makeDeck("deck-1")];
+    boardState.columns = [makeColumn("col-x", "deck-1", { position: 0 }), makeColumn("col-y", "deck-1", { position: 1 })];
+    boardState.cardsByColumn = new Map([
       ["col-x", [makeCard("c1", "col-x")]],
       ["col-y", [makeCard("c2", "col-y"), makeCard("c3", "col-y"), makeCard("c4", "col-y")]],
     ]);
@@ -212,9 +193,9 @@ describe("FocusManager persistence", () => {
   });
 
   it("clampToLoadedDeck clamps focusedColumnIndex to available columns", async () => {
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-only", "deck-1", { position: 0 })];
-    state.cardsByColumn = new Map([["col-only", [makeCard("c1", "col-only")]]]);
+    boardState.decks = [makeDeck("deck-1")];
+    boardState.columns = [makeColumn("col-only", "deck-1", { position: 0 })];
+    boardState.cardsByColumn = new Map([["col-only", [makeCard("c1", "col-only")]]]);
 
     localStorage.setItem(
       focusKey("deck-1"),
@@ -234,9 +215,9 @@ describe("FocusManager persistence", () => {
   });
 
   it("clampToLoadedDeck clamps stale card index against the actual card list", async () => {
-    state.decks = [makeDeck("deck-1")];
-    state.columns = [makeColumn("col-x", "deck-1")];
-    state.cardsByColumn = new Map([
+    boardState.decks = [makeDeck("deck-1")];
+    boardState.columns = [makeColumn("col-x", "deck-1")];
+    boardState.cardsByColumn = new Map([
       ["col-x", [makeCard("c1", "col-x"), makeCard("c2", "col-x")]],
     ]);
 
@@ -287,10 +268,7 @@ describe("FocusManager rapid deck switch race condition", () => {
 
   beforeEach(() => {
     localStorage.clear();
-    state.decks = [];
-    state.columns = [];
-    state.cardsByColumn = new Map();
-    state.tagsByDeck = [];
+    resetBoardState();
   });
 
   it("skips clampToLoadedDeck when loadedDeckId belongs to a stale deck switch", () => {
@@ -337,10 +315,7 @@ describe("FocusManager rapid deck switch race condition", () => {
 describe("FocusManager focus helpers", () => {
   beforeEach(() => {
     localStorage.clear();
-    state.decks = [];
-    state.columns = [];
-    state.cardsByColumn = new Map();
-    state.tagsByDeck = [];
+    resetBoardState();
   });
 
   it("saveCurrentCardIndex stores focusedCardIndex under the focused column", () => {

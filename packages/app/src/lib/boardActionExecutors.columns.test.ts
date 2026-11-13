@@ -3,9 +3,10 @@ import type { Column } from "#lib/types.ts";
 import type { DeckData } from "#lib/deckData.svelte.ts";
 import type { FocusManager } from "#lib/focusManager.svelte.ts";
 import type { BoardActionExecutors } from "#lib/boardActionExecutors.ts";
-import { makeCard, makeColumn } from "./__fixtures__/models";
+import { makeColumn } from "./__fixtures__/models";
+import { threeColumnBoard, twoColumnBoard } from "./__fixtures__/boards";
 import { boardState } from "./__fixtures__/boardBackend";
-import { createBoardActions, setupBoard } from "./__fixtures__/boardHarness";
+import { createBoardActions } from "./__fixtures__/boardHarness";
 
 // Column operations executed by BoardActionExecutors, regardless of the focus
 // mode they are invoked from: creation, deletion, reordering, and rename
@@ -22,18 +23,7 @@ describe("column operations from column focus", () => {
   let actions: BoardActionExecutors;
 
   beforeEach(async () => {
-    ({ data, focus } = await setupBoard({
-      columns: [
-        makeColumn("col-0", "deck-1", { position: 0 }),
-        makeColumn("col-1", "deck-1", { position: 1 }),
-        makeColumn("col-2", "deck-1", { position: 2 }),
-      ],
-      cards: {
-        "col-0": [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")],
-        "col-1": [makeCard("c-1-a", "col-1")],
-        "col-2": [],
-      },
-    }));
+    ({ data, focus } = await threeColumnBoard());
     focus.focusMode = "column";
     focus.focusedColumnIndex = 1;
     actions = createBoardActions(data, focus);
@@ -98,20 +88,7 @@ describe("column creation from card focus", () => {
   let actions: BoardActionExecutors;
 
   beforeEach(async () => {
-    ({ data, focus } = await setupBoard({
-      columns: [
-        makeColumn("col-0", "deck-1", { position: 0 }),
-        makeColumn("col-1", "deck-1", { position: 1 }),
-      ],
-      cards: {
-        "col-0": [
-          makeCard("c-0-a", "col-0"),
-          makeCard("c-0-b", "col-0"),
-          makeCard("c-0-c", "col-0"),
-        ],
-        "col-1": [makeCard("c-1-a", "col-1")],
-      },
-    }));
+    ({ data, focus } = await twoColumnBoard());
     focus.focusMode = "card";
     focus.focusedColumnIndex = 0;
     focus.focusedCardIndex = 1;

@@ -814,18 +814,30 @@ export class WasmBackend implements DatabaseBackend {
     await this.init();
     const db = this.ensureDb();
     const card = await this.getCard(id);
+    if (!card.deleted_at) throw new Error("Card is not deleted");
+    // Cards deleted with their column come back only with the column.
+    if (card.deleted_with_column) {
+      throw new Error(
+        "Cannot restore card that was deleted with column. Restore the column instead."
+      );
+    }
     const now = this.now();
 
-    // Get max position in the column
+    // Back to its original slot, clamped to the column's current tail.
     const maxResult = db.exec(
       "SELECT COALESCE(MAX(position), -1) FROM cards WHERE column_id = ? AND deleted_at IS NULL",
       [card.column_id]
     );
-    const newPosition = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
+    const tail = ((maxResult[0]?.values[0]?.[0] as number) ?? -1) + 1;
+    const newPosition = Math.min(Math.max(card.position, 0), tail);
 
-    // Restore card
     db.run(
-      "UPDATE cards SET deleted_at = NULL, deleted_with_column = 0, position = ?, updated_at = ? WHERE id = ?",
+      `UPDATE cards SET position = position + 1, updated_at = ?
+       WHERE column_id = ? AND position >= ? AND deleted_at IS NULL`,
+      [now, card.column_id, newPosition]
+    );
+    db.run(
+      "UPDATE cards SET deleted_at = NULL, position = ?, updated_at = ? WHERE id = ?",
       [newPosition, now, id]
     );
 

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { normalizeKey, KeySequenceProcessor } from "./keyProcessor";
 import {
   DEFAULT_KEYBINDINGS,
@@ -118,6 +118,23 @@ describe("KeySequenceProcessor", () => {
   it("returns none for keys with no binding or prefix", () => {
     const p = new KeySequenceProcessor();
     expect(p.process("z", "column")).toEqual({ type: "none" });
+  });
+
+  it("discards a pending prefix once the timeout elapses", () => {
+    vi.useFakeTimers();
+    try {
+      const p = new KeySequenceProcessor(500);
+      expect(p.process("d", "column")).toEqual({ type: "prefix" });
+      vi.advanceTimersByTime(499);
+      expect(p.process("d", "column")).toEqual({ type: "action", action: "double" });
+
+      expect(p.process("d", "column")).toEqual({ type: "prefix" });
+      vi.advanceTimersByTime(500);
+      // The first "d" expired, so this one starts a new sequence.
+      expect(p.process("d", "column")).toEqual({ type: "prefix" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each(["reset", "destroy"] as const)(

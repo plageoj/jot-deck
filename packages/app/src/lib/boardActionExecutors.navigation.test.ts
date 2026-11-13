@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import type { DeckData } from "#lib/deckData.svelte.ts";
 import type { FocusManager } from "#lib/focusManager.svelte.ts";
 import type { BoardActionExecutors } from "#lib/boardActionExecutors.ts";
-import { makeCard, makeColumn } from "./__fixtures__/models";
-import { createBoardActions, setupBoard } from "./__fixtures__/boardHarness";
+import { threeColumnBoard, twoColumnBoard } from "./__fixtures__/boards";
+import { createBoardActions } from "./__fixtures__/boardHarness";
 
 // Focus navigation executed by BoardActionExecutors: moving between columns
 // and cards, entering/leaving card focus, and half-page scrolling.
@@ -19,18 +19,7 @@ describe("column-focus navigation", () => {
   let actions: BoardActionExecutors;
 
   beforeEach(async () => {
-    ({ data, focus } = await setupBoard({
-      columns: [
-        makeColumn("col-0", "deck-1", { position: 0 }),
-        makeColumn("col-1", "deck-1", { position: 1 }),
-        makeColumn("col-2", "deck-1", { position: 2 }),
-      ],
-      cards: {
-        "col-0": [makeCard("c-0-a", "col-0"), makeCard("c-0-b", "col-0")],
-        "col-1": [makeCard("c-1-a", "col-1")],
-        "col-2": [],
-      },
-    }));
+    ({ data, focus } = await threeColumnBoard());
     focus.focusMode = "column";
     focus.focusedColumnIndex = 1;
     actions = createBoardActions(data, focus);
@@ -91,20 +80,7 @@ describe("card-focus navigation", () => {
   let actions: BoardActionExecutors;
 
   beforeEach(async () => {
-    ({ data, focus } = await setupBoard({
-      columns: [
-        makeColumn("col-0", "deck-1", { position: 0 }),
-        makeColumn("col-1", "deck-1", { position: 1 }),
-      ],
-      cards: {
-        "col-0": [
-          makeCard("c-0-a", "col-0"),
-          makeCard("c-0-b", "col-0"),
-          makeCard("c-0-c", "col-0"),
-        ],
-        "col-1": [makeCard("c-1-a", "col-1")],
-      },
-    }));
+    ({ data, focus } = await twoColumnBoard());
     focus.focusMode = "card";
     focus.focusedColumnIndex = 0;
     focus.focusedCardIndex = 1;
@@ -179,6 +155,16 @@ describe("card-focus navigation", () => {
     expect(focus.focusedColumnIndex).toBe(1);
     // col-1 has 1 card → restoreCardIndex falls back to length-1 = 0
     expect(focus.focusedCardIndex).toBe(0);
+  });
+
+  it("moveRight wraps from the last column to the first and restores its card", async () => {
+    await actions.executeCardAction("moveRight");
+    expect(focus.focusedColumnIndex).toBe(1);
+
+    await actions.executeCardAction("moveRight");
+    expect(focus.focusedColumnIndex).toBe(0);
+    expect(focus.focusMode).toBe("card");
+    expect(focus.focusedCardIndex).toBe(1); // remembered when leaving col-0
   });
 
   it("moveLeft navigates to the previous column and stays in card mode", async () => {

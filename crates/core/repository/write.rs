@@ -885,6 +885,40 @@ mod tests {
     }
 
     #[test]
+    fn writes_on_a_soft_deleted_card_are_not_found() {
+        let f = setup();
+        let c = append_card(&f.conn, &f.deck_id, &f.public_col, "gone", None, &sc(), &au()).unwrap();
+        card::soft_delete(&f.conn, &c.id).unwrap();
+
+        let err = patch_card(&f.conn, &f.deck_id, &c.id, "x", c.updated_at, &sc(), &au()).unwrap_err();
+        assert!(matches!(err, JotDeckError::NotFound(_)), "patch: {err:?}");
+        let err = move_card(&f.conn, &f.deck_id, &c.id, None, None, None, &sc(), &au()).unwrap_err();
+        assert!(matches!(err, JotDeckError::NotFound(_)), "move: {err:?}");
+        let err = delete_card(&f.conn, &f.deck_id, &c.id, &sc(), &au()).unwrap_err();
+        assert!(matches!(err, JotDeckError::NotFound(_)), "delete: {err:?}");
+    }
+
+    #[test]
+    fn append_into_a_soft_deleted_column_is_refused() {
+        let f = setup();
+        column::soft_delete(&f.conn, &f.public_col).unwrap();
+        let err = append_card(&f.conn, &f.deck_id, &f.public_col, "x", None, &sc(), &au()).unwrap_err();
+        assert!(matches!(err, JotDeckError::Unauthorized(_)), "{err:?}");
+        assert!(card::get_by_column_id(&f.conn, &f.public_col).unwrap().is_empty());
+    }
+
+    #[test]
+    fn move_into_a_soft_deleted_column_is_refused() {
+        let f = setup();
+        let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
+        let target = make_column(&f, "Doomed");
+        column::soft_delete(&f.conn, &target).unwrap();
+        let err = move_card(&f.conn, &f.deck_id, &a.id, Some(&target), None, None, &sc(), &au()).unwrap_err();
+        assert!(matches!(err, JotDeckError::Unauthorized(_)), "{err:?}");
+        assert_eq!(contents(&f, &f.public_col), vec!["A"]);
+    }
+
+    #[test]
     fn move_within_column_before_anchor() {
         let f = setup();
         let a = append_card(&f.conn, &f.deck_id, &f.public_col, "A", None, &sc(), &au()).unwrap();
@@ -992,8 +1026,8 @@ mod tests {
         assert_eq!(b.column.description.as_deref(), Some("tasks")); // 変更されない
     }
 
-    // create の不可（write allowlist 明示時）は allowlist 節のテストで担保する
-    // ―― allow_create は scope から導出するようになり、独立引数では作れない。
+    // write allowlist があると ensure_column は既存カラムの get だけになり、新規作成は
+    // できない。この挙動は allowlist 節のテストで確認する。
 
     #[test]
     fn ensure_column_does_not_match_private_same_name() {
