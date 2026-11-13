@@ -76,7 +76,7 @@ flowchart TB
 Jot Deck 本体がホストとなり、登録された各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。登録は Deck ごとに Reporters ダイアログで行い（名前・バイナリの絶対パス・引数・環境変数と §2.3 のスコープ。共有 `settings` テーブルのキー `reporters:{deck_id}` に保存）、同ダイアログの Start / Stop で起動・停止する。Reporter の stdin/stdout は JSON-RPC 用にホストが握り、stderr はホストの stderr にそのまま流す。この形により：
 
 - ライフサイクルが親に従属（子は `kill_on_drop` で spawn し、本体が死ねば Reporter も畳む。孤児プロセスなし）。
-- 採番・INSERT を本体 Repository に一元化する制約を**アーキテクチャで強制**できる。Reporter は DB に触る手段を物理的に持たず、ホストが GUI と同じコネクションで Reporter の要求を処理する。
+- 採番・INSERT を本体 Repository に一元化する。Reporter のプロトコルには DB を直接触る手段がなく、ホストが GUI と同じコネクションで Reporter の要求を処理する。ただし Reporter は OS サンドボックスなしでユーザー権限の子プロセスとして動くため、DB ファイルを直接開くことはできる。§2.3 のスコープが制限するのはプロトコル経由の要求だけであり、登録する Reporter バイナリは信頼できるものでなければならない。
 
 **一次 Reporter もサードパーティ Reporter も、等しく本体が spawn する。** サードパーティ製は、power-user がバイナリのフルパスを設定に登録し、本体がそれを spawn する（Claude Desktop の `mcpServers` 登録と同じ操作）。したがってサードパーティ Reporter も一次実装と**同一のトランスポート（stdio + Reporter プロトコル）と両チャネル（committed / ephemeral）**を得る。§4 のストリーミング体験はサードパーティにも等しく開かれる。MCP 経由（`008`）とは異なる到達経路である点に注意（→ §3.2）。
 
@@ -169,7 +169,7 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 | `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先は接続 Deck 内のカラムに限る。 |
 | `card.delete` | Reporter → 本体 | カードを論理削除（復元可能）。物理削除・復元はユーザの削除スタックと cleanup に委ねる。 |
 | `card.read` | Reporter → 本体 | 既存カードの読み返し（文脈把握・過去カードの更新対象特定）。 |
-| `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` / `deck.describe` | Reporter → 本体 | カラム構成・直近カード・検索・Deck の実行時実体の問い合わせ。引数と返り値は `008` §4.2 の同名 tool と同じ（`deck_id` は取らず、Reporter が登録された Deck に固定）。 |
+| `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` / `deck.describe` | Reporter → 本体 | カラム構成・直近カード・検索・Deck の実行時実体の問い合わせ。引数は `008` §4.2 の同名 tool と同じ（`deck_id` は取らず、Reporter が登録された Deck に固定）。返り値は同名 tool から接続単位の項目を除いたもの: `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` は `deck_id` を返さず、`deck.describe` の `capabilities` は `write_columns` / `pinned_deck_ids` を含まない。 |
 | `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等。`name` 必須、`description` / `private` は任意）。書き込みスコープ内に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ column_id, name, position, created }`）。 |
 | `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ）。 |
 | `column.move` | Reporter → 本体 | カラムの並べ替え。アンカー（`before_column_id` / `after_column_id`、どちらか一方。省略時は末尾）で意図を表明し、position は本体が採番。 |

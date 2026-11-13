@@ -138,7 +138,7 @@ flowchart LR
 - **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string, 必須 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
 - **返り値**: `{ deck_id, column_id, name, position, created }`（`created` は新規作成なら true / 既存ヒットなら false）
 - **意味**: **名前キーで get-or-create するべき等な作成**（`name` は前後の空白を除いてキーにし、空名は拒否）。同名カラムが**指定 Deck の書き込みスコープ内（可視 ∩ write allowlist）に**あればその ULID を返し（get）、無ければ末尾に作成する（create）。自由な `create` を避けることで、再送での重複列と、既存列を見落としたニアデュープ（`ToDo`/`Tasks` 乱立）を同時に抑える。
-- **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続、または allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし書き込みスコープ内の同名カラムがあれば get として id を返す ―― **既存カラムの取得は妨げない**。名前 lookup は指定 Deck の書き込みスコープ内のみを探索し、private / allowlist 外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
+- **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続では `ensure_column` 自体が使えない（`tools/list` から外れ、呼び出しは名前 lookup の前に capability エラーになる）。allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし書き込みスコープ内の同名カラムがあれば get として id を返す ―― **既存カラムの取得は妨げない**。名前 lookup は指定 Deck の書き込みスコープ内のみを探索し、private / allowlist 外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
 
 #### `update_column`
 - **引数**: `column_id`（string, ULID, 必須）, `name` / `description` / `private`（いずれも任意, 指定分のみ更新。空文字の `description` はクリア）
@@ -263,7 +263,7 @@ flowchart LR
 | **Deck スコープの明示引数** | 対象 Deck は呼び出しごとの `deck_id` 引数で決まり、Deck 作成・Deck 間移動は不可（不変条件）。`JOT_DECK_DECK_ID` を設定した接続だけは列挙した Deck へ**厳格に限定**され、列挙外を指す `deck_id` は authorization error になる ―― この接続では blast radius が列挙した Deck に閉じる。未設定の接続では対象 Deck を固定できず、**blast radius はこの接続がアクセスし得る全 Deck に及ぶ**。→ §4.4 / §4.5 |
 | **`private` 除外** | ユーザが立てた `private` カラムは、どの `deck_id` を指定していても全接続から読めず・書けない。フィルタは本体側。→ §4.5 |
 | **capability（opt-out）** | 接続の権限 read / append / edit / delete / structure は**既定すべて有効**（設定ゼロで指定 Deck を読み書き・再編＝§4.5 と一致）。機微な用途では個別に **deny して絞る**（例: KB 読取専用なら append 以降を deny、re-org させたくない接続は structure を deny）。allowlist を明示した接続では `ensure_column` の新規作成が無効（§4.5）。 |
-| **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。`JOT_DECK_DECK_ID` 未設定の接続では、この誘発が及ぶ範囲は 1 Deck ではなく**アクセス可能な全 Deck**になる点に注意（複数 Deck へ横展開されるリスクは `deck_id` を都度検証する本体側フィルタだけが頼り）。この代償を **①削除・カスケード削除は論理削除＋アンドゥで、上書き・改名・移動は変更履歴（§5.1）で復元でき、誤操作の拡散はレート制限で抑える** と **②機微な接続は capability を deny する、または `JOT_DECK_DECK_ID` で対象 Deck を限定して封じられる** ことで受ける。外部由来カードに provenance ラベルを付す（未実装）。 |
+| **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。`JOT_DECK_DECK_ID` 未設定の接続では、この誘発が及ぶ範囲は 1 Deck ではなく**アクセス可能な全 Deck**になる点に注意（複数 Deck へ横展開されるリスクは `deck_id` を都度検証する本体側フィルタだけが頼り）。この代償を **①削除・カスケード削除は論理削除＋アンドゥで、上書き・改名・移動は変更前の状態が変更履歴（§5.1）に残り（GUI からの復元は Activity ビューで行う。未実装）、誤操作の拡散はレート制限で抑える** と **②機微な接続は capability を deny する、または `JOT_DECK_DECK_ID` で対象 Deck を限定して封じられる** ことで受ける。外部由来カードに provenance ラベルを付す（未実装）。 |
 | **構造の復元性** | カラム/カードの削除ミスは論理削除＋アンドゥ（`002` §3）で戻せる。`patch_card` の内容上書き・`update_column` の改名・`move_card` / `move_column` の位置変更は論理削除の対象外だが、変更前の状態が変更履歴（§5.1）に残り、そこから戻せる（GUI からの復元は Activity ビューで行う。未実装）。加えて CAS・レート制限で暴走の代償を抑える。 |
 | **カード長 backstop** | 1 カードの最大長（本体のカード長 backstop）。 |
 | **レート制限** | 接続ごとの writes/分 上限。カード長 backstop が縛れない「小カード大量投入」の暴走を抑える。 |
