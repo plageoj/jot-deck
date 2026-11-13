@@ -296,6 +296,9 @@ export class DeckData {
   }
 
   private async loadSnapshot(deckId: string): Promise<DeckSnapshot> {
+    if (this.db.getDeckSnapshot) {
+      return { deckId, ...(await this.db.getDeckSnapshot(deckId)) };
+    }
     const columns = await this.db.getColumnsByDeck(deckId);
     const [cardEntries, tags] = await Promise.all([
       Promise.all(

@@ -8,7 +8,7 @@
  */
 
 import type { DatabaseBackend } from "./types";
-export type { DatabaseBackend, CreateDeckParams, CreateColumnParams, CreateCardParams } from "./types";
+export type { DatabaseBackend, CreateDeckParams, CreateColumnParams, CreateCardParams, DeckContents } from "./types";
 
 let backend: DatabaseBackend | null = null;
 let initPromise: Promise<DatabaseBackend> | null = null;

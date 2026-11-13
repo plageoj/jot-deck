@@ -3,7 +3,7 @@
   import type { EditSession } from "#lib/deckData.svelte.ts";
   import { linkHintLabels, openExternalUrl, type LinkHints } from "#lib/externalLinks.ts";
   import { settingsStore } from "#lib/settings.svelte.ts";
-  import CardEditor from "./CardEditor.svelte";
+  import { getLoadedCardEditor, loadCardEditor } from "#lib/cardEditorLoader.ts";
   import MarkdownContent from "./MarkdownContent.svelte";
   import TagHighlight from "./TagHighlight.svelte";
 
@@ -64,6 +64,15 @@
   let streaming = $derived(streamingText !== null && streamingText !== undefined);
   let displayContent = $derived(streaming ? (streamingText ?? "") : card.content);
 
+  // CodeMirror is split out of the startup bundle; normally it is already
+  // preloaded and this resolves synchronously.
+  let CardEditor = $state(getLoadedCardEditor());
+  $effect(() => {
+    if (editing && !CardEditor) {
+      void loadCardEditor().then((component) => (CardEditor = component));
+    }
+  });
+
   async function handleSave(
     session: EditSession,
     content: string,
@@ -123,15 +132,20 @@
   {/if}
   {#if editing && !streaming && editSession}
     {@const session = editSession}
-    <CardEditor
-      content={card.content}
-      entry={editEntry}
-      onSave={(content, release, cursor) => handleSave(session, content, release, cursor)}
-      onCancel={() => handleCancel(session)}
-      onExitEdit={() => handleExit(session)}
-      onRegisterExit={(exit) => onRegisterExit?.(session, exit)}
-      {onTagSuggestions}
-    />
+    {#if CardEditor}
+      <CardEditor
+        content={card.content}
+        entry={editEntry}
+        onSave={(content, release, cursor) => handleSave(session, content, release, cursor)}
+        onCancel={() => handleCancel(session)}
+        onExitEdit={() => handleExit(session)}
+        onRegisterExit={(exit) => onRegisterExit?.(session, exit)}
+        {onTagSuggestions}
+      />
+    {:else}
+      <!-- CardEditor is still loading (only possible right after startup). -->
+      <div class="card-content">{card.content}</div>
+    {/if}
   {:else}
     <div class="card-content" class:markdown={settingsStore.state.markdownEnabled}>
       {#if displayContent}

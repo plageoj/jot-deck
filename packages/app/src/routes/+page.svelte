@@ -34,6 +34,7 @@
   import type { Column, Deck, EditEntry, TrashItem } from "#lib/types.ts";
   import "#lib/styles/theme.css";
   import { afterNextPaint, markStartup, reportStartup } from "#lib/startupTrace.ts";
+  import { loadCardEditor } from "#lib/cardEditorLoader.ts";
 
   markStartup("page_script");
 
@@ -181,6 +182,9 @@
       .then(afterNextPaint)
       .then(() => {
         markStartup("board_painted");
+        // CodeMirror stays out of the startup chunk; fetch it now that the
+        // board is on screen so the first edit doesn't wait on it.
+        void loadCardEditor();
         return reportStartup({
           columns: data.columns.length,
           cards: Object.values(data.cardsByColumn).reduce((n, cards) => n + cards.length, 0),

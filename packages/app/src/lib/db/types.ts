@@ -24,6 +24,13 @@ export interface CreateCardParams {
   position?: number;
 }
 
+/** Everything the board shows for one deck. */
+export interface DeckContents {
+  columns: Column[];
+  cardsByColumn: Record<string, Card[]>;
+  tags: Tag[];
+}
+
 /**
  * Database backend interface
  *
@@ -89,6 +96,11 @@ export interface DatabaseBackend {
   discardEmptyCard(id: string, holder: string): Promise<void>;
   restoreCard(id: string): Promise<Card>;
   getDeletedCards(deckId: string): Promise<Card[]>;
+
+  /** A deck's columns, their cards and its tags in one round trip. Optional:
+   * backends without per-call IPC overhead leave it out and callers compose
+   * the per-entity reads instead. */
+  getDeckSnapshot?(deckId: string): Promise<DeckContents>;
 
   // Tag operations
   getTagsByDeck(deckId: string): Promise<Tag[]>;
