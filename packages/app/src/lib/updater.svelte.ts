@@ -15,7 +15,9 @@ type Status =
   | { kind: "up-to-date" }
   | { kind: "downloading"; downloaded: number; contentLength?: number }
   | { kind: "installing" }
-  | { kind: "error"; message: string };
+  // "check" errors are shown only in the About dialog (a background check
+  // must not alarm an offline user); "install" errors also reach the banner.
+  | { kind: "error"; phase: "check" | "install"; message: string };
 
 function isTauri(): boolean {
   return globalThis.window !== undefined && "__TAURI_INTERNALS__" in globalThis;
@@ -24,6 +26,9 @@ function isTauri(): boolean {
 class UpdaterStore {
   status = $state<Status>({ kind: "idle" });
   private update: unknown = null;
+  // Set when connectivity returns while a check is in flight: that check may
+  // still fail from the outage, so its failure triggers one retry.
+  private reconnectedDuringCheck = false;
 
   async check(): Promise<void> {
     if (!isTauri()) return;
@@ -35,6 +40,7 @@ class UpdaterStore {
       return;
     }
     this.status = { kind: "checking" };
+    this.reconnectedDuringCheck = false;
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
@@ -52,12 +58,30 @@ class UpdaterStore {
         this.status = { kind: "up-to-date" };
       }
     } catch (err) {
+      if (this.reconnectedDuringCheck) {
+        // Leave "checking" without surfacing the stale error, then retry.
+        this.status = { kind: "idle" };
+        void this.check();
+        return;
+      }
       this.status = {
         kind: "error",
+        phase: "check",
         message: err instanceof Error ? err.message : String(err),
       };
     }
   }
+
+  // `online` listener: a check that failed (typically launched offline) is
+  // retried once connectivity returns, including one still in flight when the
+  // network came back. Any other state is left alone.
+  handleOnline = (): void => {
+    if (this.status.kind === "checking") {
+      this.reconnectedDuringCheck = true;
+    } else if (this.status.kind === "error" && this.status.phase === "check") {
+      void this.check();
+    }
+  };
 
   async installAndRelaunch(): Promise<void> {
     if (!isTauri()) return;
@@ -85,6 +109,7 @@ class UpdaterStore {
     } catch (err) {
       this.status = {
         kind: "error",
+        phase: "install",
         message: err instanceof Error ? err.message : String(err),
       };
     }

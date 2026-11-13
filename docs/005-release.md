@@ -122,7 +122,9 @@ tauri::Builder::default()
 pnpm --filter app add @tauri-apps/plugin-updater @tauri-apps/plugin-process
 ```
 
-起動時に `check()` し、利用可能なら設定 dialog で通知 → ユーザー承諾後に DL & インストール → `relaunch()`。
+起動時に `check()` し、利用可能ならバナーで通知 → ユーザー承諾後に DL & インストール → `relaunch()`。
+
+起動時チェックの失敗（オフライン等）は通知せず、ネットワーク復帰（`online` イベント）時に再チェックする。チェックのエラーは About ダイアログ（開いた時点と「Check for Updates」で再チェックする）にだけ表示し、バナーに出すエラーはユーザーが始めたインストールの失敗に限る。
 
 サイレント自動更新ではなく**ユーザー承認方式**とする（power-user 向けで、編集中のカードを失う事故を避けるため）。
 
