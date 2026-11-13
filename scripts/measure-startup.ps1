@@ -33,7 +33,6 @@ $stages = @(
   @("main", "rust", "main"),
   @("setup_start", "rust", "setup_start"),
   @("db_opened", "rust", "db_opened"),
-  @("cleanup_done", "rust", "cleanup_done"),
   @("setup_end", "rust", "setup_end"),
   @("page_load_start", "rust", "page_load_started"),
   @("response_end", "js", "response_end"),

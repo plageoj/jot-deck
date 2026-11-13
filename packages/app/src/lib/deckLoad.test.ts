@@ -265,4 +265,21 @@ describe("DeckData deck load snapshots", () => {
     expect(fresh.deckLoadError).toBeNull();
     expect(fresh.isDeckLoaded).toBe(true);
   });
+
+  it("uses the backend's one-round-trip snapshot when it offers one", async () => {
+    const perColumn = vi.spyOn(mockBackend, "getCardsByColumn");
+    const { columns, cards, tags } = fixture("deck-2", "snap");
+    mockBackend.getDeckSnapshot = async () => ({
+      columns,
+      cardsByColumn: { [columns[0].id]: cards },
+      tags,
+    });
+    try {
+      await data.selectDeck(makeDeck("deck-2"));
+      expectBoardOf("deck-2", "snap");
+      expect(perColumn).not.toHaveBeenCalled();
+    } finally {
+      delete mockBackend.getDeckSnapshot;
+    }
+  });
 });

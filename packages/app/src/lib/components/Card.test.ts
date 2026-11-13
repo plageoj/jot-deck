@@ -2,6 +2,7 @@ import { fireEvent, render } from "@testing-library/svelte";
 import { describe, it, expect, vi } from "vitest";
 import { EditorView } from "@codemirror/view";
 import Card from "./Card.svelte";
+import { loadCardEditor } from "#lib/cardEditorLoader.ts";
 import { makeCard } from "#lib/__fixtures__/models.ts";
 import type { EditSession } from "#lib/deckData.svelte.ts";
 
@@ -24,6 +25,7 @@ describe("Card editing", () => {
       async (_session: EditSession, _content: string, _release: boolean, _cursor: number) =>
         true,
     );
+    await loadCardEditor();
     const { container } = render(Card, {
       props: {
         card: makeCard("card-1", "col-1", { content: CONTENT }),

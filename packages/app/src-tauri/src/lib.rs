@@ -338,6 +338,35 @@ fn get_deleted_cards(state: State<AppState>, deck_id: String) -> CommandResult<V
     card::get_deleted_by_deck(&conn, &deck_id).map_err(Into::into)
 }
 
+// ========== Deck Snapshot ==========
+
+/// Everything the board shows for one deck, read under a single lock.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeckSnapshot {
+    columns: Vec<Column>,
+    cards_by_column: std::collections::HashMap<String, Vec<Card>>,
+    tags: Vec<Tag>,
+}
+
+/// One round trip for a board (re)load instead of one invoke per column, and
+/// a consistent view since nothing commits between the reads.
+#[tauri::command]
+fn get_deck_snapshot(state: State<AppState>, deck_id: String) -> CommandResult<DeckSnapshot> {
+    let conn = get_conn(&state)?;
+    let columns = column::get_by_deck_id(&conn, &deck_id)?;
+    let cards_by_column = columns
+        .iter()
+        .map(|col| Ok((col.id.clone(), card::get_by_column_id(&conn, &col.id)?)))
+        .collect::<Result<_, jot_deck_core::JotDeckError>>()?;
+    let tags = tag::get_tags_by_deck(&conn, &deck_id)?;
+    Ok(DeckSnapshot {
+        columns,
+        cards_by_column,
+        tags,
+    })
+}
+
 // ========== Tag Commands ==========
 
 #[tauri::command]
@@ -473,6 +502,20 @@ fn spawn_external_change_watcher(handle: tauri::AppHandle) {
     });
 }
 
+/// 30 日を過ぎた論理削除データと変更履歴を物理削除する（002 §3 / 008 §5.1）。
+/// 起動直後のボード読み込みと DB ロックを取り合わないよう、少し待ってから
+/// 別スレッドで実行する。失敗しても起動は止めない（次回起動で再試行）。
+fn spawn_deferred_cleanup(handle: tauri::AppHandle) {
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        let state = handle.state::<AppState>();
+        let Ok(mut conn) = state.conn.lock() else { return };
+        if let Err(e) = run_cleanup_batch(&mut conn) {
+            eprintln!("[jot-deck] cleanup failed: {}", e);
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     startup_trace::mark("run");
@@ -492,16 +535,9 @@ pub fn run() {
             std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data dir");
             let db_path = app_data_dir.join("jot-deck.db");
 
-            let mut conn = create_file_db(db_path.to_str().unwrap())
+            let conn = create_file_db(db_path.to_str().unwrap())
                 .expect("Failed to create database");
             startup_trace::mark("db_opened");
-
-            // 起動時に 30 日を過ぎた論理削除データと変更履歴を物理削除する
-            // （002 §3 / 008 §5.1）。失敗しても起動は止めない（次回起動で再試行）。
-            if let Err(e) = run_cleanup_batch(&mut conn) {
-                eprintln!("[jot-deck] cleanup failed: {}", e);
-            }
-            startup_trace::mark("cleanup_done");
 
             app.manage(AppState {
                 conn: Mutex::new(conn),
@@ -510,6 +546,7 @@ pub fn run() {
             app.manage(reporter::ReporterRegistry::default());
 
             spawn_external_change_watcher(app.handle().clone());
+            spawn_deferred_cleanup(app.handle().clone());
 
             startup_trace::mark("setup_end");
             Ok(())
@@ -547,6 +584,8 @@ pub fn run() {
             discard_empty_card,
             restore_card,
             get_deleted_cards,
+            // Deck snapshot (board load)
+            get_deck_snapshot,
             // Tag commands
             get_tags_by_deck,
             get_cards_by_tag,

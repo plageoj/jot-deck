@@ -12,6 +12,7 @@ import type {
   CreateDeckParams,
   CreateColumnParams,
   CreateCardParams,
+  DeckContents,
 } from "./types";
 
 export class TauriBackend implements DatabaseBackend {
@@ -174,6 +175,10 @@ export class TauriBackend implements DatabaseBackend {
 
   async getDeletedCards(deckId: string): Promise<Card[]> {
     return invoke<Card[]>("get_deleted_cards", { deckId });
+  }
+
+  async getDeckSnapshot(deckId: string): Promise<DeckContents> {
+    return invoke<DeckContents>("get_deck_snapshot", { deckId });
   }
 
   // Tag operations
