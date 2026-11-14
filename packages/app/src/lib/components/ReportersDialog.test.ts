@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/svelte";
 import { beforeAll, beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import ReportersDialog from "./ReportersDialog.svelte";
-import type { Column, ReporterConfig } from "#lib/types.ts";
+import type { Column, Deck, ReporterConfig } from "#lib/types.ts";
 
 // jsdom's <dialog> support varies; stub the modal methods so onMount's
 // showModal() and the close button never throw regardless of jsdom version.
@@ -30,6 +30,7 @@ function makeReporter(
   return {
     reporter_id: id,
     name: `${id}-name`,
+    deck_ids: ["deck-1"],
     command: `/usr/local/bin/${id}`,
     args: [],
     env: {},
@@ -40,10 +41,15 @@ function makeReporter(
   };
 }
 
-function makeColumn(id: string, name: string, isPrivate = false): Column {
+function makeColumn(
+  id: string,
+  name: string,
+  isPrivate = false,
+  deckId = "deck-1",
+): Column {
   return {
     id,
-    deck_id: "deck-1",
+    deck_id: deckId,
     name,
     position: 0,
     description: null,
@@ -60,15 +66,27 @@ const COLUMNS: Column[] = [
   makeColumn("col-3", "Secrets", true),
 ];
 
+function makeDeck(id: string, name: string): Deck {
+  return { id, name, sort_order: "a0", created_at: "", updated_at: "" } as Deck;
+}
+
+const DECKS: Deck[] = [makeDeck("deck-1", "Main"), makeDeck("deck-2", "Work")];
+
+const COLUMNS_BY_DECK: Record<string, Column[]> = {
+  "deck-1": COLUMNS,
+  "deck-2": [makeColumn("col-9", "Backlog", false, "deck-2")],
+};
+
 /** Props with every callback stubbed; each test overrides what it exercises. */
 function makeProps(overrides: Record<string, unknown> = {}) {
   return {
-    deckId: "deck-1",
-    columns: COLUMNS,
+    currentDeckId: "deck-1",
+    decks: DECKS,
+    loadColumns: vi.fn(async (deckId: string) => COLUMNS_BY_DECK[deckId] ?? []),
     listReporters: vi.fn(async () => [] as ReporterConfig[]),
     listRunning: vi.fn(async () => [] as string[]),
-    onAdd: vi.fn(async (_d: string, c: ReporterConfig) => c),
-    onUpdate: vi.fn(async (_d: string, c: ReporterConfig) => c),
+    onAdd: vi.fn(async (c: ReporterConfig) => c),
+    onUpdate: vi.fn(async (c: ReporterConfig) => c),
     onRemove: vi.fn(async () => {}),
     onStart: vi.fn(async () => {}),
     onStop: vi.fn(async () => {}),
@@ -112,9 +130,9 @@ describe("ReportersDialog listing", () => {
     const props = await renderDialog();
 
     expect(
-      screen.getByText("No reporters registered for this deck yet."),
+      screen.getByText("No reporters registered yet."),
     ).toBeTruthy();
-    expect(props.listReporters).toHaveBeenCalledWith("deck-1");
+    expect(props.listReporters).toHaveBeenCalled();
   });
 
   it("lists reporters with a Stopped badge and their command", async () => {
@@ -151,8 +169,57 @@ describe("ReportersDialog listing", () => {
       screen.getByText(/Failed to load reporters:.*host unavailable/),
     ).toBeTruthy();
     expect(
-      screen.queryByText("No reporters registered for this deck yet."),
+      screen.queryByText("No reporters registered yet."),
     ).toBeNull();
+  });
+
+  /** Columns load for deck-1 but fail for deck-2. */
+  const failingColumns = vi.fn(async (deckId: string) => {
+    if (deckId === "deck-2") throw new Error("deck locked");
+    return COLUMNS_BY_DECK[deckId] ?? [];
+  });
+
+  it("keeps the reporter controls when a deck's columns fail to load", async () => {
+    await renderDialog({
+      loadColumns: failingColumns,
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", { deck_ids: ["deck-2"], allowed_columns: ["col-9"] }),
+      ]),
+    });
+
+    expect(screen.queryByText(/Failed to load reporters/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Start" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
+    // An allowlisted column it couldn't look up isn't called "removed".
+    expect(screen.getByText(/Columns: \(unavailable column\)/)).toBeTruthy();
+  });
+
+  it("blocks saving a column allowlist for a deck whose columns didn't load", async () => {
+    const props = await renderDialog({
+      loadColumns: failingColumns,
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", { deck_ids: ["deck-2"], allowed_columns: ["col-9"] }),
+      ]),
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByText(/Couldn't load columns: .*deck locked/)).toBeTruthy();
+    expect(screen.queryByText("This deck has no columns yet.")).toBeNull();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(
+      screen.getByText(
+        "Couldn't load the columns of Work. Reopen this dialog to retry, or allow all columns.",
+      ),
+    ).toBeTruthy();
+    expect(props.onUpdate).not.toHaveBeenCalled();
+
+    // Widening to all columns needs no column list, so it saves.
+    await fireEvent.click(screen.getByLabelText("All columns"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ deck_ids: ["deck-2"], allowed_columns: null }),
+    );
   });
 });
 
@@ -164,7 +231,7 @@ describe("ReportersDialog start/stop", () => {
 
     await fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-    expect(props.onStart).toHaveBeenCalledWith("deck-1", "r1");
+    expect(props.onStart).toHaveBeenCalledWith("r1");
     expect(await screen.findByText("Running")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
   });
@@ -290,9 +357,9 @@ describe("ReportersDialog removal", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
     await fireEvent.click(screen.getByRole("button", { name: "Remove" }));
 
-    expect(props.onRemove).toHaveBeenCalledWith("deck-1", "r1");
+    expect(props.onRemove).toHaveBeenCalledWith("r1");
     expect(
-      await screen.findByText("No reporters registered for this deck yet."),
+      await screen.findByText("No reporters registered yet."),
     ).toBeTruthy();
   });
 
@@ -353,9 +420,11 @@ describe("ReportersDialog add/edit form", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
-    expect(props.onAdd).toHaveBeenCalledWith("deck-1", {
+    expect(props.onAdd).toHaveBeenCalledWith({
       reporter_id: "",
       name: "Minutes",
+      // A new reporter starts limited to the open deck.
+      deck_ids: ["deck-1"],
       command: "/opt/whisper",
       args: ["--model", "small", "--lang=ja"],
       // Only the first `=` splits, so values may contain `=`.
@@ -466,13 +535,14 @@ describe("ReportersDialog add/edit form", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
-    expect(props.onUpdate).toHaveBeenCalledWith("deck-1", {
+    expect(props.onUpdate).toHaveBeenCalledWith({
       reporter_id: "r1",
       name: "Minutes v2",
+      deck_ids: ["deck-1"],
       command: "/opt/whisper",
       args: [],
       env: {},
-      // Untouched scope round-trips unchanged (007 §10).
+      // Untouched scope round-trips unchanged (007 §2.3).
       deny: ["delete"],
       max_writes_per_min: 30,
       allowed_columns: ["col-1"],
@@ -499,7 +569,6 @@ describe("ReportersDialog add/edit form", () => {
     await fireEvent.click(screen.getByRole("button", { name: "Add" }));
 
     expect(props.onAdd).toHaveBeenCalledWith(
-      "deck-1",
       expect.objectContaining({
         deny: ["delete", "structure"],
         max_writes_per_min: 30,
@@ -582,7 +651,6 @@ describe("ReportersDialog add/edit form", () => {
     await fireEvent.click(screen.getByLabelText("All columns"));
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(props.onUpdate).toHaveBeenCalledWith(
-      "deck-1",
       expect.objectContaining({
         deny: ["edit"],
         max_writes_per_min: 10,
@@ -610,7 +678,6 @@ describe("ReportersDialog add/edit form", () => {
     });
     await fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(props.onUpdate).toHaveBeenCalledWith(
-      "deck-1",
       expect.objectContaining({ deny: ["delete", "bogus"] }),
     );
   });
@@ -628,13 +695,96 @@ describe("ReportersDialog add/edit form", () => {
     });
 
     expect(
-      screen.getByText("All capabilities · 120 writes/min · All columns"),
+      screen.getByText("Decks: Main · All capabilities · 120 writes/min · All columns"),
     ).toBeTruthy();
     expect(
       screen.getByText(
-        "Denied: delete, structure · 30 writes/min · Columns: Inbox, (removed column)",
+        "Decks: Main · Denied: delete, structure · 30 writes/min · Columns: Inbox, (removed column)",
       ),
     ).toBeTruthy();
+  });
+
+  it("summarizes the deck scope, naming every deck and column", async () => {
+    await renderDialog({
+      listReporters: vi.fn(async () => [
+        makeReporter("any", { deck_ids: null }),
+        makeReporter("two", {
+          deck_ids: ["deck-2", "gone"],
+          allowed_columns: ["col-9"],
+        }),
+      ]),
+    });
+
+    expect(
+      screen.getByText("All decks · All capabilities · 120 writes/min · All columns"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Decks: Work, (removed deck) · All capabilities · 120 writes/min · Columns: Backlog",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("adds a reporter over several decks with columns from each", async () => {
+    const props = await renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add reporter" }));
+    await fillForm("Minutes", "/opt/whisper");
+    await fireEvent.click(screen.getByLabelText("Work"));
+    await fireEvent.click(screen.getByLabelText("Only selected columns"));
+    // Several decks: their columns are grouped under each deck's name.
+    expect(screen.getByText("Main", { selector: ".deck-group-name" })).toBeTruthy();
+    await fireEvent.click(screen.getByLabelText("Backlog"));
+    await fireEvent.click(screen.getByLabelText("Inbox"));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(props.onAdd).toHaveBeenCalledWith(
+      expect.objectContaining({
+        deck_ids: ["deck-1", "deck-2"],
+        allowed_columns: ["col-1", "col-9"],
+      }),
+    );
+  });
+
+  it("allows every deck and drops columns of decks taken out of scope", async () => {
+    const props = await renderDialog({
+      listReporters: vi.fn(async () => [
+        makeReporter("r1", {
+          deck_ids: ["deck-1", "deck-2"],
+          allowed_columns: ["col-1", "col-9"],
+        }),
+      ]),
+    });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect((screen.getByLabelText("Work") as HTMLInputElement).checked).toBe(true);
+    await fireEvent.click(screen.getByLabelText("Work"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deck_ids: ["deck-1"], allowed_columns: ["col-1"] }),
+    );
+
+    // Saving closes the form and reloads the list.
+    await fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    await fireEvent.click(screen.getByLabelText("All decks"));
+    await fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onUpdate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ deck_ids: null }),
+    );
+  });
+
+  it("requires at least one deck unless every deck is allowed", async () => {
+    const props = await renderDialog();
+
+    await fireEvent.click(screen.getByRole("button", { name: "+ Add reporter" }));
+    await fillForm("Minutes", "/opt/whisper");
+    await fireEvent.click(screen.getByLabelText("Main"));
+    await fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(
+      screen.getByText("Select at least one deck, or allow all decks."),
+    ).toBeTruthy();
+    expect(props.onAdd).not.toHaveBeenCalled();
   });
 
   it("cancel closes the form without saving", async () => {
@@ -716,6 +866,34 @@ describe("ReportersDialog under Tauri", () => {
     expect(await screen.findByText("Stopped")).toBeTruthy();
   });
 
+  it("shows a reporter that exited during the load as Stopped", async () => {
+    let emitExit: ((e: { payload: { reporter_id: string } }) => void) | undefined;
+    mockListen.mockImplementation(async (_event: string, handler: unknown) => {
+      emitExit = handler as (e: { payload: { reporter_id: string } }) => void;
+      return () => {};
+    });
+    const pendingColumns: ((cols: Column[]) => void)[] = [];
+    const finishColumns = (cols: Column[]) => pendingColumns.forEach((resolve) => resolve(cols));
+    const listRunning = vi.fn(async () => ["r1"]);
+
+    render(ReportersDialog, {
+      props: makeProps({
+        listReporters: vi.fn(async () => [makeReporter("r1")]),
+        listRunning,
+        // Columns stay pending while the running snapshot has already landed.
+        loadColumns: vi.fn(
+          () => new Promise<Column[]>((resolve) => pendingColumns.push(resolve)),
+        ),
+      }),
+    });
+    await waitFor(() => expect(listRunning).toHaveBeenCalled());
+    expect(emitExit).toBeDefined();
+    emitExit?.({ payload: { reporter_id: "r1" } });
+    finishColumns(COLUMNS);
+
+    expect(await screen.findByText("Stopped")).toBeTruthy();
+    expect(screen.queryByText("Running")).toBeNull();
+  });
 
   it("drops a subscription that resolves after the dialog is closed", async () => {
     const unlisten = vi.fn();

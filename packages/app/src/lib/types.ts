@@ -56,14 +56,16 @@ export interface Card {
 /** A registered Reporter (007-reporter-protocol.md §2.2): an external input
  * adapter the host spawns as a child process and pipes over stdio. Field names
  * are snake_case because this object is serialized straight into the Rust
- * `ReporterConfig` struct via Tauri. `deny` / `max_writes_per_min` /
- * `allowed_columns` are the per-Reporter auth scope (007 §10), edited in the
+ * `ReporterConfig` struct via Tauri. `deck_ids` / `deny` / `max_writes_per_min`
+ * / `allowed_columns` are the per-Reporter auth scope (007 §2.3), edited in the
  * Reporters dialog and validated fail-closed by the host. */
 export interface ReporterConfig {
   /** Stable ULID assigned by the host on add; empty when creating a new one. */
   reporter_id: string;
   /** Human-readable label shown in the registration UI. */
   name: string;
+  /** Decks the Reporter may address; null = every deck. */
+  deck_ids: string[] | null;
   /** Absolute path to the Reporter binary. */
   command: string;
   /** Command-line arguments passed to the binary. */
@@ -74,7 +76,8 @@ export interface ReporterConfig {
   deny: string[];
   /** Per-Reporter write rate cap; null uses the host default. */
   max_writes_per_min: number | null;
-  /** Write allowlist by column ULID; null = the whole deck. */
+  /** Write allowlist by column ULID (any of its decks); null = every
+   * visible column. */
   allowed_columns: string[] | null;
 }
 

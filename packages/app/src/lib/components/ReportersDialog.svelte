@@ -2,29 +2,29 @@
   import { onMount, onDestroy } from "svelte";
   import { isTauri } from "#lib/db/index.ts";
   import { DESKTOP_DOWNLOAD_URL } from "#lib/webDemo.ts";
-  import type { Column, ReporterConfig } from "#lib/types.ts";
+  import type { Column, Deck, ReporterConfig } from "#lib/types.ts";
 
   interface Props {
-    /** Deck whose Reporters are being managed (007 registrations are per-deck). */
-    deckId: string;
-    /** The deck's columns, offered as the per-Reporter write allowlist. */
-    columns: Column[];
-    listReporters: (deckId: string) => Promise<ReporterConfig[]>;
+    /** Deck that is open; a new Reporter starts limited to it. */
+    currentDeckId: string;
+    /** Every deck, offered as the per-Reporter deck scope. */
+    decks: Deck[];
+    /** A deck's columns, offered as the per-Reporter write allowlist. */
+    loadColumns: (deckId: string) => Promise<Column[]>;
+    listReporters: () => Promise<ReporterConfig[]>;
     listRunning: () => Promise<string[]>;
-    onAdd: (deckId: string, config: ReporterConfig) => Promise<ReporterConfig>;
-    onUpdate: (
-      deckId: string,
-      config: ReporterConfig,
-    ) => Promise<ReporterConfig>;
-    onRemove: (deckId: string, reporterId: string) => Promise<void>;
-    onStart: (deckId: string, reporterId: string) => Promise<void>;
+    onAdd: (config: ReporterConfig) => Promise<ReporterConfig>;
+    onUpdate: (config: ReporterConfig) => Promise<ReporterConfig>;
+    onRemove: (reporterId: string) => Promise<void>;
+    onStart: (reporterId: string) => Promise<void>;
     onStop: (reporterId: string) => Promise<void>;
     onClose: () => void;
   }
 
   let {
-    deckId,
-    columns,
+    currentDeckId,
+    decks,
+    loadColumns,
     listReporters,
     listRunning,
     onAdd,
@@ -42,6 +42,12 @@
   const desktop = isTauri();
 
   let configs = $state<ReporterConfig[]>([]);
+  // Columns per deck id, loaded with the list: row summaries name allowlisted
+  // columns of any deck, and the form offers the columns of the decks in scope.
+  let columnsByDeck = $state<Record<string, Column[]>>({});
+  // Decks whose columns failed to load, keyed by deck id. Loaded apart from the
+  // reporter list so one failing deck never hides the Start / Stop controls.
+  let columnErrors = $state<Record<string, string>>({});
   // Ids of Reporters currently running. Plain array (not Set) so reassignment
   // drives Svelte reactivity predictably.
   let running = $state<string[]>([]);
@@ -64,9 +70,12 @@
   let draftArgs = $state("");
   let draftEnv = $state("");
   let formError = $state<string | null>(null);
-  // Auth scope (007 §10). `draftDeny` holds the capabilities switched off;
-  // `draftMaxWrites` is blank for the host default; the allowlist only applies
-  // when `draftRestrictColumns` is on.
+  // Auth scope (007 §2.3). `draftDecks` applies unless `draftAllDecks` is on;
+  // `draftDeny` holds the capabilities switched off; `draftMaxWrites` is blank
+  // for the host default; the allowlist only applies when
+  // `draftRestrictColumns` is on.
+  let draftAllDecks = $state(false);
+  let draftDecks = $state<string[]>([]);
   let draftDeny = $state<string[]>([]);
   let draftMaxWrites = $state("");
   let draftRestrictColumns = $state(false);
@@ -92,39 +101,73 @@
 
   const isRunning = (id: string) => running.includes(id);
 
+  const allColumns = $derived(decks.flatMap((d) => columnsByDeck[d.id] ?? []));
+  // Decks whose columns the allowlist picker offers.
+  const scopeDecks = $derived(
+    draftAllDecks ? decks : decks.filter((d) => draftDecks.includes(d.id)),
+  );
+
+  /** Every deck's columns; a deck that fails lands in `errors`, never throws. */
+  async function loadAllColumns(): Promise<{
+    columns: Record<string, Column[]>;
+    errors: Record<string, string>;
+  }> {
+    const results = await Promise.allSettled(decks.map((d) => loadColumns(d.id)));
+    const columns: Record<string, Column[]> = {};
+    const errors: Record<string, string> = {};
+    results.forEach((result, i) => {
+      const id = decks[i].id;
+      if (result.status === "fulfilled") columns[id] = result.value;
+      else errors[id] = `${result.reason}`;
+    });
+    return { columns, errors };
+  }
+
+  // Reporters that exited while a load was in flight, so the `listRunning`
+  // snapshot it returns can't show one that already stopped as Running.
+  let exitedDuringLoad: string[] = [];
+
   async function load() {
     loading = true;
     loadError = null;
+    exitedDuringLoad = [];
+    const columnsTask = loadAllColumns();
     try {
-      const [list, run] = await Promise.all([
-        listReporters(deckId),
-        listRunning(),
-      ]);
+      const [list, run] = await Promise.all([listReporters(), listRunning()]);
       configs = list;
-      running = run;
+      running = run.filter((id) => !exitedDuringLoad.includes(id));
     } catch (e) {
       loadError = `Failed to load reporters: ${e}`;
-    } finally {
-      loading = false;
     }
+    const loaded = await columnsTask;
+    columnsByDeck = loaded.columns;
+    columnErrors = loaded.errors;
+    loading = false;
   }
+
+  const columnsIncomplete = $derived(Object.keys(columnErrors).length > 0);
 
   onMount(async () => {
     dialogRef?.showModal();
     if (!desktop) return;
-    await load();
     // A child process ending on its own emits `reporter-exit`; drop its badge.
+    // Subscribe before loading so an exit during the load isn't missed.
     const { listen } = await import("@tauri-apps/api/event");
     const unlisten = await listen<{ reporter_id: string }>(
       "reporter-exit",
       ({ payload }) => {
+        exitedDuringLoad = [...exitedDuringLoad, payload.reporter_id];
         running = running.filter((id) => id !== payload.reporter_id);
       },
     );
     // Closed while we were subscribing: drop it immediately instead of
     // handing it to a component that will never run onDestroy again.
-    if (destroyed) unlisten();
-    else reporterExitUnlisten = unlisten;
+    if (destroyed) {
+      unlisten();
+      return;
+    }
+    reporterExitUnlisten = unlisten;
+    await load();
   });
 
   onDestroy(() => {
@@ -159,7 +202,7 @@
     setRowError(r.reporter_id, null);
     setBusy(r.reporter_id, true);
     try {
-      await onStart(deckId, r.reporter_id);
+      await onStart(r.reporter_id);
       if (!isRunning(r.reporter_id)) running = [...running, r.reporter_id];
     } catch (e) {
       setRowError(r.reporter_id, `${e}`);
@@ -184,7 +227,7 @@
   async function confirmRemove(r: ReporterConfig) {
     setRowError(r.reporter_id, null);
     try {
-      await onRemove(deckId, r.reporter_id);
+      await onRemove(r.reporter_id);
       running = running.filter((id) => id !== r.reporter_id);
       confirmRemoveId = null;
       await load();
@@ -200,6 +243,8 @@
     draftCommand = "";
     draftArgs = "";
     draftEnv = "";
+    draftAllDecks = false;
+    draftDecks = [currentDeckId];
     draftDeny = [];
     draftMaxWrites = "";
     draftRestrictColumns = false;
@@ -216,7 +261,10 @@
     draftEnv = Object.entries(r.env)
       .map(([k, v]) => `${k}=${v}`)
       .join("\n");
-    // Normalize like the host (`Capabilities::try_from_deny`) so a stored
+    draftAllDecks = r.deck_ids === null;
+    // Ids of decks that no longer exist are dropped, like removed columns below.
+    draftDecks = (r.deck_ids ?? []).filter((id) => decks.some((d) => d.id === id));
+    // Normalize like the host (`Capabilities::from_deny`) so a stored
     // `"Delete"` still shows — and saves — as denied.
     draftDeny = r.deny
       .map((d) => d.trim().toLowerCase())
@@ -224,10 +272,11 @@
     draftMaxWrites =
       r.max_writes_per_min === null ? "" : String(r.max_writes_per_min);
     draftRestrictColumns = r.allowed_columns !== null;
-    // Ids of columns no longer in the deck are dropped: the allowlist only ever
-    // holds columns the user can see and confirm here.
-    draftColumns = (r.allowed_columns ?? []).filter((id) =>
-      columns.some((c) => c.id === id),
+    // Ids of columns that no longer exist are dropped: the allowlist only ever
+    // holds columns the user can see and confirm here. While some deck's
+    // columns failed to load, unknown ids may just be unseen, so they stay.
+    draftColumns = (r.allowed_columns ?? []).filter(
+      (id) => columnsIncomplete || allColumns.some((c) => c.id === id),
     );
     formError = null;
     formMode = "edit";
@@ -245,6 +294,12 @@
       : [...draftDeny.filter((n) => n !== name), name];
   }
 
+  function setDeckSelected(id: string, selected: boolean) {
+    draftDecks = selected
+      ? [...draftDecks.filter((d) => d !== id), id]
+      : draftDecks.filter((d) => d !== id);
+  }
+
   function setColumnSelected(id: string, selected: boolean) {
     draftColumns = selected
       ? [...draftColumns.filter((c) => c !== id), id]
@@ -253,17 +308,25 @@
 
   /** One-line summary of a registration's auth scope for its list row. */
   function scopeSummary(r: ReporterConfig): string {
+    const deckNames =
+      r.deck_ids === null
+        ? "All decks"
+        : `Decks: ${r.deck_ids
+            .map((id) => decks.find((d) => d.id === id)?.name ?? "(removed deck)")
+            .join(", ")}`;
     const caps =
       r.deny.length === 0 ? "All capabilities" : `Denied: ${r.deny.join(", ")}`;
     const rate = `${r.max_writes_per_min ?? DEFAULT_MAX_WRITES_PER_MIN} writes/min`;
     let cols = "All columns";
     if (r.allowed_columns !== null) {
       const names = r.allowed_columns.map(
-        (id) => columns.find((c) => c.id === id)?.name ?? "(removed column)",
+        (id) =>
+          allColumns.find((c) => c.id === id)?.name ??
+          (columnsIncomplete ? "(unavailable column)" : "(removed column)"),
       );
       cols = `Columns: ${names.join(", ")}`;
     }
-    return `${caps} · ${rate} · ${cols}`;
+    return `${deckNames} · ${caps} · ${rate} · ${cols}`;
   }
 
   function parseArgs(text: string): string[] {
@@ -317,13 +380,35 @@
         return;
       }
     }
-    if (draftRestrictColumns && draftColumns.length === 0) {
+    if (!draftAllDecks && draftDecks.length === 0) {
+      formError = "Select at least one deck, or allow all decks.";
+      return;
+    }
+    // Saving a restricted allowlist rebuilds it from the loaded columns, so a
+    // deck whose columns didn't load would silently lose its entries.
+    const unloaded = scopeDecks.filter((d) => d.id in columnErrors);
+    if (draftRestrictColumns && unloaded.length > 0) {
+      formError = `Couldn't load the columns of ${unloaded
+        .map((d) => d.name)
+        .join(", ")}. Reopen this dialog to retry, or allow all columns.`;
+      return;
+    }
+    // Only columns of the decks in scope: one outside it could never be written.
+    const allowedColumns = scopeDecks
+      .flatMap((d) => columnsByDeck[d.id] ?? [])
+      .filter((c) => draftColumns.includes(c.id))
+      .map((c) => c.id);
+    if (draftRestrictColumns && allowedColumns.length === 0) {
       formError = "Select at least one column, or allow all columns.";
       return;
     }
     const config: ReporterConfig = {
       reporter_id: editingId ?? "",
       name,
+      // Deck list order regardless of click order.
+      deck_ids: draftAllDecks
+        ? null
+        : decks.filter((d) => draftDecks.includes(d.id)).map((d) => d.id),
       command,
       args: parseArgs(draftArgs),
       env,
@@ -335,16 +420,14 @@
         ...draftDeny.filter((n) => !CAPABILITIES.some((c) => c.name === n)),
       ],
       max_writes_per_min: maxWrites,
-      allowed_columns: draftRestrictColumns
-        ? columns.filter((c) => draftColumns.includes(c.id)).map((c) => c.id)
-        : null,
+      allowed_columns: draftRestrictColumns ? allowedColumns : null,
     };
     formError = null;
     try {
       if (editingId) {
-        await onUpdate(deckId, config);
+        await onUpdate(config);
       } else {
-        await onAdd(deckId, config);
+        await onAdd(config);
       }
       closeForm();
       await load();
@@ -387,9 +470,9 @@
         >
       {:else}
         <p class="hint intro">
-          Reporters are local input adapters this deck spawns as child processes
+          Reporters are local input adapters Jot Deck spawns as child processes
           and streams cards from (transcription, LLM classification, webhooks).
-          They never touch the network — only this local deck.
+          They never touch the network — only the local decks you allow.
         </p>
 
         {#if loadError}
@@ -397,7 +480,7 @@
         {:else if loading}
           <p class="hint">Loading…</p>
         {:else if configs.length === 0}
-          <p class="hint empty">No reporters registered for this deck yet.</p>
+          <p class="hint empty">No reporters registered yet.</p>
         {:else}
           <ul class="reporter-list">
             {#each configs as r (r.reporter_id)}
@@ -531,6 +614,47 @@
             </div>
 
             <fieldset class="field scope-group">
+              <legend>Decks</legend>
+              <label class="check">
+                <input
+                  type="radio"
+                  name="reporter-deck-scope"
+                  checked={!draftAllDecks}
+                  onchange={() => (draftAllDecks = false)}
+                />
+                Only selected decks
+              </label>
+              <label class="check">
+                <input
+                  type="radio"
+                  name="reporter-deck-scope"
+                  checked={draftAllDecks}
+                  onchange={() => (draftAllDecks = true)}
+                />
+                All decks
+              </label>
+              {#if !draftAllDecks}
+                <div class="column-picks">
+                  {#each decks as d (d.id)}
+                    <label class="check">
+                      <input
+                        type="checkbox"
+                        checked={draftDecks.includes(d.id)}
+                        onchange={(e) =>
+                          setDeckSelected(d.id, e.currentTarget.checked)}
+                      />
+                      {d.name}
+                    </label>
+                  {/each}
+                </div>
+              {/if}
+              <span class="hint"
+                >A reporter allowed more than one deck names the deck in each
+                deck-level call.</span
+              >
+            </fieldset>
+
+            <fieldset class="field scope-group">
               <legend>Permissions</legend>
               {#each CAPABILITIES as cap (cap.name)}
                 <label class="check">
@@ -579,19 +703,33 @@
               </label>
               {#if draftRestrictColumns}
                 <div class="column-picks">
-                  {#each columns as col (col.id)}
-                    <label class="check" class:disabled={col.private}>
-                      <input
-                        type="checkbox"
-                        disabled={col.private}
-                        checked={!col.private && draftColumns.includes(col.id)}
-                        onchange={(e) =>
-                          setColumnSelected(col.id, e.currentTarget.checked)}
-                      />
-                      {col.name}{col.private ? " (private)" : ""}
-                    </label>
+                  {#each scopeDecks as d (d.id)}
+                    {#if scopeDecks.length > 1}
+                      <span class="deck-group-name">{d.name}</span>
+                    {/if}
+                    {#if columnErrors[d.id]}
+                      <span class="error-text"
+                        >Couldn't load columns: {columnErrors[d.id]}</span
+                      >
+                    {/if}
+                    {#each columnsByDeck[d.id] ?? [] as col (col.id)}
+                      <label class="check" class:disabled={col.private}>
+                        <input
+                          type="checkbox"
+                          disabled={col.private}
+                          checked={!col.private && draftColumns.includes(col.id)}
+                          onchange={(e) =>
+                            setColumnSelected(col.id, e.currentTarget.checked)}
+                        />
+                        {col.name}{col.private ? " (private)" : ""}
+                      </label>
+                    {:else}
+                      {#if !columnErrors[d.id]}
+                        <span class="hint">This deck has no columns yet.</span>
+                      {/if}
+                    {/each}
                   {:else}
-                    <span class="hint">This deck has no columns yet.</span>
+                    <span class="hint">Select a deck first.</span>
                   {/each}
                 </div>
                 <span class="hint"
@@ -869,6 +1007,16 @@
     padding-left: 1.25rem;
     max-height: 8rem;
     overflow-y: auto;
+  }
+
+  .deck-group-name {
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+
+  .deck-group-name:not(:first-child) {
+    margin-top: 0.25rem;
   }
 
   .text-input.narrow {

@@ -15,22 +15,25 @@
 //!
 //! Write surface: card writes (`append_card`, `patch_card`, `move_card`,
 //! `delete_card`) and column-structure writes (`ensure_column`,
-//! `update_column`, `move_column`). On top of the core trust boundary the
-//! bridge applies connection policy — capability opt-out
+//! `update_column`, `move_column`). Every tool runs through
+//! `jot_deck_core::access`, shared with the Reporter host: it applies the
+//! connection policy — Deck scope, capability opt-out
 //! (append/edit/delete/structure), a per-connection write rate limit, a write
-//! column allowlist (`JOT_DECK_WRITE_COLUMNS`), and write attribution logging
-//! (008 §5).
+//! column allowlist (`JOT_DECK_WRITE_COLUMNS`) — and shapes the results. This
+//! crate adds the MCP framing, tool schemas, resources, and write attribution
+//! logging (008 §5).
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
 
+use jot_deck_core::access::{self, AccessError, AccessPolicy, Written, DEFAULT_MAX_WRITES_PER_MIN};
 use jot_deck_core::deck_scope::DeckScope;
 use jot_deck_core::history::Author;
 use jot_deck_core::write::WriteScope;
-use jot_deck_core::{query, write, Connection};
+use jot_deck_core::{query, Connection};
 use serde_json::{json, Value};
+
+pub use jot_deck_core::access::Capabilities;
 
 /// Protocol version we advertise when the client requests none, or requests one
 /// we don't support (MCP negotiation: fall back to a version we do speak).
@@ -93,95 +96,22 @@ ULIDs assigned by Jot Deck — discover them via the tools, never guess them. Pr
 are never visible. Some connections disable write capabilities or restrict writes to specific \
 columns (reads stay open); `describe_deck` reports exactly what's available.";
 
-/// Default per-connection write cap: writes/minute (008 §5 rate limit). Overridable
-/// via `JOT_DECK_MAX_WRITES_PER_MIN`.
-const DEFAULT_MAX_WRITES_PER_MIN: usize = 120;
-
-/// Which write verbs a connection may invoke (008 §5). All default ON; a
-/// connection opts out via the `JOT_DECK_DENY` env list (e.g. `append,delete`).
-/// `move_card` is gated under `edit` (it mutates an existing card's placement);
-/// the column tools (`ensure_column`/`update_column`/`move_column`) are gated
-/// under `structure`.
-#[derive(Debug, Clone, Copy)]
-pub struct Capabilities {
-    pub append: bool,
-    pub edit: bool,
-    pub delete: bool,
-    pub structure: bool,
-}
-
-impl Default for Capabilities {
-    fn default() -> Self {
-        Self {
-            append: true,
-            edit: true,
-            delete: true,
-            structure: true,
-        }
-    }
-}
-
-/// Split a comma-separated env value into trimmed, non-empty tokens. Shared by
-/// the deny-list and write-allowlist parsers.
 fn split_env_list(raw: &str) -> impl Iterator<Item = &str> {
     raw.split(',').map(str::trim).filter(|s| !s.is_empty())
 }
 
-impl Capabilities {
-    /// Parse a deny list like `"append, delete"` into capabilities (default all
-    /// on). Unknown tokens are ignored but warned on stderr — a typo in a
-    /// lockdown config must not silently leave a verb enabled.
-    pub fn from_deny_list(deny: &str) -> Self {
-        let mut c = Self::default();
-        for tok in split_env_list(deny).map(|s| s.to_ascii_lowercase()) {
-            match tok.as_str() {
-                "append" => c.append = false,
-                "edit" => c.edit = false,
-                "delete" => c.delete = false,
-                "structure" => c.structure = false,
-                other => eprintln!(
-                    "[jot-deck-mcp] JOT_DECK_DENY: ignoring unknown capability '{}' (expected append/edit/delete/structure)",
-                    other
-                ),
-            }
-        }
-        c
+/// Parse the `JOT_DECK_DENY` list (e.g. `append,delete`) into capabilities. An
+/// unknown name is warned on stderr and otherwise ignored, so a typo in the env
+/// var doesn't stop the bridge (the mistyped verb keeps its default-on state).
+pub fn capabilities_from_deny_env(deny: &str) -> Capabilities {
+    let (capabilities, unknown) = Capabilities::from_deny(split_env_list(deny));
+    for name in unknown {
+        eprintln!(
+            "[jot-deck-mcp] JOT_DECK_DENY: ignoring unknown capability '{}' (expected append/edit/delete/structure)",
+            name
+        );
     }
-}
-
-/// Per-connection sliding-window write rate limiter (008 §5). Bounds the
-/// "many tiny writes" runaway the card-length backstop can't catch.
-struct RateLimiter {
-    max_per_min: usize,
-    events: Mutex<VecDeque<Instant>>,
-}
-
-impl RateLimiter {
-    fn new(max_per_min: usize) -> Self {
-        Self {
-            max_per_min,
-            events: Mutex::new(VecDeque::new()),
-        }
-    }
-
-    /// Record a write attempt; err if it would exceed the per-minute cap.
-    fn check_and_record(&self) -> Result<(), String> {
-        let now = Instant::now();
-        let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(cutoff) = now.checked_sub(Duration::from_secs(60)) {
-            while events.front().is_some_and(|&t| t < cutoff) {
-                events.pop_front();
-            }
-        }
-        if events.len() >= self.max_per_min {
-            return Err(format!(
-                "Rate limit exceeded: max {} writes/min for this connection. Slow down and retry.",
-                self.max_per_min
-            ));
-        }
-        events.push_back(now);
-        Ok(())
-    }
+    capabilities
 }
 
 /// Parse a comma-separated `JOT_DECK_WRITE_COLUMNS` list of column ULIDs into a
@@ -222,7 +152,7 @@ impl BridgeConfig {
     /// `JOT_DECK_WRITE_COLUMNS` (write allowlist).
     pub fn from_env() -> Self {
         let capabilities = std::env::var("JOT_DECK_DENY")
-            .map(|d| Capabilities::from_deny_list(&d))
+            .map(|d| capabilities_from_deny_env(&d))
             .unwrap_or_default();
         let max_writes_per_min = match std::env::var("JOT_DECK_MAX_WRITES_PER_MIN") {
             Ok(raw) => raw.parse::<usize>().ok().filter(|&n| n > 0).unwrap_or_else(|| {
@@ -247,15 +177,12 @@ impl BridgeConfig {
     }
 }
 
-/// The MCP bridge over one connection. Which Deck each call addresses is
-/// decided by `scope` (limited to the pinned Decks, or any Deck per call →
-/// 008 §4.5).
+/// The MCP bridge over one connection. What the connection may do — which
+/// Decks, which write verbs, how fast, which columns — is its `policy`
+/// (`jot_deck_core::access`, shared with the Reporter host → 008 §4.5 / §5).
 pub struct Bridge {
     conn: Connection,
-    scope: DeckScope,
-    capabilities: Capabilities,
-    rate_limiter: RateLimiter,
-    write_scope: WriteScope,
+    policy: AccessPolicy,
     connection_id: String,
     /// `initialize` の `clientInfo.name`（例: "claude-code"）。変更履歴の表示名。
     client_name: Mutex<Option<String>>,
@@ -279,10 +206,13 @@ impl Bridge {
     ) -> Self {
         Self {
             conn,
-            scope: DeckScope::from_pinned(pinned_deck_id),
-            capabilities: config.capabilities,
-            rate_limiter: RateLimiter::new(config.max_writes_per_min),
-            write_scope: config.write_scope,
+            policy: AccessPolicy::new(
+                DeckScope::from_pinned(pinned_deck_id),
+                config.capabilities,
+                config.max_writes_per_min,
+                config.write_scope,
+                "connection",
+            ),
             connection_id: config.connection_id,
             client_name: Mutex::new(None),
         }
@@ -359,19 +289,19 @@ impl Bridge {
         let args = params.get("arguments").cloned().unwrap_or(json!({}));
 
         let result = match name {
-            "list_decks" => self.tool_list_decks(),
-            "list_columns" => self.tool_list_columns(&args),
-            "read_card" => self.tool_read_card(&args),
-            "search_cards" => self.tool_search_cards(&args),
-            "recent_cards" => self.tool_recent_cards(&args),
-            "describe_deck" => self.tool_describe_deck(&args),
-            "append_card" => self.tool_append_card(&args),
-            "patch_card" => self.tool_patch_card(&args),
-            "move_card" => self.tool_move_card(&args),
-            "delete_card" => self.tool_delete_card(&args),
-            "ensure_column" => self.tool_ensure_column(&args),
-            "update_column" => self.tool_update_column(&args),
-            "move_column" => self.tool_move_column(&args),
+            "list_decks" => access::list_decks(&self.conn, &self.policy),
+            "list_columns" => access::list_columns(&self.conn, &self.policy, &args),
+            "read_card" => access::read_card(&self.conn, &self.policy, &args),
+            "search_cards" => access::search_cards(&self.conn, &self.policy, &args),
+            "recent_cards" => access::recent_cards(&self.conn, &self.policy, &args),
+            "describe_deck" => access::describe_deck(&self.conn, &self.policy, &args),
+            "append_card" => self.write("append_card", access::append_card, &args),
+            "patch_card" => self.write("patch_card", access::patch_card, &args),
+            "move_card" => self.write("move_card", access::move_card, &args),
+            "delete_card" => self.write("delete_card", access::delete_card, &args),
+            "ensure_column" => self.write("ensure_column", access::ensure_column, &args),
+            "update_column" => self.write("update_column", access::update_column, &args),
+            "move_column" => self.write("move_column", access::move_column, &args),
             other => {
                 return error_response(id, -32602, &format!("Unknown tool: {}", other));
             }
@@ -382,308 +312,30 @@ impl Bridge {
             // Tool-level failures come back as a result with isError:true so the
             // model reads the message and self-corrects (008 §4.6), rather than a
             // transport error.
-            Err(msg) => success(id, tool_err(&msg)),
+            Err(e) => success(id, tool_err(&e.to_string())),
         }
-    }
-
-    // ---- deck resolution (008 §4.5) ----
-
-    /// Target Deck of a deck-addressed tool: its `deck_id` argument, resolved by
-    /// core (pin → argument → error; no implicit default).
-    fn deck_arg(&self, args: &Value) -> Result<String, String> {
-        self.scope
-            .resolve(&self.conn, opt_str(args, "deck_id").as_deref())
-            .map_err(|e| e.to_string())
-    }
-
-    /// Deck owning `card_id` (card ids are unique across Decks).
-    fn deck_of_card(&self, card_id: &str) -> Result<String, String> {
-        self.scope
-            .deck_for_card(&self.conn, card_id)
-            .map_err(|e| e.to_string())
-    }
-
-    /// Deck owning `column_id` (column ids are unique across Decks).
-    fn deck_of_column(&self, column_id: &str) -> Result<String, String> {
-        self.scope
-            .deck_for_column(&self.conn, column_id)
-            .map_err(|e| e.to_string())
-    }
-
-    fn tool_list_decks(&self) -> Result<Value, String> {
-        self.scope
-            .list_decks(&self.conn)
-            .map(|d| json!({ "decks": d }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn tool_list_columns(&self, args: &Value) -> Result<Value, String> {
-        let deck_id = self.deck_arg(args)?;
-        // Wrap the list in an object: MCP `structuredContent` must be a JSON
-        // object, not a top-level array (strict hosts reject arrays).
-        query::list_columns(&self.conn, &deck_id)
-            .map(|c| json!({ "deck_id": deck_id, "columns": c }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn tool_read_card(&self, args: &Value) -> Result<Value, String> {
-        let card_id = require_str(args, "card_id")?;
-        let deck_id = self.deck_of_card(&card_id)?;
-        query::read_card(&self.conn, &deck_id, &card_id)
-            .map(|c| json!(c))
-            .map_err(|e| e.to_string())
-    }
-
-    fn tool_search_cards(&self, args: &Value) -> Result<Value, String> {
-        let deck_id = self.deck_arg(args)?;
-        let params = query::SearchParams {
-            query: opt_str(args, "query"),
-            column_id: opt_str(args, "column_id"),
-            tags: opt_str_array(args, "tags"),
-            min_score: args.get("min_score").and_then(Value::as_i64).map(|n| n as i32),
-            limit: args.get("limit").and_then(Value::as_u64).map(|n| n as usize),
-        };
-        query::search_cards(&self.conn, &deck_id, &params)
-            .map(|c| json!({ "deck_id": deck_id, "cards": c }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn tool_recent_cards(&self, args: &Value) -> Result<Value, String> {
-        let deck_id = self.deck_arg(args)?;
-        let column_id = opt_str(args, "column_id");
-        let limit = args.get("limit").and_then(Value::as_u64).map(|n| n as usize);
-        query::recent_cards(&self.conn, &deck_id, column_id.as_deref(), limit)
-            .map(|c| json!({ "deck_id": deck_id, "cards": c }))
-            .map_err(|e| e.to_string())
-    }
-
-    fn tool_describe_deck(&self, args: &Value) -> Result<Value, String> {
-        let deck_id = self.deck_arg(args)?;
-        self.describe(&deck_id).map_err(|e| e.to_string())
-    }
-
-    /// `describe_deck` / `deck://schema` payload: the core description plus this
-    /// connection's policy.
-    fn describe(&self, deck_id: &str) -> jot_deck_core::Result<Value> {
-        let desc = query::describe_deck(&self.conn, deck_id)?;
-        let mut v = json!(desc);
-        // Augment the core description with this connection's write policy so the
-        // agent learns its effective scope without the user explaining it (008 §4.6).
-        v["capabilities"] = json!({
-            "read": true,
-            "append": self.capabilities.append,
-            "edit": self.capabilities.edit,
-            "delete": self.capabilities.delete,
-            "structure": self.capabilities.structure,
-            // null = every visible column is writable; a list = only these
-            // column ULIDs (write allowlist → 008 §4.5). Reads are never restricted.
-            "write_columns": self.write_scope.allowed_columns(),
-            // The Decks this connection is limited to (JOT_DECK_DECK_ID), or
-            // null when any Deck may be addressed per call (008 §4.5).
-            "pinned_deck_ids": self.scope.pinned(),
-        });
-        if let Some(obj) = v.get_mut("constraints").and_then(Value::as_object_mut) {
-            obj.insert(
-                "max_writes_per_min".to_string(),
-                json!(self.rate_limiter.max_per_min),
-            );
-        }
-        Ok(v)
     }
 
     // ---- write tools (008 §4.1) ----
 
-    /// Common prelude for every write tool: enforce the verb's capability, then
-    /// the per-connection rate limit (008 §5). Centralized so the two gates and
-    /// their order never drift between tools.
-    fn begin_write(&self, enabled: bool, verb: &str) -> Result<(), String> {
-        // Denied verbs are also hidden from `tools/list`, but an agent may still
-        // call one — answer with a clear error.
-        if !enabled {
-            return Err(format!(
-                "The '{}' capability is disabled for this connection.",
-                verb
-            ));
-        }
-        self.rate_limiter.check_and_record()
-    }
-
-    /// Log a write to stderr for connection attribution (008 §5). stdout carries
-    /// JSON-RPC, so audit lines go to stderr where MCP hosts capture them. `target`
-    /// is the affected card or column ULID.
-    fn log_write(&self, deck_id: &str, tool: &str, target: &str) {
+    /// Run a write tool and log it to stderr for connection attribution (008 §5).
+    /// stdout carries JSON-RPC, so audit lines go to stderr where MCP hosts
+    /// capture them. The capability / rate-limit gates run inside the op.
+    fn write(
+        &self,
+        tool: &str,
+        op: fn(&Connection, &AccessPolicy, &Author, &Value) -> Result<Written, AccessError>,
+        args: &Value,
+    ) -> Result<Value, AccessError> {
+        let written = op(&self.conn, &self.policy, &self.author(), args)?;
         eprintln!(
             "[jot-deck-mcp] conn={} deck={} {} target={}",
-            self.connection_id, deck_id, tool, target
+            self.connection_id,
+            written.deck_id,
+            tool,
+            written.effect.target()
         );
-    }
-
-    fn tool_append_card(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.append, "append")?;
-        let column_id = require_str(args, "column_id")?;
-        let content = require_str(args, "content")?;
-        let idempotency_key = opt_str(args, "idempotency_key");
-        let deck_id = self.deck_of_column(&column_id)?;
-        let card = write::append_card(
-            &self.conn,
-            &deck_id,
-            &column_id,
-            &content,
-            idempotency_key.as_deref(),
-            &self.write_scope,
-            &self.author(),
-        )
-        .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "append_card", &card.id);
-        Ok(json!({
-            "card_id": card.id,
-            "column_id": card.column_id,
-            "position": card.position,
-            "created_at": card.created_at.to_rfc3339(),
-        }))
-    }
-
-    fn tool_patch_card(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.edit, "edit")?;
-        let card_id = require_str(args, "card_id")?;
-        let content = require_str(args, "content")?;
-        let expected = require_str(args, "expected_updated_at")?;
-        let expected_updated_at = chrono::DateTime::parse_from_rfc3339(&expected)
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .map_err(|_| {
-                "expected_updated_at must be an RFC3339 timestamp (the updated_at you last read)"
-                    .to_string()
-            })?;
-        let deck_id = self.deck_of_card(&card_id)?;
-        let card = write::patch_card(
-            &self.conn,
-            &deck_id,
-            &card_id,
-            &content,
-            expected_updated_at,
-            &self.write_scope,
-            &self.author(),
-        )
-        .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "patch_card", &card.id);
-        Ok(json!({ "card_id": card.id, "updated_at": card.updated_at.to_rfc3339() }))
-    }
-
-    fn tool_move_card(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.edit, "edit")?;
-        let card_id = require_str(args, "card_id")?;
-        let to_column_id = opt_str(args, "to_column_id");
-        let before_card_id = opt_str(args, "before_card_id");
-        let after_card_id = opt_str(args, "after_card_id");
-        // The card's own Deck bounds the move: a destination column in another
-        // Deck is rejected by core (no cross-Deck moves → 008 §4.4).
-        let deck_id = self.deck_of_card(&card_id)?;
-        let card = write::move_card(
-            &self.conn,
-            &deck_id,
-            &card_id,
-            to_column_id.as_deref(),
-            before_card_id.as_deref(),
-            after_card_id.as_deref(),
-            &self.write_scope,
-            &self.author(),
-        )
-        .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "move_card", &card.id);
-        Ok(json!({ "card_id": card.id, "column_id": card.column_id, "position": card.position }))
-    }
-
-    fn tool_delete_card(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.delete, "delete")?;
-        let card_id = require_str(args, "card_id")?;
-        let deck_id = self.deck_of_card(&card_id)?;
-        let card = write::delete_card(&self.conn, &deck_id, &card_id, &self.write_scope, &self.author())
-            .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "delete_card", &card.id);
-        let deleted_at = card.deleted_at.map(|d| d.to_rfc3339()).unwrap_or_default();
-        Ok(json!({ "card_id": card.id, "deleted_at": deleted_at }))
-    }
-
-    // ---- structure tools (008 §4.1) ----
-
-    fn tool_ensure_column(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.structure, "structure")?;
-        let name = require_str(args, "name")?;
-        let description = require_str(args, "description")?;
-        let private = args.get("private").and_then(Value::as_bool).unwrap_or(false);
-        let deck_id = self.deck_arg(args)?;
-        // structure is already enforced by begin_write above; whether a *new*
-        // column may be created is derived inside ensure_column from the write
-        // scope (an allowlist forbids creation → 008 §4.5).
-        let result = write::ensure_column(
-            &self.conn,
-            &deck_id,
-            &name,
-            &description,
-            private,
-            &self.write_scope,
-            &self.author(),
-        )
-        .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "ensure_column", &result.column.id);
-        Ok(json!({
-            "deck_id": deck_id,
-            "column_id": result.column.id,
-            "name": result.column.name,
-            "position": result.column.position,
-            "created": result.created,
-        }))
-    }
-
-    fn tool_update_column(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.structure, "structure")?;
-        let column_id = require_str(args, "column_id")?;
-        let name = opt_str(args, "name");
-        // Distinguish absent (leave) from present-empty (clear) for description.
-        let description = args
-            .get("description")
-            .and_then(Value::as_str)
-            .map(|s| if s.is_empty() { None } else { Some(s) });
-        let private = args.get("private").and_then(Value::as_bool);
-        let deck_id = self.deck_of_column(&column_id)?;
-        let column = write::update_column(
-            &self.conn,
-            &deck_id,
-            &column_id,
-            name.as_deref(),
-            description,
-            private,
-            &self.write_scope,
-            &self.author(),
-        )
-        .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "update_column", &column.id);
-        Ok(json!({
-            "column_id": column.id,
-            "name": column.name,
-            "description": column.description,
-            "private": column.private,
-        }))
-    }
-
-    fn tool_move_column(&self, args: &Value) -> Result<Value, String> {
-        self.begin_write(self.capabilities.structure, "structure")?;
-        let column_id = require_str(args, "column_id")?;
-        let before_column_id = opt_str(args, "before_column_id");
-        let after_column_id = opt_str(args, "after_column_id");
-        let deck_id = self.deck_of_column(&column_id)?;
-        let column = write::move_column(
-            &self.conn,
-            &deck_id,
-            &column_id,
-            before_column_id.as_deref(),
-            after_column_id.as_deref(),
-            &self.write_scope,
-            &self.author(),
-        )
-        .map_err(|e| e.to_string())?;
-        self.log_write(&deck_id, "move_column", &column.id);
-        Ok(json!({ "column_id": column.id, "position": column.position }))
+        Ok(written.result)
     }
 
     // ---- resources ----
@@ -692,7 +344,7 @@ impl Bridge {
     /// `deck://schema` (the pinned Deck's `describe_deck`) on a connection pinned
     /// to a single Deck — otherwise there is no single Deck it could describe.
     fn resource_defs(&self) -> Vec<Value> {
-        let decks = self.scope.list_decks(&self.conn).unwrap_or_default();
+        let decks = self.policy.deck_scope().list_decks(&self.conn).unwrap_or_default();
         let mut defs: Vec<Value> = decks
             .into_iter()
             .map(|d| {
@@ -704,7 +356,7 @@ impl Bridge {
                 })
             })
             .collect();
-        if self.scope.sole_pinned().is_some() {
+        if self.policy.deck_scope().sole_pinned().is_some() {
             defs.push(json!({
                 "uri": SCHEMA_URI,
                 "name": "Deck schema",
@@ -719,14 +371,18 @@ impl Bridge {
         let uri = params.get("uri").and_then(Value::as_str).unwrap_or("");
 
         let data = if uri == SCHEMA_URI {
-            self.scope
+            self.policy
+                .deck_scope()
                 .resolve(&self.conn, None)
-                .and_then(|deck_id| self.describe(&deck_id))
+                .map_err(AccessError::from)
+                .and_then(|deck_id| access::describe(&self.conn, &self.policy, &deck_id))
         } else if let Some(requested) = uri.strip_prefix("deck://").filter(|s| !s.is_empty()) {
             // KB view: the deck description plus each visible column's cards.
-            self.scope
+            self.policy
+                .deck_scope()
                 .resolve(&self.conn, Some(requested))
                 .and_then(|deck_id| self.deck_kb(&deck_id))
+                .map_err(AccessError::from)
         } else {
             return error_response(id, -32602, &format!("Unknown resource: {}", uri));
         };
@@ -780,18 +436,19 @@ impl Bridge {
     /// tool whose capability is enabled (denied verbs are hidden so the agent
     /// won't attempt them → 008 §4.6).
     fn tool_defs(&self) -> Vec<Value> {
+        let caps = self.policy.capabilities();
         let mut defs = read_tool_defs();
-        if self.capabilities.append {
+        if caps.append {
             defs.push(append_card_def());
         }
-        if self.capabilities.edit {
+        if caps.edit {
             defs.push(patch_card_def());
             defs.push(move_card_def());
         }
-        if self.capabilities.delete {
+        if caps.delete {
             defs.push(delete_card_def());
         }
-        if self.capabilities.structure {
+        if caps.structure {
             defs.push(ensure_column_def());
             defs.push(update_column_def());
             defs.push(move_column_def());
@@ -948,16 +605,16 @@ fn delete_card_def() -> Value {
 fn ensure_column_def() -> Value {
     json!({
         "name": "ensure_column",
-        "description": "Get-or-create a column by name in a Deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. Give a one-line `description` of what belongs in the column — it sharpens where cards get routed. Prefer this over guessing a column id.",
+        "description": "Get-or-create a column by name in a Deck (idempotent). Returns the column's ULID and whether it was created. If a visible column with that name exists it is returned unchanged; otherwise a new one is created at the end. A one-line `description` of what belongs in the column is optional but sharpens where cards get routed. Prefer this over guessing a column id.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "deck_id": deck_id_prop(),
                 "name": { "type": "string", "description": "Column name (the get-or-create key)." },
-                "description": { "type": "string", "description": "One-line description of what belongs in this column (classification axis)." },
+                "description": { "type": "string", "description": "Optional one-line description of what belongs in this column (classification axis). Used only when the column is created." },
                 "private": { "type": "boolean", "description": "Create it hidden from all connections (default false)." }
             },
-            "required": ["name", "description"],
+            "required": ["name"],
             "additionalProperties": false,
         },
     })
@@ -1025,32 +682,6 @@ fn tool_err(message: &str) -> Value {
         "content": [{ "type": "text", "text": message }],
         "isError": true,
     })
-}
-
-fn require_str(args: &Value, key: &str) -> Result<String, String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .map(|s| s.to_string())
-        .ok_or_else(|| format!("Missing required argument: {}", key))
-}
-
-fn opt_str(args: &Value, key: &str) -> Option<String> {
-    args.get(key)
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-}
-
-fn opt_str_array(args: &Value, key: &str) -> Vec<String> {
-    args.get(key)
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(Value::as_str)
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1282,7 +913,7 @@ mod tests {
     #[test]
     fn deck_resource_lists_cards_without_private() {
         let (bridge, _, _) = bridge_with_data();
-        let deck_id = bridge.scope.sole_pinned().unwrap().to_string();
+        let deck_id = bridge.policy.deck_scope().sole_pinned().unwrap().to_string();
         let req = json!({ "jsonrpc": "2.0", "id": 4, "method": "resources/read",
             "params": { "uri": format!("deck://{}", deck_id) } })
         .to_string();
@@ -1330,7 +961,7 @@ mod tests {
 
     #[test]
     fn deny_list_parses_known_and_ignores_unknown() {
-        let c = Capabilities::from_deny_list("append, bogus, delete");
+        let c = capabilities_from_deny_env("append, bogus, delete");
         assert!(!c.append);
         assert!(c.edit); // untouched
         assert!(!c.delete);
@@ -1773,7 +1404,7 @@ mod tests {
         let resp = call(&bridge, 1, "list_decks", json!({}));
         let listed = structured(&resp)["decks"].as_array().unwrap();
         assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0]["deck_id"], bridge.scope.sole_pinned().unwrap());
+        assert_eq!(listed[0]["deck_id"], bridge.policy.deck_scope().sole_pinned().unwrap());
     }
 
     #[test]

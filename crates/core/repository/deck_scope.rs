@@ -1,13 +1,14 @@
-//! Which Deck an MCP call addresses (008-mcp-server.md §4.5).
+//! Which Deck an agent call addresses (008-mcp-server.md §4.5, 007 §2.3).
 //!
-//! A connection is either pinned to the Decks listed in `JOT_DECK_DECK_ID`
-//! (comma-separated) or may address any local Deck per call. Deck-addressed
+//! A connection (an MCP bridge, or a running Reporter) is either pinned to a
+//! list of Decks (`JOT_DECK_DECK_ID` / a Reporter registration's `deck_ids`) or
+//! may address any local Deck per call. Deck-addressed
 //! tools resolve their target with [`DeckScope::resolve`] (explicit `deck_id`,
 //! checked against a pinned connection's list → the sole pinned Deck → error —
 //! there is no implicit default, so a call's target never depends on GUI state);
 //! card/column-addressed tools derive it from the id they name. The GUI's last
 //! active Deck is only surfaced as a hint (`DeckSummary::active`). Like
-//! `query.rs`/`write.rs`, this validation lives in core — the bridge is
+//! `query.rs`/`write.rs`, this validation lives in core — the transports are
 //! untrusted (008 §4.5).
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -29,7 +30,7 @@ pub struct DeckSummary {
 /// 接続が扱える Deck の範囲。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DeckScope {
-    /// `JOT_DECK_DECK_ID` で列挙した Deck（1 つ以上・重複なし）に厳格限定。
+    /// 列挙した Deck（`JOT_DECK_DECK_ID` / Reporter の `deck_ids`。重複なし）に厳格限定。
     /// 列挙外の Deck の指定は Unauthorized、そのカード/カラムは見えない。
     Pinned(Vec<String>),
     /// ローカルの全 Deck。対象は呼び出しごとに `deck_id` で決まる。
@@ -51,6 +52,22 @@ impl DeckScope {
         } else {
             Self::Pinned(ids)
         }
+    }
+
+    /// 保存済みの Deck id 一覧から作る（Reporter 登録の `deck_ids`）。`None` は
+    /// 全 Deck。空要素・重複は除く。`Some` で有効な id が残らなければ、どの Deck
+    /// も扱えない接続になる（未設定扱いで全 Deck に広げない ―― fail-closed）。
+    pub fn from_ids(ids: Option<&[String]>) -> Self {
+        let Some(ids) = ids else {
+            return Self::AnyDeck;
+        };
+        let mut pinned: Vec<String> = Vec::new();
+        for id in ids.iter().map(|id| id.trim()) {
+            if !id.is_empty() && !pinned.iter().any(|seen| seen == id) {
+                pinned.push(id.to_string());
+            }
+        }
+        Self::Pinned(pinned)
     }
 
     /// 列挙した Deck（固定接続のみ）。
@@ -84,14 +101,14 @@ impl DeckScope {
         let requested = requested.filter(|id| !id.is_empty());
         match (requested, self.sole_pinned()) {
             (Some(req), _) if !self.admits(req) => Err(JotDeckError::Unauthorized(format!(
-                "Deck {} is outside this connection, which is limited to Deck(s) {} (JOT_DECK_DECK_ID). Call list_decks for the Decks you can use.",
+                "Deck {} is outside this connection, which is limited to Deck(s) {}. List the Decks you can use (list_decks / deck.list).",
                 req,
                 self.pinned().unwrap_or_default().join(", ")
             ))),
             (Some(req), _) => Ok(deck::get_by_id(conn, req)?.id),
             (None, Some(only)) => Ok(deck::get_by_id(conn, only)?.id),
             (None, None) => Err(JotDeckError::InvalidOperation(
-                "deck_id required: call list_decks and pass a deck_id (the `active` Deck is the one last open in the Jot Deck app)."
+                "deck_id required: list the Decks (list_decks / deck.list) and pass a deck_id (the `active` Deck is the one last open in the Jot Deck app)."
                     .to_string(),
             )),
         }
@@ -188,6 +205,26 @@ mod tests {
             DeckScope::from_pinned(Some(" B, A ,,B".to_string())),
             pinned(&["B", "A"])
         );
+    }
+
+    #[test]
+    fn from_ids_pins_the_listed_decks_and_fails_closed_when_empty() {
+        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(DeckScope::from_ids(None), DeckScope::AnyDeck);
+        assert_eq!(
+            DeckScope::from_ids(Some(&ids(&["B", " A", "B", ""]))),
+            pinned(&["B", "A"])
+        );
+        // An empty list admits no Deck — it never widens to AnyDeck.
+        let none = DeckScope::from_ids(Some(&ids(&[" "])));
+        assert_eq!(none, pinned(&[]));
+        let conn = create_in_memory().unwrap();
+        let a = new_deck(&conn, "A");
+        assert!(matches!(
+            none.resolve(&conn, Some(&a)),
+            Err(JotDeckError::Unauthorized(_))
+        ));
+        assert!(none.list_decks(&conn).unwrap().is_empty());
     }
 
     #[test]

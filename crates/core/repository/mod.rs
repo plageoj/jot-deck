@@ -1,3 +1,4 @@
+pub mod access;
 pub mod card;
 pub mod column;
 pub mod deck;

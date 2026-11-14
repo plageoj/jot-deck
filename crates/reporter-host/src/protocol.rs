@@ -1,12 +1,11 @@
-//! JSON-RPC 2.0 envelope + Reporter-protocol request/result types (007 §6.1).
+//! JSON-RPC 2.0 envelope and error codes of the Reporter protocol (007 §6.1).
 //!
 //! The Reporter is the client: it sends requests over its stdout, the host (Jot
-//! Deck) answers on the Reporter's stdin. This module holds the wire types and
-//! the error-code mapping; the actual method → core mapping lives in `dispatch`.
-//!
-//! Phase 1 covers the *committed* channel only (007 §6.1). The ephemeral stream
-//! (`card.stream.begin/delta/end`, occupancy lock) is Phase 2 and not defined here.
+//! Deck) answers on the Reporter's stdin. This module holds the envelope, the
+//! error-code mapping and the ephemeral `card.stream.delta` payload; method
+//! arguments are parsed by `jot_deck_core::access`, shared with the MCP bridge.
 
+use jot_deck_core::access::AccessError;
 use jot_deck_core::JotDeckError;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -32,7 +31,7 @@ pub const NOT_FOUND: i64 = -32002;
 pub const INVALID_OPERATION: i64 = -32003;
 /// CAS mismatch or occupancy conflict (002 §5) — re-read and retry.
 pub const CONFLICT: i64 = -32004;
-/// Capability disabled or per-Reporter rate limit exceeded (007 §10 scope).
+/// Capability disabled or per-Reporter rate limit exceeded (007 §2.3 scope).
 pub const POLICY_DENIED: i64 = -32005;
 
 impl RpcError {
@@ -43,14 +42,17 @@ impl RpcError {
         }
     }
 
-    /// A bad/missing argument in `params` (before any core call).
-    pub fn invalid_params(message: impl Into<String>) -> Self {
-        Self::new(INVALID_PARAMS, message)
-    }
+}
 
-    /// A capability/rate-limit refusal raised by the Reporter scope (not core).
-    pub fn policy_denied(message: impl Into<String>) -> Self {
-        Self::new(POLICY_DENIED, message)
+/// Map an access-layer failure: policy refusals and bad arguments get their own
+/// codes, core domain errors go through the `JotDeckError` mapping below.
+impl From<AccessError> for RpcError {
+    fn from(e: AccessError) -> Self {
+        match e {
+            AccessError::Denied(msg) => RpcError::new(POLICY_DENIED, msg),
+            AccessError::InvalidArgs(msg) => RpcError::new(INVALID_PARAMS, msg),
+            AccessError::Core(e) => e.into(),
+        }
     }
 }
 
@@ -87,134 +89,6 @@ pub fn error_response(id: &Value, err: &RpcError) -> String {
     .to_string()
 }
 
-/// Deserialize a method's `params` into its typed struct, turning a shape
-/// mismatch into an `invalid_params` error rather than a panic.
-pub fn parse_params<T: for<'de> Deserialize<'de>>(params: &Value) -> Result<T, RpcError> {
-    // Treat an absent `params` as an empty object so methods with all-optional
-    // fields (e.g. deck.recent_cards) work when the Reporter omits it.
-    let params = if params.is_null() {
-        json!({})
-    } else {
-        params.clone()
-    };
-    serde_json::from_value(params)
-        .map_err(|e| RpcError::invalid_params(format!("Invalid params: {}", e)))
-}
-
-// ---- Method param types (007 §6.1) ----
-
-/// `card.append` — create a card at a column's end. The host assigns the ULID /
-/// position and extracts `#tag`s; `idempotency_key` makes a resend a no-op.
-#[derive(Debug, Deserialize)]
-pub struct AppendParams {
-    pub column_id: String,
-    pub content: String,
-    #[serde(default)]
-    pub idempotency_key: Option<String>,
-}
-
-/// `card.patch` (alias `card.commit`) — confirmed edit guarded by optimistic
-/// lock. `expected_updated_at` is the `updated_at` the Reporter last read (002 §5.3).
-#[derive(Debug, Deserialize)]
-pub struct PatchParams {
-    pub card_id: String,
-    pub content: String,
-    pub expected_updated_at: String,
-}
-
-/// `card.read` — read a single card back (context / patch-target identification).
-#[derive(Debug, Deserialize)]
-pub struct ReadParams {
-    pub card_id: String,
-}
-
-/// `card.move` — move / reorder a card by an anchor. `to_column_id` omitted means
-/// reorder within the current column; `before`/`after` omitted means the target
-/// column's end. The host assigns the position value.
-#[derive(Debug, Deserialize)]
-pub struct MoveCardParams {
-    pub card_id: String,
-    #[serde(default)]
-    pub to_column_id: Option<String>,
-    #[serde(default)]
-    pub before_card_id: Option<String>,
-    #[serde(default)]
-    pub after_card_id: Option<String>,
-}
-
-/// `card.delete` — soft-delete a card (recoverable via the user's delete stack).
-#[derive(Debug, Deserialize)]
-pub struct DeleteParams {
-    pub card_id: String,
-}
-
-/// `deck.recent_cards` — the query-less "what happened lately" path.
-#[derive(Debug, Deserialize)]
-pub struct RecentCardsParams {
-    #[serde(default)]
-    pub column_id: Option<String>,
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-/// `deck.search_cards` — FTS5 + tag/score/column filter (context lookup).
-#[derive(Debug, Deserialize)]
-pub struct SearchCardsParams {
-    #[serde(default)]
-    pub query: Option<String>,
-    #[serde(default)]
-    pub column_id: Option<String>,
-    #[serde(default)]
-    pub tags: Vec<String>,
-    #[serde(default)]
-    pub min_score: Option<i32>,
-    #[serde(default)]
-    pub limit: Option<usize>,
-}
-
-/// `column.ensure` — get-or-create by name (idempotent). The host assigns the
-/// ULID / position; `created` tells the Reporter which happened.
-#[derive(Debug, Deserialize)]
-pub struct EnsureColumnParams {
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    #[serde(default)]
-    pub private: bool,
-}
-
-/// `column.update` — patch name / description / private (only the given fields).
-///
-/// `description` distinguishes three cases: absent (leave), present-empty
-/// (clear to NULL), present-nonempty (set). `Option<Option<String>>` with
-/// `default` captures absent vs present; the inner is normalized in `dispatch`.
-#[derive(Debug, Deserialize)]
-pub struct UpdateColumnParams {
-    pub column_id: String,
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "double_option")]
-    pub description: Option<Option<String>>,
-    #[serde(default)]
-    pub private: Option<bool>,
-}
-
-/// `card.stream.begin` — acquire the occupancy lock on an existing card so the
-/// Reporter owns it for the duration of the stream (007 §6.2 / §7).
-#[derive(Debug, Deserialize)]
-pub struct StreamBeginParams {
-    pub card_id: String,
-}
-
-/// `card.stream.end` — commit the final text and release the lock. No
-/// `expected_updated_at`: the occupancy lock (not CAS) is the concurrency
-/// control while streaming.
-#[derive(Debug, Deserialize)]
-pub struct StreamEndParams {
-    pub card_id: String,
-    pub content: String,
-}
-
 /// `card.stream.delta` — a mid-stream chunk. Ephemeral: it never touches the DB,
 /// so it is parsed by `peek_ephemeral` and pushed straight to the frontend
 /// overlay rather than going through `dispatch` (007 §4 / §8.2).
@@ -222,27 +96,4 @@ pub struct StreamEndParams {
 pub struct StreamDelta {
     pub card_id: String,
     pub chunk: String,
-}
-
-/// `column.move` — reorder by an anchor (`before`/`after`, one of them; omit for
-/// the deck's end). The host assigns the position value.
-#[derive(Debug, Deserialize)]
-pub struct MoveColumnParams {
-    pub column_id: String,
-    #[serde(default)]
-    pub before_column_id: Option<String>,
-    #[serde(default)]
-    pub after_column_id: Option<String>,
-}
-
-/// Deserialize helper so an explicit JSON `null` maps to `Some(None)` (clear)
-/// while an absent key maps to `None` (leave) — the distinction `update_column`
-/// needs for `description`.
-fn double_option<'de, D>(de: D) -> Result<Option<Option<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    // If the key is present at all, deserialize its value as Option<String>;
-    // serde only calls this fn when the key exists (paired with `default`).
-    Ok(Some(Option::<String>::deserialize(de)?))
 }

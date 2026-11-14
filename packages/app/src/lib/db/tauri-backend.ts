@@ -205,30 +205,24 @@ export class TauriBackend implements DatabaseBackend {
   }
 
   // Reporter host operations
-  async listReporters(deckId: string): Promise<ReporterConfig[]> {
-    return invoke<ReporterConfig[]>("list_reporters", { deckId });
+  async listReporters(): Promise<ReporterConfig[]> {
+    return invoke<ReporterConfig[]>("list_reporters");
   }
 
-  async addReporter(
-    deckId: string,
-    config: ReporterConfig
-  ): Promise<ReporterConfig> {
-    return invoke<ReporterConfig>("add_reporter", { deckId, config });
+  async addReporter(config: ReporterConfig): Promise<ReporterConfig> {
+    return invoke<ReporterConfig>("add_reporter", { config });
   }
 
-  async updateReporter(
-    deckId: string,
-    config: ReporterConfig
-  ): Promise<ReporterConfig> {
-    return invoke<ReporterConfig>("update_reporter", { deckId, config });
+  async updateReporter(config: ReporterConfig): Promise<ReporterConfig> {
+    return invoke<ReporterConfig>("update_reporter", { config });
   }
 
-  async removeReporter(deckId: string, reporterId: string): Promise<void> {
-    return invoke("remove_reporter", { deckId, reporterId });
+  async removeReporter(reporterId: string): Promise<void> {
+    return invoke("remove_reporter", { reporterId });
   }
 
-  async startReporter(deckId: string, reporterId: string): Promise<void> {
-    return invoke("start_reporter", { deckId, reporterId });
+  async startReporter(reporterId: string): Promise<void> {
+    return invoke("start_reporter", { reporterId });
   }
 
   async stopReporter(reporterId: string): Promise<void> {

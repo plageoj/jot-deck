@@ -1,18 +1,19 @@
-//! Jot Deck Reporter host — committed channel (007-reporter-protocol.md, Phase 1).
+//! Jot Deck Reporter host (007-reporter-protocol.md).
 //!
 //! The Reporter host is the *inverse* of the MCP bridge (`crates/mcp`). There,
 //! Claude spawns the bridge and the bridge opens the DB directly. Here, **Jot
 //! Deck spawns the Reporter and owns the pipe** (007 §2.2), so the host is the
 //! JSON-RPC *server*: it reads requests from the child's stdout and answers on
 //! the child's stdin. This crate holds the transport-agnostic core of that
-//! server — envelope parsing, method dispatch onto `jot_deck_core::write`/`query`,
-//! and the per-Reporter scope — so it is unit-testable against an in-memory DB.
-//! The Tauri layer (`packages/app/src-tauri/src/reporter.rs`) owns spawning, the
-//! stdio pump, and frontend change events.
+//! server — envelope parsing, method dispatch onto `jot_deck_core::access` (the
+//! layer the MCP bridge uses too), and the per-Reporter scope — so it is
+//! unit-testable against an in-memory DB. The Tauri layer
+//! (`packages/app/src-tauri/src/reporter.rs`) owns spawning, the stdio pump, and
+//! frontend change events.
 //!
-//! Phase 1 = the committed channel only (`card.append`/`patch`/`read`, `deck.*`,
-//! `column.ensure`/`update`/`move`). The ephemeral stream (`card.stream.*`) and
-//! the occupancy lock (002 §5.2) are Phase 2.
+//! Two channels: the committed channel (`card.*`, `deck.*`, `column.*`,
+//! `card.stream.begin`/`end`) goes through `handle_message`; the ephemeral
+//! `card.stream.delta` is recognized by `peek_ephemeral` and never touches the DB.
 
 mod dispatch;
 mod protocol;
@@ -20,7 +21,8 @@ mod scope;
 
 pub use dispatch::{dispatch, Committed, DispatchOutcome};
 pub use protocol::{RpcError, StreamDelta};
-pub use scope::{Capabilities, ReporterScope, DEFAULT_MAX_WRITES_PER_MIN};
+pub use jot_deck_core::access::{Capabilities, DEFAULT_MAX_WRITES_PER_MIN};
+pub use scope::ReporterScope;
 
 use jot_deck_core::Connection;
 use serde_json::Value;
@@ -40,9 +42,9 @@ pub fn peek_ephemeral(line: &str) -> Option<StreamDelta> {
     serde_json::from_value(params.clone()).ok()
 }
 
-/// The outcome of handling one line: the response to write back (always present
-/// in Phase 1 — every committed-channel method is request/response), plus what
-/// the write changed so the host can emit a frontend event.
+/// The outcome of handling one line: the response to write back (every
+/// committed-channel method is request/response), plus what the write changed so
+/// the host can emit a frontend event.
 pub struct Handled {
     /// Serialized JSON-RPC response line to write to the Reporter's stdin, or
     /// `None` for a notification (no `id`), which must not be answered.
@@ -51,16 +53,11 @@ pub struct Handled {
     pub committed: Option<Committed>,
 }
 
-/// Handle one incoming JSON-RPC line from a Reporter against `conn`/`deck_id`
-/// under `scope`. Mirrors `Bridge::handle_message`: parse the envelope, treat a
+/// Handle one incoming JSON-RPC line from a Reporter against `conn` under
+/// `scope` (which Decks it may address is part of the scope). Mirrors `Bridge::handle_message`: parse the envelope, treat a
 /// missing `id` as a notification (no reply), otherwise dispatch and build the
 /// success/error response.
-pub fn handle_message(
-    conn: &Connection,
-    deck_id: &str,
-    scope: &ReporterScope,
-    line: &str,
-) -> Handled {
+pub fn handle_message(conn: &Connection, scope: &ReporterScope, line: &str) -> Handled {
     let msg: Value = match serde_json::from_str(line) {
         Ok(v) => v,
         Err(_) => {
@@ -88,7 +85,7 @@ pub fn handle_message(
         };
     };
 
-    match dispatch(conn, deck_id, scope, method, &params) {
+    match dispatch(conn, scope, method, &params) {
         Ok(outcome) => Handled {
             response: Some(protocol::success_response(&id, outcome.result)),
             committed: outcome.committed,
@@ -149,27 +146,38 @@ mod tests {
         (conn, d.id, col.id, secret.id, cardrow.id)
     }
 
+    /// A scope with every capability, limited to `deck_id` (so calls may omit
+    /// it, like a Reporter registered for a single Deck).
+    fn pinned(deck_id: &str, reporter_id: &str) -> ReporterScope {
+        ReporterScope::new(
+            Some(vec![deck_id.to_string()]),
+            Capabilities::default(),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            reporter_id.to_string(),
+        )
+    }
+
     /// Send one request and return the parsed response Value plus the committed
-    /// signal, using the default (all-enabled) scope.
+    /// signal, using an all-enabled scope pinned to `deck_id`.
     fn call(
         conn: &Connection,
         deck_id: &str,
         method: &str,
         params: Value,
     ) -> (Value, Option<Committed>) {
-        call_scoped(conn, deck_id, &ReporterScope::default(), method, params)
+        call_scoped(conn, &pinned(deck_id, "r1"), method, params)
     }
 
     fn call_scoped(
         conn: &Connection,
-        deck_id: &str,
         scope: &ReporterScope,
         method: &str,
         params: Value,
     ) -> (Value, Option<Committed>) {
         let req = json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params })
             .to_string();
-        let handled = handle_message(conn, deck_id, scope, &req);
+        let handled = handle_message(conn, scope, &req);
         let resp: Value = serde_json::from_str(&handled.response.unwrap()).unwrap();
         (resp, handled.committed)
     }
@@ -190,11 +198,11 @@ mod tests {
 
     #[test]
     fn writes_are_recorded_under_the_reporter() {
-        let (conn, deck_id, col_id, _, _) = deck_with_data();
+        let (conn, _, col_id, _, _) = deck_with_data();
+        // Unpinned: a card append addresses its Deck through the column.
         let scope = ReporterScope::default();
         let (resp, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.append",
             json!({ "column_id": col_id, "content": "note" }),
@@ -302,33 +310,20 @@ mod tests {
         assert_eq!(b["result"]["created"], true);
     }
 
-    #[test]
-    fn try_from_deny_parses_known_capabilities() {
-        let c = Capabilities::try_from_deny(&["Delete".to_string(), " structure ".to_string()])
-            .expect("known verbs parse");
-        assert!(c.append && c.edit);
-        assert!(!c.delete && !c.structure);
-    }
 
-    #[test]
-    fn try_from_deny_rejects_unknown_tokens() {
-        let err = Capabilities::try_from_deny(&["append".to_string(), "delte".to_string()])
-            .expect_err("a typo must fail closed, not leave the verb enabled");
-        assert_eq!(err, vec!["delte".to_string()]);
-    }
 
     #[test]
     fn deny_append_disables_capability() {
         let (conn, deck_id, col_id, _, _) = deck_with_data();
         let scope = ReporterScope::new(
-            Capabilities::from_deny_list("append"),
+            Some(vec![deck_id.clone()]),
+            Capabilities::from_deny(["append"]).0,
             DEFAULT_MAX_WRITES_PER_MIN,
             None,
             "r1".to_string(),
         );
         let (resp, committed) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.append",
             json!({ "column_id": col_id, "content": "x" }),
@@ -342,6 +337,7 @@ mod tests {
         let (conn, deck_id, col_id, _, _) = deck_with_data();
         // Allowlist naming only the visible column.
         let scope = ReporterScope::new(
+            Some(vec![deck_id.clone()]),
             Capabilities::default(),
             DEFAULT_MAX_WRITES_PER_MIN,
             Some(vec![col_id.clone()]),
@@ -350,7 +346,6 @@ mod tests {
         // Append to an allowed column succeeds.
         let (ok, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.append",
             json!({ "column_id": col_id, "content": "in scope" }),
@@ -359,7 +354,6 @@ mod tests {
         // Append to a made-up column id outside the allowlist is Unauthorized.
         let (bad, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.append",
             json!({ "column_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "content": "x" }),
@@ -369,7 +363,6 @@ mod tests {
         // but must not *create* a new one.
         let (created, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "column.ensure",
             json!({ "name": "Fresh", "description": "d" }),
@@ -404,14 +397,14 @@ mod tests {
         let (conn, deck_id, _col, _, card_id) = deck_with_data();
         // With `delete` denied, the call is refused.
         let denied = ReporterScope::new(
-            Capabilities::from_deny_list("delete"),
+            Some(vec![deck_id.clone()]),
+            Capabilities::from_deny(["delete"]).0,
             DEFAULT_MAX_WRITES_PER_MIN,
             None,
             "r1".to_string(),
         );
         let (blocked, committed) = call_scoped(
             &conn,
-            &deck_id,
             &denied,
             "card.delete",
             json!({ "card_id": card_id }),
@@ -435,6 +428,7 @@ mod tests {
         // Allowlist names only the visible column; moving to a made-up column id
         // outside it is rejected.
         let scope = ReporterScope::new(
+            Some(vec![deck_id.clone()]),
             Capabilities::default(),
             DEFAULT_MAX_WRITES_PER_MIN,
             Some(vec![col_id]),
@@ -442,7 +436,6 @@ mod tests {
         );
         let (resp, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.move",
             json!({ "card_id": card_id, "to_column_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV" }),
@@ -461,7 +454,7 @@ mod tests {
     fn notification_without_id_is_not_answered() {
         let (conn, deck_id, _, _, _) = deck_with_data();
         let req = json!({ "jsonrpc": "2.0", "method": "ping" }).to_string();
-        let handled = handle_message(&conn, &deck_id, &ReporterScope::default(), &req);
+        let handled = handle_message(&conn, &pinned(&deck_id, "r1"), &req);
         assert!(handled.response.is_none());
     }
 
@@ -473,6 +466,7 @@ mod tests {
         // One Reporter = one scope for its whole lifetime: begin and end must
         // present the same holder id, or end sees the lock as someone else's.
         let scope = ReporterScope::new(
+            Some(vec![deck_id.clone()]),
             Capabilities::default(),
             DEFAULT_MAX_WRITES_PER_MIN,
             None,
@@ -480,7 +474,6 @@ mod tests {
         );
         let (begin, committed) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.stream.begin",
             json!({ "card_id": card_id }),
@@ -490,7 +483,6 @@ mod tests {
 
         let (end, committed_end) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.stream.end",
             json!({ "card_id": card_id, "content": "final #done" }),
@@ -508,12 +500,14 @@ mod tests {
     fn stream_begin_conflicts_when_held_by_another_reporter() {
         let (conn, deck_id, _col, _, card_id) = deck_with_data();
         let scope_a = ReporterScope::new(
+            Some(vec![deck_id.clone()]),
             Capabilities::default(),
             DEFAULT_MAX_WRITES_PER_MIN,
             None,
             "reporter:a".to_string(),
         );
         let scope_b = ReporterScope::new(
+            Some(vec![deck_id.clone()]),
             Capabilities::default(),
             DEFAULT_MAX_WRITES_PER_MIN,
             None,
@@ -521,7 +515,6 @@ mod tests {
         );
         let (ok, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope_a,
             "card.stream.begin",
             json!({ "card_id": card_id }),
@@ -529,7 +522,6 @@ mod tests {
         assert!(ok["result"]["card_id"].is_string());
         let (conflict, committed) = call_scoped(
             &conn,
-            &deck_id,
             &scope_b,
             "card.stream.begin",
             json!({ "card_id": card_id }),
@@ -542,14 +534,14 @@ mod tests {
     fn stream_begin_denied_when_edit_capability_off() {
         let (conn, deck_id, _col, _, card_id) = deck_with_data();
         let scope = ReporterScope::new(
-            Capabilities::from_deny_list("edit"),
+            Some(vec![deck_id.clone()]),
+            Capabilities::from_deny(["edit"]).0,
             DEFAULT_MAX_WRITES_PER_MIN,
             None,
             "r1".to_string(),
         );
         let (resp, _) = call_scoped(
             &conn,
-            &deck_id,
             &scope,
             "card.stream.begin",
             json!({ "card_id": card_id }),
@@ -577,5 +569,121 @@ mod tests {
         assert!(peek_ephemeral(&append).is_none());
         // Garbage is not ephemeral.
         assert!(peek_ephemeral("not json").is_none());
+    }
+
+    /// A second Deck with one visible column, for the multi-Deck scope tests.
+    fn second_deck(conn: &Connection) -> (String, String) {
+        let d = deck::create(
+            conn,
+            NewDeck {
+                name: "Work".to_string(),
+                sort_order: SortOrder::default(),
+            },
+        )
+        .unwrap();
+        let col = column::create(
+            conn,
+            NewColumn {
+                deck_id: d.id.clone(),
+                name: "Inbox".to_string(),
+            },
+        )
+        .unwrap();
+        (d.id, col.id)
+    }
+
+    #[test]
+    fn describe_and_initialize_report_the_full_scope() {
+        let (conn, deck_id, col_id, _, _) = deck_with_data();
+        let scope = ReporterScope::new(
+            Some(vec![deck_id.clone()]),
+            Capabilities::default(),
+            30,
+            Some(vec![col_id.clone()]),
+            "r1".to_string(),
+        );
+        let (desc, _) = call_scoped(&conn, &scope, "deck.describe", json!({}));
+        let caps = &desc["result"]["capabilities"];
+        assert_eq!(caps["write_columns"], json!([col_id]));
+        assert_eq!(caps["pinned_deck_ids"], json!([deck_id]));
+        assert_eq!(desc["result"]["constraints"]["max_writes_per_min"], 30);
+
+        let (init, _) = call_scoped(&conn, &scope, "initialize", json!({}));
+        assert_eq!(init["result"]["capabilities"], *caps);
+    }
+
+    #[test]
+    fn deck_queries_return_the_same_shape_as_mcp() {
+        let (conn, deck_id, _, _, _) = deck_with_data();
+        for method in ["deck.list_columns", "deck.recent_cards", "deck.search_cards"] {
+            let (resp, _) = call(&conn, &deck_id, method, json!({}));
+            assert_eq!(resp["result"]["deck_id"], deck_id, "{method}");
+        }
+        let (decks, _) = call(&conn, &deck_id, "deck.list", json!({}));
+        assert_eq!(decks["result"]["decks"][0]["deck_id"], deck_id);
+    }
+
+    #[test]
+    fn multi_deck_scope_takes_deck_id_per_call_and_rejects_others() {
+        let (conn, home, _, _, _) = deck_with_data();
+        let (work, work_col) = second_deck(&conn);
+        let (_, other_col) = second_deck(&conn);
+        let both = ReporterScope::new(
+            Some(vec![home.clone(), work.clone()]),
+            Capabilities::default(),
+            DEFAULT_MAX_WRITES_PER_MIN,
+            None,
+            "r1".to_string(),
+        );
+
+        // Several Decks: a Deck-level call must name one.
+        let (missing, _) = call_scoped(&conn, &both, "deck.list_columns", json!({}));
+        assert_eq!(missing["error"]["code"], protocol::INVALID_OPERATION);
+        let (cols, _) = call_scoped(&conn, &both, "deck.list_columns", json!({ "deck_id": work }));
+        assert_eq!(cols["result"]["deck_id"], work);
+
+        // Card writes follow their column's Deck — inside the scope only.
+        let (ok, committed) = call_scoped(
+            &conn,
+            &both,
+            "card.append",
+            json!({ "column_id": work_col, "content": "from work" }),
+        );
+        assert!(ok["result"]["card_id"].is_string());
+        assert!(matches!(committed, Some(Committed::Card { column_id }) if column_id == work_col));
+        let (outside, committed) = call_scoped(
+            &conn,
+            &both,
+            "card.append",
+            json!({ "column_id": other_col, "content": "elsewhere" }),
+        );
+        assert_eq!(outside["error"]["code"], protocol::UNAUTHORIZED);
+        assert!(committed.is_none());
+
+        let (listed, _) = call_scoped(&conn, &both, "deck.list", json!({}));
+        assert_eq!(listed["result"]["decks"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn unpinned_scope_reaches_every_deck() {
+        let (conn, home, _, _, _) = deck_with_data();
+        let (work, _) = second_deck(&conn);
+        let scope = ReporterScope::default();
+        let (ensured, _) = call_scoped(
+            &conn,
+            &scope,
+            "column.ensure",
+            json!({ "deck_id": work, "name": "Minutes" }),
+        );
+        assert_eq!(ensured["result"]["deck_id"], work);
+        assert_eq!(ensured["result"]["created"], true);
+        let (listed, _) = call_scoped(&conn, &scope, "deck.list", json!({}));
+        let ids: Vec<&str> = listed["result"]["decks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["deck_id"].as_str().unwrap())
+            .collect();
+        assert!(ids.contains(&home.as_str()) && ids.contains(&work.as_str()));
     }
 }
