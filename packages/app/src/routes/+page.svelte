@@ -33,6 +33,9 @@
   import { isWebDemo } from "#lib/webDemo.ts";
   import type { Column, Deck, EditEntry, TrashItem } from "#lib/types.ts";
   import "#lib/styles/theme.css";
+  import { afterNextPaint, markStartup, reportStartup } from "#lib/startupTrace.ts";
+
+  markStartup("page_script");
 
   const data = new DeckData();
   const focus = new FocusManager(data);
@@ -170,8 +173,19 @@
     actions.onStartEdit = startCardEdit;
     window.addEventListener("keydown", actions.handleKeydown);
     window.addEventListener("paste", actions.handlePaste);
+    markStartup("mounted");
     await Promise.all([data.init(), settingsStore.load()]);
     if (!pageMounted) return;
+    markStartup("data_loaded");
+    void tick()
+      .then(afterNextPaint)
+      .then(() => {
+        markStartup("board_painted");
+        return reportStartup({
+          columns: data.columns.length,
+          cards: Object.values(data.cardsByColumn).reduce((n, cards) => n + cards.length, 0),
+        });
+      });
     // React to writes from other processes (CLI / MCP bridge) on the shared DB.
     void data.watchExternalChanges();
     // Non-blocking and silent on failure (e.g. offline) — a check error only
