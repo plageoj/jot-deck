@@ -90,8 +90,8 @@ describe("DeckData trash", () => {
   });
 
   it("breaks deleted_at ties deterministically by id (descending)", async () => {
-    // Same deletedAt — order must be stable and id-descending so undo picks
-    // the same item every time, regardless of source-table merge order.
+    // Same deletedAt — the Trash palette order must be stable and id-descending,
+    // regardless of source-table merge order.
     const sameTs = "2026-05-02T10:00:00Z";
     deckState.deletedColumns = [makeColumn("id-c", "deck-1", { deletedAt: sameTs })];
     deckState.deletedCards = [

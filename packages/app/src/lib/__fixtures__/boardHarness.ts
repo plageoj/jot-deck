@@ -1,4 +1,4 @@
-import type { Card, Column, Deck } from "#lib/types.ts";
+import type { Card, Column, Deck, EditEntry } from "#lib/types.ts";
 import { DeckData } from "#lib/deckData.svelte.ts";
 import { FocusManager } from "#lib/focusManager.svelte.ts";
 import { BoardActionExecutors } from "#lib/boardActionExecutors.ts";
@@ -38,7 +38,7 @@ export function createBoardActions(
   data: DeckData,
   focus: FocusManager,
   callbacks: {
-    startEdit?: (cardId: string) => void | Promise<void>;
+    startEdit?: (cardId: string, entry?: EditEntry) => void | Promise<void>;
     renameColumn?: () => void;
     runTask?: (task: Promise<unknown>) => void;
   } = {},
@@ -52,7 +52,7 @@ export function createBoardActions(
       focusedColumn,
       focusedCards,
       focusedCard: focusedCards[focus.focusedCardIndex],
-      startEdit: callbacks.startEdit ?? null,
+      startEdit: callbacks.startEdit ?? ((cardId) => focus.startEdit(cardId)),
       renameColumn: callbacks.renameColumn ?? null,
       runTask:
         callbacks.runTask ??

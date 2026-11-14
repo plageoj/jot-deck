@@ -2,7 +2,9 @@ import { test, expect } from "@playwright/test";
 import { waitForAppLoad } from "./e2e-helpers";
 
 // Browser-only handling of desktop features (docs/009-web-demo.md §4–§6). These
-// apply to every browser run, not just the demo build.
+// apply to every browser run, not just the demo build. Each test only checks
+// that the real isTauri() detection takes the browser branch; the branch
+// contents are covered by the component tests.
 test.describe("Browser runtime", () => {
   test.beforeEach(async ({ page }) => {
     await waitForAppLoad(page);
@@ -20,8 +22,6 @@ test.describe("Browser runtime", () => {
     const dialog = page.locator("dialog.reporters-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Available in the desktop app.");
-    await expect(dialog.getByRole("link", { name: "Download the desktop app" })).toBeVisible();
-    await expect(dialog.getByRole("button", { name: /Add reporter/ })).toHaveCount(0);
   });
 
   test("deck switcher has no MCP config or deck id copy", async ({ page }) => {
@@ -29,7 +29,6 @@ test.describe("Browser runtime", () => {
 
     await expect(page.locator(".current-name")).toContainText("Getting Started");
     await expect(page.getByRole("button", { name: "Copy MCP server config" })).toHaveCount(0);
-    await expect(page.locator(".deck-id-row")).toHaveCount(0);
   });
 
   test("About has no update check", async ({ page }) => {
@@ -39,20 +38,13 @@ test.describe("Browser runtime", () => {
     const dialog = page.locator("dialog.about-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Check for Updates" })).toHaveCount(0);
-    await expect(dialog.getByRole("link", { name: "desktop app" })).toBeVisible();
   });
 
-  test("cheatsheet dims browser-reserved keys and lists alternatives first", async ({ page }) => {
+  test("cheatsheet dims browser-reserved keys", async ({ page }) => {
     await page.keyboard.press("Shift+/");
 
     const palette = page.locator(".cheatsheet-item").filter({ hasText: "Command palette" });
-    await expect(palette.locator("kbd")).toHaveText(["F1", "Ctrl+Shift+P"]);
     await expect(palette.locator("kbd.unavailable")).toHaveText(["Ctrl+Shift+P"]);
-    await expect(palette.locator("kbd.unavailable")).toHaveAttribute("title", "Ctrl+Shift+P — Desktop only");
-    await expect(page.locator(".cheatsheet-hints")).toContainText("Desktop only");
-
-    const column = page.locator(".cheatsheet-item").filter({ hasText: "Switch column" });
-    await expect(column.locator("kbd")).toHaveText(["gn", "gc", "Ctrl+t"]);
   });
 });
 

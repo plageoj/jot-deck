@@ -42,25 +42,27 @@ describe("card operations", () => {
   });
 
   describe("creation", () => {
-    it("createCard from column focus creates a card in the focused column and marks it for editing", async () => {
+    it("createCard from column focus creates a card in the focused column and hands it to startEdit", async () => {
+      const startEdit = vi.fn();
+      actions = createBoardActions(data, focus, { startEdit });
       focus.focusMode = "column";
       focus.focusedColumnIndex = 1;
       await actions.executeColumnAction("createCard");
       expect(boardState.createCardCalls).toHaveLength(1);
       expect(boardState.createCardCalls[0].column_id).toBe("col-1");
-      expect(focus.editingCardId).not.toBeNull();
+      expect(startEdit).toHaveBeenCalledWith("created-card-1");
+      expect(focus.focusMode).toBe("card");
     });
 
-    it("createCardBelow inserts at focusedCardIndex+1 and starts editing it", async () => {
-      await actions.executeCardAction("createCardBelow");
-      expect(boardState.createCardCalls[0]?.position).toBe(2);
-      expect(focus.focusMode).toBe("edit");
-    });
-
-    it("createCardAbove inserts at focusedCardIndex and starts editing it", async () => {
-      await actions.executeCardAction("createCardAbove");
-      expect(boardState.createCardCalls[0]?.position).toBe(1);
-      expect(focus.focusMode).toBe("edit");
+    it.each([
+      ["createCardBelow", 2],
+      ["createCardAbove", 1],
+    ])("%s inserts at position %i and hands the card to startEdit", async (action, position) => {
+      const startEdit = vi.fn();
+      actions = createBoardActions(data, focus, { startEdit });
+      await actions.executeCardAction(action);
+      expect(boardState.createCardCalls[0]?.position).toBe(position);
+      expect(startEdit).toHaveBeenCalledWith("created-card-1");
     });
 
     it("hands the created card to the startEdit callback from either focus mode", async () => {
@@ -77,12 +79,6 @@ describe("card operations", () => {
   });
 
   describe("edit start", () => {
-    it("startEdit transitions into edit mode for the focused card", async () => {
-      await actions.executeCardAction("startEdit");
-      expect(focus.focusMode).toBe("edit");
-      expect(focus.editingCardId).toBe("c-0-b");
-    });
-
     it("startEdit runs the startEdit callback as a task when one is provided", async () => {
       const startEdit = vi.fn();
       const tasks: Promise<unknown>[] = [];

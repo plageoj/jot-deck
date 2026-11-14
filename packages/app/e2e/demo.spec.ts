@@ -21,6 +21,8 @@ const cardTexts = (page: Page, column: number) =>
   columns(page).nth(column).locator(".card").allInnerTexts();
 const columnNames = (page: Page) => page.locator(".column-name").allInnerTexts();
 const focusedCard = (page: Page) => page.locator(".card.focused");
+const focusedColumnIndex = (page: Page) =>
+  columns(page).evaluateAll((els) => els.findIndex((el) => el.classList.contains("focused")));
 
 test.describe("Jot Deck Demo", () => {
   test.beforeEach(async ({ page }) => {
@@ -56,18 +58,21 @@ test.describe("Jot Deck Demo", () => {
     await page.keyboard.press("g");
     await page.keyboard.press("1");
     await page.waitForTimeout(300);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(0);
 
     // Navigate right
     await page.keyboard.press("l");
     await page.waitForTimeout(300);
     await page.keyboard.press("l");
     await page.waitForTimeout(300);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(2);
 
     // Navigate left
     await page.keyboard.press("h");
     await page.waitForTimeout(300);
     await page.keyboard.press("h");
     await page.waitForTimeout(300);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(0);
 
     // ========================================
     // Scene 5: Create cards in first column
@@ -105,10 +110,12 @@ test.describe("Jot Deck Demo", () => {
     await page.waitForTimeout(300);
     await page.keyboard.press("k");
     await page.waitForTimeout(300);
+    await expect(focusedCard(page)).toContainText("Welcome to Jot Deck!");
 
     // Move down with 'j'
     await page.keyboard.press("j");
     await page.waitForTimeout(300);
+    await expect(focusedCard(page)).toContainText("Keyboard-first design");
 
     // Jump to first with 'gg'
     await page.keyboard.press("g");
@@ -225,10 +232,12 @@ test.describe("Jot Deck Demo", () => {
     await page.keyboard.press("g");
     await page.keyboard.press("1");
     await page.waitForTimeout(400);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(0);
 
     await page.keyboard.press("g");
     await page.keyboard.press("3");
     await page.waitForTimeout(400);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(2);
 
     // ========================================
     // Scene 14: Column reordering (in column mode)
@@ -265,22 +274,6 @@ test.describe("Feature Highlights", () => {
     await ensureDeckAndColumn(page);
   });
 
-  test("quick card creation workflow", async ({ page }) => {
-    // Rapidly create multiple cards
-    for (let i = 1; i <= 3; i++) {
-      await page.keyboard.press("o");
-      await page.waitForTimeout(300);
-      await typeInEditor(page, `Quick note ${i}`);
-      await saveAndExitEditor(page);
-    }
-
-    // Verify cards exist
-    await expect(page.locator("text=Quick note 1")).toBeVisible();
-    await expect(page.locator("text=Quick note 3")).toBeVisible();
-
-    await page.waitForTimeout(1000);
-  });
-
   test("keyboard navigation demo", async ({ page }) => {
     // Create multiple columns
     await page.keyboard.press("Escape");
@@ -304,21 +297,27 @@ test.describe("Feature Highlights", () => {
     await typeInEditor(page, "Card A2");
     await saveAndExitEditor(page);
 
+    await expect(columns(page).nth(0).locator(".card")).toHaveCount(2);
+    await expect(focusedCard(page)).toContainText("Card A2");
+
     // Navigate with h/j/k/l
     await page.keyboard.press("k");
     await page.waitForTimeout(300);
+    await expect(focusedCard(page)).toContainText("Card A1");
     await page.keyboard.press("j");
     await page.waitForTimeout(300);
+    await expect(focusedCard(page)).toContainText("Card A2");
     await page.keyboard.press("l");
     await page.waitForTimeout(300);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(1);
     await page.keyboard.press("h");
     await page.waitForTimeout(300);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(0);
 
     // Jump with g+number
     await page.keyboard.press("g");
     await page.keyboard.press("3");
     await page.waitForTimeout(500);
-
-    await page.waitForTimeout(1000);
+    await expect.poll(() => focusedColumnIndex(page)).toBe(2);
   });
 });

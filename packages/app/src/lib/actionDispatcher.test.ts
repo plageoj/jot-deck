@@ -358,9 +358,9 @@ describe("ActionDispatcher board operation routing", () => {
     });
   });
 
-  it("undo clamps a focus index left past the last column", async () => {
-    // Undoing a column create shrinks the list under the focused index; the
-    // next createColumn must not insert past the end (issue #81).
+  it("createColumn after an undo that shrank the board appends at the end", async () => {
+    // The clamp itself is covered in actionDispatchHelpers.test.ts; this checks
+    // the next createColumn uses the clamped index (issue #81).
     focus.focusedColumnIndex = 2;
     data.history.push({
       undo: async () => {
@@ -370,8 +370,6 @@ describe("ActionDispatcher board operation routing", () => {
     });
 
     await dispatcher.executeAction("undo");
-    expect(focus.focusedColumnIndex).toBe(1);
-
     await dispatcher.executeColumnAction("createColumn");
     expect(boardState.createColumnCalls[0].position).toBe(2);
   });
@@ -542,11 +540,17 @@ describe("ActionDispatcher.selectColumnFromPalette", () => {
 });
 
 describe("ActionDispatcher destroy", () => {
-  it("destroy resets the key processor and does not throw", async () => {
-    const { data, focus } = await setupBoard();
+  it("destroy drops a pending key sequence", async () => {
+    const { data, focus } = await threeColumnBoard();
     const dispatcher = new ActionDispatcher(data, focus);
+    focus.focusMode = "column";
 
-    expect(() => dispatcher.destroy()).not.toThrow();
+    dispatcher.handleKeydown(makeKeyEvent({ key: "d" }));
+    dispatcher.destroy();
+    dispatcher.handleKeydown(makeKeyEvent({ key: "d" }));
+    await flushPromises();
+
+    expect(boardState.deleteColumnCalls).toEqual([]);
   });
 });
 
@@ -588,7 +592,12 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     expect(renameColumn).not.toHaveBeenCalled();
   });
 
-  it.each(["column", "card"] as const)("renames the column with `F2` in %s focus", async (mode) => {
+  it.each([
+    ["r", "column"],
+    ["r", "card"],
+    ["F2", "column"],
+    ["F2", "card"],
+  ] as const)("renames the column with `%s` in %s focus", async (key, mode) => {
     focus.focusMode = mode;
     focus.focusedCardIndex = 0;
     const renameDeck = vi.fn();
@@ -596,7 +605,7 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     dispatcher.onRenameDeck = renameDeck;
     dispatcher.onRenameColumn = renameColumn;
 
-    const event = makeKeyEvent({ key: "F2" });
+    const event = makeKeyEvent({ key });
     dispatcher.handleKeydown(event);
     await flushPromises();
 
@@ -613,11 +622,16 @@ describe("ActionDispatcher.handleKeydown routing", () => {
     expect(focus.focusMode).toBe("edit");
   });
 
-  it("processes a palette trigger while a palette is open (command mode)", () => {
+  it("switches palettes when a palette trigger is pressed while one is open", () => {
+    focus.focusMode = "card";
     focus.openPalette("deck"); // focusMode -> command
     const event = makeKeyEvent({ key: "P", ctrl: true, shift: true });
     dispatcher.handleKeydown(event);
     expect(event.defaultPrevented).toBe(true);
+    expect(focus.activePalette).toBe("command");
+
+    focus.closePalette();
+    expect(focus.focusMode).toBe("card");
   });
 
   it("ignores non-trigger keys while a palette is open", () => {

@@ -148,6 +148,24 @@ describe("DeckData deck load snapshots", () => {
     },
   );
 
+  it.each<Stage>(["columns", "cards", "tags"])(
+    "a refresh is discarded if the selected deck changes outside selectDeck while %s load",
+    async (stage) => {
+      const columns = data.columns;
+      const gate = hold(stage, "deck-1");
+      content["deck-1"] = fixture("deck-1", "stale");
+      const refreshing = data.refreshDeck();
+      await vi.waitFor(() => expect(gates.has(`${stage}:deck-1`)).toBe(false));
+
+      // Same load generation, different deck: only the deck-id guard can reject it.
+      data.currentDeck = makeDeck("deck-2");
+      gate.release();
+
+      await expect(refreshing).resolves.toBe(false);
+      expect(data.columns).toBe(columns);
+    },
+  );
+
   it("overlapping refreshes of the same deck commit only the latest", async () => {
     const gate = hold("cards", "deck-1");
     const older = data.refreshDeck();

@@ -49,10 +49,13 @@ describe("column operations from column focus", () => {
     expect(boardState.deleteColumnCalls).toContain("col-1");
   });
 
-  it("reorderColumnLeft moves the column when not at the start", async () => {
-    await actions.executeColumnAction("reorderColumnLeft");
-    expect(boardState.moveColumnCalls).toHaveLength(1);
-    expect(boardState.moveColumnCalls[0].id).toBe("col-1");
+  it.each([
+    ["reorderColumnLeft", 0],
+    ["reorderColumnRight", 2],
+  ])("%s moves the focused column one step and follows it", async (action, target) => {
+    await actions.executeColumnAction(action);
+    expect(boardState.moveColumnCalls).toEqual([{ id: "col-1", position: target }]);
+    expect(focus.focusedColumnIndex).toBe(target);
   });
 
   it("reorderColumnLeft wraps the first column to the end", async () => {
@@ -86,19 +89,6 @@ describe("column operations from column focus", () => {
     focus.focusedColumnIndex = 0;
     await actions.executeColumnAction("reorderColumnRight");
     expect(boardState.moveColumnCalls).toHaveLength(0);
-  });
-
-  it("reorderColumnRight moves the column when not at the end", async () => {
-    await actions.executeColumnAction("reorderColumnRight");
-    expect(boardState.moveColumnCalls).toHaveLength(1);
-  });
-
-  it("renameColumn requests a rename from column and card focus", async () => {
-    const renameColumn = vi.fn();
-    actions = createBoardActions(data, focus, { renameColumn });
-    await actions.executeColumnAction("renameColumn");
-    await actions.executeCardAction("renameColumn");
-    expect(renameColumn).toHaveBeenCalledTimes(2);
   });
 });
 

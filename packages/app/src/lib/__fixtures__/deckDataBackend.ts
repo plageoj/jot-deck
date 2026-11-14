@@ -141,8 +141,6 @@ export const mockBackend: Partial<DatabaseBackend> = {
   updateCardContent: (id, content) =>
     Promise.resolve(makeCard(id, "col-active", { content })),
   acquireCardLock: (id) => Promise.resolve({ ...findCard(id), locked_by: "user" }),
-  updateCardContentCas: (id, content) =>
-    Promise.resolve({ ...findCard(id), content, locked_by: "user" }),
   updateCardContentCasOwned: (id, holder, content) =>
     Promise.resolve({ ...findCard(id), content, locked_by: holder }),
   updateCardContentCasAndRelease: (id, _holder, content) =>
