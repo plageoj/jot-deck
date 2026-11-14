@@ -75,7 +75,7 @@ flowchart TB
 
 Jot Deck 本体がホストとなり、登録された各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。登録は Deck ごとに Reporters ダイアログで行い（名前・バイナリの絶対パス・引数・環境変数と §2.3 のスコープ。共有 `settings` テーブルのキー `reporters:{deck_id}` に保存）、同ダイアログの Start / Stop で起動・停止する。Reporter の stdin/stdout は JSON-RPC 用にホストが握り、stderr はホストの stderr にそのまま流す。この形により：
 
-- ライフサイクルが親に従属（子は `kill_on_drop` で spawn し、本体が死ねば Reporter も畳む。孤児プロセスなし）。
+- ライフサイクルが親に従属（子は `kill_on_drop` で spawn し、Stop などで子ハンドルが drop されると Reporter を kill する。本体プロセスの終了時に drop が走る保証はなく、その場合 Reporter には stdin のクローズしか届かないため、それを無視する Reporter は孤児として残り得る）。
 - 採番・INSERT を本体 Repository に一元化する。Reporter のプロトコルには DB を直接触る手段がなく、ホストが GUI と同じコネクションで Reporter の要求を処理する。ただし Reporter は OS サンドボックスなしでユーザー権限の子プロセスとして動くため、DB ファイルを直接開くことはできる。§2.3 のスコープが制限するのはプロトコル経由の要求だけであり、登録する Reporter バイナリは信頼できるものでなければならない。
 
 **一次 Reporter もサードパーティ Reporter も、等しく本体が spawn する。** サードパーティ製は、power-user がバイナリのフルパスを設定に登録し、本体がそれを spawn する（Claude Desktop の `mcpServers` 登録と同じ操作）。したがってサードパーティ Reporter も一次実装と**同一のトランスポート（stdio + Reporter プロトコル）と両チャネル（committed / ephemeral）**を得る。§4 のストリーミング体験はサードパーティにも等しく開かれる。MCP 経由（`008`）とは異なる到達経路である点に注意（→ §3.2）。
@@ -176,7 +176,7 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 `card.*` / `column.*` はいずれも request/response で、**ID / position の採番は本体が一元化**（§7）。カード・カラムの順序は生の position ではなく「どのカード/カラムの前/後」という**アンカー**で表明する。Reporter は append を主としつつ（§1.3 の append-mostly）、既存カードの再配置（`card.move`）と論理削除（`card.delete`）も行える ―― これらは姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `move_card` / `delete_card` と**同じ core を 007 トランスポートで叩く**（§2.1 の共有 core）。書き込みスコープ（§2.3）は `card.delete` を独立の権限として扱える。
 
-エラーは JSON-RPC の error で返す。トランスポート層の `-32700`（parse error）/ `-32601`（method not found）/ `-32602`（invalid params）に加え、アプリケーションのコードは `-32001` Unauthorized（スコープ外・private）/ `-32002` NotFound / `-32003` InvalidOperation（長さ超過など）/ `-32004` Conflict（CAS 不一致・占有競合 → 再読込して再試行）/ `-32005` PolicyDenied（capability 無効・レート上限超過）。
+エラーは JSON-RPC の error で返す。トランスポート層の `-32700`（parse error）/ `-32601`（method not found）/ `-32602`（invalid params）に加え、アプリケーションのコードは `-32001` Unauthorized（明示指定したカラムがスコープ外・private）/ `-32002` NotFound（不在・削除済みに加え、private カラム内のカードの `card.read` や書き込みも存在を漏らさないようこちら）/ `-32003` InvalidOperation（長さ超過など）/ `-32004` Conflict（CAS 不一致・占有競合 → 再読込して再試行）/ `-32005` PolicyDenied（capability 無効・レート上限超過）。
 
 #### 6.1.1 構造メソッド（カラムの作成 / 再編）
 
@@ -197,6 +197,8 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 | `card.stream.end(card_id, content)` | Reporter → 本体 | request/response | ストリーム終了。最終テキスト `content` を確定チャネルに落とし（commit）、**commit 結果（`{ card_id, updated_at }`）またはエラーを返して成功時にロックを解放**する。 |
 
 ライフサイクルは短命・周期的： `begin(ack) → delta… → end(commit) →（次の）begin`。境界の 2 メソッドだけが確定応答を持ち、間の `delta` は揮発する。`begin` / `end` は `edit` capability で許可される。
+
+`end` はロック保持を条件に書き込み、`updated_at` の CAS は取らない。一方 `card.patch`（と MCP の `patch_card`）は CAS だけを見て占有ロックを確認しないため、ストリーム中の同一カードへの patch は成功し、その後の `end` がそれを上書きする。上書き前の本文は変更履歴（`008` §5.1）に残る。
 
 ---
 
