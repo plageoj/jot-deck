@@ -183,24 +183,24 @@ export const mockBackend: Partial<DatabaseBackend> = {
   },
   getTagSuggestions: (_deckId: string, prefix: string) =>
     Promise.resolve([{ id: `tag-${prefix}`, name: `${prefix}-suggestion` }]),
-  listReporters: (deckId: string) => {
-    deckState.reporterCalls.push(["listReporters", deckId]);
+  listReporters: () => {
+    deckState.reporterCalls.push(["listReporters"]);
     return Promise.resolve(deckState.reporters);
   },
-  addReporter: (deckId: string, config: ReporterConfig) => {
-    deckState.reporterCalls.push(["addReporter", deckId, config.name]);
+  addReporter: (config: ReporterConfig) => {
+    deckState.reporterCalls.push(["addReporter", config.name]);
     return Promise.resolve({ ...config, reporter_id: "assigned-id" });
   },
-  updateReporter: (deckId: string, config: ReporterConfig) => {
-    deckState.reporterCalls.push(["updateReporter", deckId, config.reporter_id]);
+  updateReporter: (config: ReporterConfig) => {
+    deckState.reporterCalls.push(["updateReporter", config.reporter_id]);
     return Promise.resolve(config);
   },
-  removeReporter: (deckId: string, reporterId: string) => {
-    deckState.reporterCalls.push(["removeReporter", deckId, reporterId]);
+  removeReporter: (reporterId: string) => {
+    deckState.reporterCalls.push(["removeReporter", reporterId]);
     return Promise.resolve();
   },
-  startReporter: (deckId: string, reporterId: string) => {
-    deckState.reporterCalls.push(["startReporter", deckId, reporterId]);
+  startReporter: (reporterId: string) => {
+    deckState.reporterCalls.push(["startReporter", reporterId]);
     return Promise.resolve();
   },
   stopReporter: (reporterId: string) => {

@@ -12,6 +12,7 @@ const { TauriBackend } = await import("./tauri-backend");
 const config: ReporterConfig = {
   reporter_id: "rep-1",
   name: "Minutes",
+  deck_ids: ["deck-1"],
   command: "/opt/whisper",
   args: ["--model", "small"],
   env: { TOKEN: "abc" },
@@ -28,37 +29,27 @@ describe("TauriBackend reporter surface", () => {
     backend = new TauriBackend();
   });
 
-  it("lists a deck's registered reporters", async () => {
-    await backend.listReporters("deck-1");
-    expect(invoke).toHaveBeenCalledWith("list_reporters", { deckId: "deck-1" });
+  it("lists every registered reporter", async () => {
+    await backend.listReporters();
+    expect(invoke).toHaveBeenCalledWith("list_reporters");
   });
 
   it("adds and updates through distinct commands, passing the whole config", async () => {
-    await backend.addReporter("deck-1", config);
-    expect(invoke).toHaveBeenCalledWith("add_reporter", {
-      deckId: "deck-1",
-      config,
-    });
+    await backend.addReporter(config);
+    expect(invoke).toHaveBeenCalledWith("add_reporter", { config });
 
-    await backend.updateReporter("deck-1", config);
-    expect(invoke).toHaveBeenCalledWith("update_reporter", {
-      deckId: "deck-1",
-      config,
-    });
+    await backend.updateReporter(config);
+    expect(invoke).toHaveBeenCalledWith("update_reporter", { config });
   });
 
-  it("removes by id within a deck", async () => {
-    await backend.removeReporter("deck-1", "rep-1");
+  it("removes, starts, and stops by id", async () => {
+    await backend.removeReporter("rep-1");
     expect(invoke).toHaveBeenCalledWith("remove_reporter", {
-      deckId: "deck-1",
       reporterId: "rep-1",
     });
-  });
 
-  it("starts within a deck but stops by id alone (a running child spans decks)", async () => {
-    await backend.startReporter("deck-1", "rep-1");
+    await backend.startReporter("rep-1");
     expect(invoke).toHaveBeenCalledWith("start_reporter", {
-      deckId: "deck-1",
       reporterId: "rep-1",
     });
 
@@ -68,7 +59,7 @@ describe("TauriBackend reporter surface", () => {
     });
   });
 
-  it("lists running reporters across all decks", async () => {
+  it("lists running reporters", async () => {
     await backend.listRunningReporters();
     expect(invoke).toHaveBeenCalledWith("list_running_reporters");
   });

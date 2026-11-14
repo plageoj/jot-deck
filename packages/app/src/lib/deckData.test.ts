@@ -943,6 +943,7 @@ describe("DeckData reporter registry", () => {
   const config: ReporterConfig = {
     reporter_id: "rep-1",
     name: "Minutes",
+    deck_ids: null,
     command: "/opt/whisper",
     args: [],
     env: {},
@@ -965,24 +966,22 @@ describe("DeckData reporter registry", () => {
     state.reporters = [config];
     state.runningReporters = ["rep-1"];
 
-    expect(await data.listReporters("deck-1")).toEqual([config]);
+    expect(await data.listReporters()).toEqual([config]);
     expect(await data.listRunningReporters()).toEqual(["rep-1"]);
-    expect((await data.addReporter("deck-1", config)).reporter_id).toBe(
-      "assigned-id",
-    );
-    await data.updateReporter("deck-1", config);
-    await data.startReporter("deck-1", "rep-1");
+    expect((await data.addReporter(config)).reporter_id).toBe("assigned-id");
+    await data.updateReporter(config);
+    await data.startReporter("rep-1");
     await data.stopReporter("rep-1");
-    await data.removeReporter("deck-1", "rep-1");
+    await data.removeReporter("rep-1");
 
     expect(state.reporterCalls).toEqual([
-      ["listReporters", "deck-1"],
+      ["listReporters"],
       ["listRunningReporters"],
-      ["addReporter", "deck-1", "Minutes"],
-      ["updateReporter", "deck-1", "rep-1"],
-      ["startReporter", "deck-1", "rep-1"],
+      ["addReporter", "Minutes"],
+      ["updateReporter", "rep-1"],
+      ["startReporter", "rep-1"],
       ["stopReporter", "rep-1"],
-      ["removeReporter", "deck-1", "rep-1"],
+      ["removeReporter", "rep-1"],
     ]);
   });
 
@@ -994,7 +993,7 @@ describe("DeckData reporter registry", () => {
 
     // The registration dialog reports failures inline per row, so DeckData must
     // not swallow them into `this.error` the way the board operations do.
-    await expect(data.startReporter("deck-1", "rep-1")).rejects.toThrow("ENOENT");
+    await expect(data.startReporter("rep-1")).rejects.toThrow("ENOENT");
     expect(data.error).toBeNull();
 
     mockBackend.startReporter = original;

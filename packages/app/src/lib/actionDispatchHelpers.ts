@@ -1,5 +1,6 @@
 import type { DeckData } from "./deckData.svelte";
 import type { FocusManager } from "./focusManager.svelte";
+import { settingsStore } from "./settings.svelte";
 
 /**
  * Handles actions that are independent of the current column/card focus mode.
@@ -26,8 +27,13 @@ export function executeGlobalAction(
     case "showTrashPalette":
       focus.openPalette("trash");
       return true;
+    case "newDeck":
+      return data.createDeck().then(() => true);
     case "showSettings":
       focus.showSettings = true;
+      return true;
+    case "toggleTheme":
+      settingsStore.toggleTheme();
       return true;
     case "showKeybindings":
       focus.showKeybindings = true;

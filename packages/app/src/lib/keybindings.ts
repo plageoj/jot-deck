@@ -33,6 +33,7 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
   { sequence: "F2", action: "renameColumn", modes: ["column", "card"], description: "Rename column" },
   { sequence: "dd", action: "deleteColumn", modes: ["column"], description: "Delete column" },
   { sequence: "Delete", action: "deleteColumn", modes: ["column"], description: "Delete column" },
+  { sequence: "Ctrl+w", action: "deleteColumn", modes: ["column"], description: "Delete column" },
 
   // Card focus - Navigation
   { sequence: "j", action: "moveDown", modes: ["card"], description: "Move down" },
@@ -124,9 +125,12 @@ export const DEFAULT_KEYBINDINGS: KeyBinding[] = [
 
   // Common - Deck
   { sequence: "R", action: "renameDeck", modes: ["column", "card"], description: "Rename deck" },
+  { sequence: "Ctrl+n", action: "newDeck", modes: ["column", "card"], description: "New deck" },
 
   // Common - Palettes
   { sequence: "Ctrl+p", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
+  { sequence: "gh", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
+  { sequence: "gd", action: "showDeckPalette", modes: ["column", "card"], description: "Switch deck" },
   { sequence: "Ctrl+Shift+P", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },
   { sequence: "F1", action: "showCommandPalette", modes: ["column", "card"], description: "Command palette" },
 
@@ -433,9 +437,10 @@ export function formatSequence(
 /**
  * Keys a browser keeps for itself — no `preventDefault` reaches them — so they
  * only work in the desktop app (docs/009-web-demo.md §6). Every action they
- * trigger by default also has a binding that works in the browser.
+ * trigger by default stays reachable in the browser through another binding
+ * or the command palette.
  */
-const BROWSER_RESERVED_SEQUENCES = new Set(["Ctrl+t", "Ctrl+Shift+P"]);
+const BROWSER_RESERVED_SEQUENCES = new Set(["Ctrl+t", "Ctrl+w", "Ctrl+n", "Ctrl+Shift+P"]);
 
 export function isBrowserReserved(sequence: string): boolean {
   return BROWSER_RESERVED_SEQUENCES.has(sequence);

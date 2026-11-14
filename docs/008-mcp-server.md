@@ -6,7 +6,7 @@ Jot Deck 本体は、自身の Deck に対する **書き込み・読み出し�
 
 本書は「Jot Deck 本体を汎用エージェントに開く」外向きの関心事を、**単独で読めるように**扱う。本体が提供する共通基盤（ローカル書き込み口・Card Repository 等）は次節「前提」に要約するため、本書の理解に他ドキュメントを読む必要はない。同じ基盤を内向きに使う専用アダプタ「Reporter」は姉妹ドキュメント `007-reporter-protocol.md` で扱うが、両者は独立して読める。
 
-> このドキュメントは構想段階の設計方針であり、実装済み仕様ではない。
+> 本書の MCP ブリッジは `crates/mcp`（読み書き tool・resource・接続ポリシー）として実装済みで、外部書き込みの変更履歴の記録も `jot_deck_core` に実装済みである。未実装の項目（FTS5 全文検索、変更履歴の Activity ビュー、外部由来カードの provenance ラベル）は該当箇所に明記する。
 
 ---
 
@@ -50,7 +50,7 @@ Deck が read/query を tool/resource として公開すれば、エージェン
 
 ## 3. アーキテクチャ ―― CLI と同型の直接 DB アクセス
 
-local-first を保ったまま、本体が既に持つ CLI と同じ方式で実現する。現行 CLI（`crates/core/bin/cli.rs`）は起動中の本体 GUI と通信せず、**SQLite ファイルを直接開いて `jot_deck_core` のリポジトリ関数を呼ぶ**。Tauri 本体（`packages/app/src-tauri`）も同じ DB ファイルを開く対等なクライアントである。MCP ブリッジもこの CLI の兄弟として実装する。
+local-first を保ったまま、本体が既に持つ CLI と同じ方式で実現する。現行 CLI（`crates/core/bin/cli.rs`）は起動中の本体 GUI と通信せず、**SQLite ファイルを直接開いて `jot_deck_core` のリポジトリ関数を呼ぶ**。Tauri 本体（`packages/app/src-tauri`）も同じ DB ファイルを開く対等なクライアントである。MCP ブリッジ（`crates/mcp`）もこの CLI の兄弟として実装されている。
 
 ```mermaid
 flowchart LR
@@ -79,9 +79,9 @@ flowchart LR
 - **「Card Repository ＝書き込みの一元化点」はプロセスではなくライブラリ（`jot_deck_core`）**。採番・タグ抽出・論理削除がここに集約されているため、どのプロセス（GUI / CLI / ブリッジ）がリンクしても挙動は同一で、採番一元化（`007` §7）が保たれる。
 - **local-first は保たれる**: ブリッジも本体もローカルの同一ファイルに書く。LLM 推論がリモートなのはエージェント側の事情であり、Deck の読み書きはローカルのまま。
 - **隔離レベルのトレードオフ**: `007` の spawn モデル（子は DB に触れない）より隔離は弱く、ブリッジは DB を直接触れる。ただしエージェントが握るのは MCP tool だけ（生 SQL は握らない）で、scope / `private` フィルタはブリッジ実装が担保する。ブリッジが自製の信頼バイナリである限り成立する。
-- この方式は 2 つの前提を要する:
-    - **複数プロセスの DB 共有**: 現行 `create_file_db` は既定 rollback journal・busy_timeout 無しで、ブリッジと GUI が同一 `jot-deck.db` を同時に開くと `SQLITE_BUSY` が起きる。`create_file_db` を **WAL モード＋busy_timeout** 化し、GUI 側 `Mutex<Connection>` は書き込みトランザクションを長く握らない。
-    - **GUI の外部変更観測**: 別プロセスの書き込みは GUI の `update_hook`（同一コネクションしか発火しない）を鳴らさないため、GUI は **`PRAGMA data_version` を約 1s 間隔でポーリング**（他コネクションの commit のみ値が変わる激安判定）し、変化時だけ `updated_at`/`deleted_at` 差分で可視カラムを再描画する。MCP 書き込みは ~1s 遅延で現実的なので file watch / notify は不要。
+- この方式は 2 つの仕組みに支えられている:
+    - **複数プロセスの DB 共有**: `create_file_db` は **WAL モード＋busy_timeout（5 秒）** で DB を開くため、ブリッジと GUI が同一 `jot-deck.db` を同時に開ける。書き込みトランザクションは `BEGIN IMMEDIATE` で始め、読み→書きの昇格による `SQLITE_BUSY` を避ける。GUI 側 `Mutex<Connection>` は書き込みトランザクションを長く握らない。
+    - **GUI の外部変更観測**: 別プロセスの書き込みは GUI の `update_hook`（同一コネクションしか発火しない）を鳴らさないため、GUI は **`PRAGMA data_version` を約 1s 間隔でポーリング**（他コネクションの commit のみ値が変わる激安判定）し、変化時だけフロントエンドへ通知して可視カードを読み直す。MCP 書き込みは ~1s 遅延で現実的なので file watch / notify は不要。
 
 ---
 
@@ -101,11 +101,11 @@ flowchart LR
 | tool | `update_column` | `column.update` | 書き（モード1） | カラムの name / description / private を更新 |
 | tool | `move_column` | `column.move` | 書き（モード1） | カラムの並べ替え（アンカー指定） |
 | tool | `list_decks` | ― | オンボーディング | このブリッジが読み書きできる Deck 一覧を返す（`deck_id` 発見の入口）。→ §4.5 |
-| tool | `list_columns` | `deck.query` | 読み（モード2） | 指定 Deck のカラム構成を列挙 |
+| tool | `list_columns` | `deck.list_columns` | 読み（モード2） | 指定 Deck のカラム構成を列挙 |
 | tool | `read_card` | `card.read` | 読み（モード2） | カードを ID 取得 |
-| tool | `search_cards` | `deck.query` | 読み（モード2） | FTS5 全文 + タグ/スコア/カラムで検索 |
-| tool | `recent_cards` | `deck.query` | 読み（モード2） | カラムの直近カードを取得 |
-| tool | `describe_deck` | ― | オンボーディング | 指定 Deck の実行時実体（カラム・実効範囲・制約値）を返す。→ §4.6 |
+| tool | `search_cards` | `deck.search_cards` | 読み（モード2） | 本文の部分一致 + タグ/スコア/カラムで検索（FTS5 全文検索は未実装） |
+| tool | `recent_cards` | `deck.recent_cards` | 読み（モード2） | カラムの直近カードを取得 |
+| tool | `describe_deck` | `deck.describe` | オンボーディング | 指定 Deck の実行時実体（カラム・実効範囲・制約値）を返す。→ §4.6 |
 | resource | `deck://{deck_id}` | ― | 読み（モード2） | Deck/カラム/カードの読み取り面（KB 用途） |
 | resource | `deck://schema` | ― | オンボーディング | `describe_deck` と同内容の読み取り面（自動ロード対応ホスト向けの補助。1 Deck 固定接続のみ）。→ §4.6 |
 
@@ -135,13 +135,13 @@ flowchart LR
 - **意味**: カードを**論理削除**（`deleted_at` を打つ）。物理削除・カラム連動削除・復元はエージェントに公開しない ―― 30 日後の物理削除は本体の cleanup が担い、復元はユーザの削除スタック（`u` / ゴミ箱）に委ねる。誤削除しても失われないことを安全域（§5）の前提にする。この tool は書き込みスコープに `delete` 権限が含まれる場合のみ有効（§5）。
 
 #### `ensure_column`
-- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string, 必須 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
+- **引数**: `deck_id`（string, ULID, 作成/検索先の Deck。1 Deck 固定接続以外では必須 → §4.5）, `name`（string, 必須）, `description`（string, 任意 ―― 分類軸の 1 行説明。`002-data-structure.md` の Column `description`。新規作成時だけ使い、既存カラムの取得では無視する）, `private`（bool, 任意, 既定 `false`）。作成先は**指定 Deck 内に限る**（Deck 越え・Deck 作成は不可 → §4.4）。
 - **返り値**: `{ deck_id, column_id, name, position, created }`（`created` は新規作成なら true / 既存ヒットなら false）
-- **意味**: **名前キーで get-or-create するべき等な作成**。同名カラムが**指定 Deck の可視範囲に**あればその ULID を返し（get）、無ければ末尾に作成する（create）。自由な `create` を避けることで、再送での重複列と、既存列を見落としたニアデュープ（`ToDo`/`Tasks` 乱立）を同時に抑える。
-- **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続、または allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし可視範囲の同名カラムがあれば get として id を返す ―― **既存カラムの読み取りは妨げない**。名前 lookup は指定 Deck の可視範囲のみを探索し、private / スコープ外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
+- **意味**: **名前キーで get-or-create するべき等な作成**（`name` は前後の空白を除いてキーにし、空名は拒否）。同名カラムが**指定 Deck の書き込みスコープ内（可視 ∩ write allowlist）に**あればその ULID を返し（get）、無ければ末尾に作成する（create）。自由な `create` を避けることで、再送での重複列と、既存列を見落としたニアデュープ（`ToDo`/`Tasks` 乱立）を同時に抑える。
+- **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続では `ensure_column` 自体が使えない（`tools/list` から外れ、呼び出しは名前 lookup の前に capability エラーになる）。allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし書き込みスコープ内の同名カラムがあれば get として id を返す ―― **既存カラムの取得は妨げない**。名前 lookup は指定 Deck の書き込みスコープ内のみを探索し、private / allowlist 外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
 
 #### `update_column`
-- **引数**: `column_id`（string, ULID, 必須）, `name` / `description` / `private`（いずれも任意, 指定分のみ更新）
+- **引数**: `column_id`（string, ULID, 必須）, `name` / `description` / `private`（いずれも任意, 指定分のみ更新。`null` は省略と同じ。`description` は空文字でクリア）
 - **返り値**: `{ column_id, name, description, private }`
 - **意味**: カラムの改名・分類軸の書き換え・公開/非公開の切り替え。大規模再編で「このカラムの意味を変える」操作を担う。write スコープ外カラムは authorization error。
 
@@ -154,7 +154,7 @@ flowchart LR
 
 #### `list_decks`
 - **引数**: なし
-- **返り値**: `[{ deck_id, name, active }]`（`active` は GUI の直近アクティブ Deck に立つ真偽値。**既定値ではなくヒント**で、「今開いている Deck で」といった曖昧な依頼をエージェントがこれで解釈し、`deck_id` として明示する → §4.5）
+- **返り値**: `{ decks: [{ deck_id, name, active }] }`（`active` は GUI の直近アクティブ Deck に立つ真偽値。**既定値ではなくヒント**で、「今開いている Deck で」といった曖昧な依頼をエージェントがこれで解釈し、`deck_id` として明示する → §4.5）
 - **意味**: `deck_id` 発見の入口。`JOT_DECK_DECK_ID` が設定されている接続では、そこに列挙した Deck のみを返す(1 件ならこのモードでは Deck 探索の必要がないことをエージェントに示す)。未設定なら、このブリッジがアクセスできるローカルの全 Deck を返す(Deck 単位の可視性除外 → §4.5)。
 
 #### `list_columns`
@@ -168,22 +168,22 @@ flowchart LR
 - **意味**: 文脈把握・patch 対象の特定に使う単体取得。`card_id` は全 Deck を通じて一意な ULID なので `deck_id` は取らない ―― 所属 Deck は本体が `card_id` から判定し、可視性チェックもそれに基づく。
 
 #### `search_cards`
-- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）, `query`（string, 任意, FTS5 全文検索）, `column_id`（string, 任意, 指定 Deck 内での絞り込み）, `tags`（string[], 任意, AND）, `min_score`（number, 任意）, `limit`（number, 任意, 既定 20 / 上限あり）
-- **返り値**: `{ deck_id, cards: [{ card_id, column_id, content, score, tags, created_at }] }`（関連度 or スコア降順。`deck_id` は検索した Deck で、結果の出所をエージェントが確認できる）
-- **意味**: モード2（KB としての Deck）の中核。FTS5・タグ・スコア・カラム所属という第一級のインデックスをそのまま tool 面に出す。非公開カラムのカードは結果から除外。検索は指定 Deck 内に閉じる（Deck を跨いだ横断検索は提供しない ―― 必要なら Deck ごとに呼び分ける）。
+- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）, `query`（string, 任意, 本文の部分一致。FTS5 全文検索は未実装）, `column_id`（string, 任意, 指定 Deck 内での絞り込み）, `tags`（string[], 任意, AND）, `min_score`（number, 任意）, `limit`（number, 任意, 既定 20 / 上限 100）
+- **返り値**: `{ deck_id, cards: [{ card_id, column_id, content, score, tags, created_at }] }`（スコア降順、同点は `created_at` 降順。`deck_id` は検索した Deck で、結果の出所をエージェントが確認できる）
+- **意味**: モード2（KB としての Deck）の中核。本文・タグ・スコア・カラム所属という第一級のインデックスをそのまま tool 面に出す。非公開カラムのカードは結果から除外。検索は指定 Deck 内に閉じる（Deck を跨いだ横断検索は提供しない ―― 必要なら Deck ごとに呼び分ける）。
 
 #### `recent_cards`
-- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）, `column_id`（string, 任意）, `limit`（number, 任意, 既定 20 / 上限あり）
+- **引数**: `deck_id`（string, ULID, 1 Deck 固定接続以外では必須 → §4.5）, `column_id`（string, 任意）, `limit`（number, 任意, 既定 20 / 上限 100）
 - **返り値**: `search_cards` と同形（`created_at` 降順）
 - **意味**: 「直近何が起きたか」をクエリ無しで引く軽量パス。エージェント・タスクログ用途（追記の直後に自分の書いた末尾を読み返す）で使う。
 
 ### 4.3 resource
 
-- **`deck://{deck_id}`**: Deck / カラム / カード階層の読み取り面。KB 用途で MCP クライアントが列挙・購読する。tool の read 系と同じ可視性制御（§5）を通し、非公開カラムを含めない。
+- **`deck://{deck_id}`**: Deck / カラム / カード階層の読み取り面（各可視カラムに直近カード最大 100 件を含む）。KB 用途で MCP クライアントが列挙・読み取りする（購読は提供しない）。この接続が扱える Deck ごとに 1 つ列挙され、tool の read 系と同じ可視性制御（§5）を通し、非公開カラムを含めない。
 
 ### 4.4 本体に委ねる責務（tool に出さないこと）
 
-**大規模な構造変更・カード再編こそエージェントに委譲したい関心事**であり、カラムの作成/改名/並べ替え・カードの移動はすべて書き込み面に出す（§4.1）。その上で、次の 3 点は引き続き**意図的に tool 面へ出さない**：
+**大規模な構造変更・カード再編こそエージェントに委譲したい関心事**であり、カラムの作成/改名/並べ替え・カードの移動はすべて書き込み面に出す（§4.1）。その上で、次の 3 点は**意図的に tool 面へ出さない**：
 
 - **ID / position 値の採番**: ULID 発番と position 値の割り当て/再配分は本体 Repository が一元化する（`007` §7）。エージェントは ID を握り、順序は「どのカード/カラムの前後」という**アンカーで意図だけ表明**する（`move_card` / `move_column`）。生の position 整数は渡させない。
 - **ストリーミング**: `card.stream.*`。途中経過表示は一次 Reporter 固有の関心事で、エージェントは確定チャネル（append/patch/move）で足りる。
@@ -208,9 +208,11 @@ flowchart LR
 
 実効範囲 = `deck_id で指定した Deck 内の private でないカラム` ∩ `allowlist（指定があれば。無指定なら全部）`。`JOT_DECK_DECK_ID` を設定しない接続では、**この実効範囲がブリッジからアクセス可能な全 Deck に及ぶ**（blast radius は Deck 単体ではなく、この接続が生涯で指定し得る全 Deck の合計になる）。安全は Deck 境界ではなく、**`private` ＋ capability ＋ allowlist ＋ カード長 backstop ＋ レート制限 ＋ 論理削除アンドゥ ＋ 監査(帰属)**の組み合わせで担保する（§5）。Deck 単位の隔離が要る接続は `JOT_DECK_DECK_ID` で対象 Deck を列挙して運用する。
 
-**設定（`mcpServers`）**: ブリッジは `JOT_DECK_DB_PATH` 未設定時、Production の app data dir（identifier `com.jot-deck.app`）の DB を自力で導出する。ただし identifier はリリースチャネルごとに異なる（Preview は `com.jot-deck.app.preview`、`005-release.md`）ため、**本体が生成するスニペットは本体が実際に開いている DB ファイルを `JOT_DECK_DB_PATH` として必ず埋める**。サーバー名もチャネルの productName から導く（Production は `jot-deck`、Preview は `jot-deck-preview`）ので、両チャネルを同じ MCP ホストに並べて登録できる。`JOT_DECK_DECK_ID` は省略可能で、省略時は前述の「全 Deck 対象・呼び出しごとに `deck_id` 明示」モードになる。ブリッジ本体は本番では Tauri サイドカー（`externalBin`）として同梱し、パスを本体だけが知る。deck id はユーザが直接目にしない ULID なので、**本体 GUI が deck id の表示/コピーに加え、貼り付け可能な設定スニペットを生成する**（Deck 管理 UI の「Copy MCP server config」/「Deck id」）。既定で生成するスニペットは `JOT_DECK_DECK_ID` を含めない全 Deck 対象の最小構成とし、対象 Deck を限定したいユーザは「Deck id」でコピーした ULID を自分でそこへカンマ区切りで足す。バイナリパスも DB パスも本体だけが正確に知るため、ユーザに OS 別パスを推測させない。
+**設定（`mcpServers`）**: ブリッジは `JOT_DECK_DB_PATH` 未設定時、Production の app data dir（identifier `com.jot-deck.app`）の DB を自力で導出する。ただし identifier はリリースチャネルごとに異なる（Preview は `com.jot-deck.app.preview`、`005-release.md`）ため、**本体が生成するスニペットは本体が実際に開いている DB ファイルを `JOT_DECK_DB_PATH` として必ず埋める**。サーバー名もチャネルの productName から導く（Production は `jot-deck`、Preview は `jot-deck-preview`）ので、両チャネルを同じ MCP ホストに並べて登録できる。`JOT_DECK_DECK_ID` は省略可能で、省略時は前述の「全 Deck 対象・呼び出しごとに `deck_id` 明示」モードになる。ブリッジ本体は本番では Tauri サイドカー（`externalBin`）として同梱し、パスを本体だけが知る。deck id はユーザが直接目にしない ULID なので、**本体 GUI が deck id の表示/コピーに加え、貼り付け可能な設定スニペットを生成する**（Deck スイッチャーの「Copy MCP server config」/「Deck id」）。既定で生成するスニペットは `JOT_DECK_DECK_ID` を含めない全 Deck 対象の最小構成とし、対象 Deck を限定したいユーザは「Deck id」でコピーした ULID を自分でそこへカンマ区切りで足す。バイナリパスも DB パスも本体だけが正確に知るため、ユーザに OS 別パスを推測させない。
 
 **フィルタは必ず本体（Card Repository のクエリ）側で行う。** ブリッジは spawn される補助プロセスで、その先のエージェントはプロンプトインジェクションで操作され得る。信頼境界は本体であり、ブリッジに絞り込みを委ねない。`deck_id` の妥当性検証（存在確認・`JOT_DECK_DECK_ID` 設定時の列挙内確認）も本体側で行う。
+
+**Reporter と同じ実装で適用する。** 本節の Deck スコープ・capability・write allowlist と §5 のレート制限は、接続ポリシーとして `jot_deck_core::access` にまとまっており、各 tool の引数解釈と返り値の組み立てもそこで行う。Reporter ホスト（`007`）も同じポリシーと操作を使い、Reporter 登録の `deck_ids` / `deny` / `max_writes_per_min` / `allowed_columns` は本節の `JOT_DECK_DECK_ID` / `JOT_DECK_DENY` / `JOT_DECK_MAX_WRITES_PER_MIN` / `JOT_DECK_WRITE_COLUMNS` と同じ意味を持つ。ブリッジが持つのは MCP の枠組み（tool スキーマ・resource・stderr への帰属ログ）だけである。
 
 除外カラムに対する各 tool の挙動（存在を漏らさない）：
 
@@ -241,7 +243,7 @@ flowchart LR
 
 - 可視カラム一覧（下記 purpose 付き）。
 - **この接続の実効範囲**（読める / 書けるカラム、対象 Deck）。既定は指定 Deck 全体（§4.5）だが、絞り込み接続や `private` の除外結果をエージェントが自分で把握でき、ユーザが口頭で説明する必要がなくなる。
-- 制約値：カード最大長、`search_cards` / `recent_cards` の `limit` 上限、append レート上限、タグ記法。
+- 制約値：カード最大長、`search_cards` / `recent_cards` の `limit` 既定値と上限、書き込みレート上限（writes/分）、タグ記法。
 
 **tool を主とする**理由：これはモデル起点で・冪等で・全 MCP ホストで均一に動き、かつ **move / ensure で構造を変えた後にエージェントが最新実体を取り直せる**（resource は再取得がモデル駆動でない）。常時プライマは 1 の `instructions` が賄うので、`describe_deck` の価値は「変化する実体の再取得」にある。補助として、セッション開始時に自動ロードできるホスト向けに resource `deck://schema` を併設する（固定 Deck についての同じ内容の読み取り面。対象 Deck が一意に決まらない非固定接続では公開しない）。
 
@@ -249,8 +251,8 @@ flowchart LR
 `list_columns` / `describe_deck` は名前だけでなく **「ここに何を入れるか」の 1 行説明**を返す。`決定事項` `ToDo` `論点` のような名前だけでは振り分けが当てずっぽうになる。これは Reporter のカラムテンプレート（`007` §9）を tool 面へ出したもので、分類精度に最も効く。
 
 **4. tool description と error をティーチング面に使う**
-- 各 tool の description に制約と最小の呼び出し例（「まず `list_columns` で ID を得てから書く」）。
-- **error を誘導に使う**：長さ超過は「最大 N 文字、複数カードに分割せよ」、不正 `column_id` は有効な ID 候補を返す。エージェントは error で正しい振る舞いに収束する。
+- 各 tool の description に制約と最小の呼び出し例（「まず `list_columns` で ID を得てから書く」）。capability を deny した書き込み tool は `tools/list` に出さない。
+- **error を誘導に使う**：tool の失敗は JSON-RPC エラーではなく `isError: true` の結果として返し、モデルが読んで自己修正できるようにする。長さ超過は「最大 N 文字、複数カードに分割せよ」、`deck_id` 省略は「`list_decks` で選んで渡せ」、`patch_card` の競合は「再読込して再試行せよ」と返す。エージェントは error で正しい振る舞いに収束する。
 
 ---
 
@@ -263,12 +265,12 @@ flowchart LR
 | **Deck スコープの明示引数** | 対象 Deck は呼び出しごとの `deck_id` 引数で決まり、Deck 作成・Deck 間移動は不可（不変条件）。`JOT_DECK_DECK_ID` を設定した接続だけは列挙した Deck へ**厳格に限定**され、列挙外を指す `deck_id` は authorization error になる ―― この接続では blast radius が列挙した Deck に閉じる。未設定の接続では対象 Deck を固定できず、**blast radius はこの接続がアクセスし得る全 Deck に及ぶ**。→ §4.4 / §4.5 |
 | **`private` 除外** | ユーザが立てた `private` カラムは、どの `deck_id` を指定していても全接続から読めず・書けない。フィルタは本体側。→ §4.5 |
 | **capability（opt-out）** | 接続の権限 read / append / edit / delete / structure は**既定すべて有効**（設定ゼロで指定 Deck を読み書き・再編＝§4.5 と一致）。機微な用途では個別に **deny して絞る**（例: KB 読取専用なら append 以降を deny、re-org させたくない接続は structure を deny）。allowlist を明示した接続では `ensure_column` の新規作成が無効（§4.5）。 |
-| **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。`JOT_DECK_DECK_ID` 未設定の接続では、この誘発が及ぶ範囲は 1 Deck ではなく**アクセス可能な全 Deck**になる点に注意（複数 Deck へ横展開されるリスクは `deck_id` を都度検証する本体側フィルタだけが頼り）。この代償を **①削除・カスケード削除は論理削除＋アンドゥで、上書き・改名・移動は変更履歴（§5.1）で復元でき、誤操作の拡散はレート制限で抑える** と **②機微な接続は capability を deny する、または `JOT_DECK_DECK_ID` で対象 Deck を限定して封じられる** ことで受ける。外部由来カードには provenance ラベルを付す。 |
-| **構造の復元性** | カラム/カードの削除ミスは論理削除＋アンドゥ（`002` §3）で戻せる。`patch_card` の内容上書き・`update_column` の改名・`move_card` / `move_column` の位置変更は論理削除の対象外だが、変更前の状態が変更履歴（§5.1）に残り、そこから戻せる。加えて CAS・レート制限で暴走の代償を抑える。 |
+| **injection の代償と回復性** | 既定接続は追記に加え編集・削除・再編もできるため、`search_cards` で読んだ悪意コンテンツが誘発しうる操作は広い。`JOT_DECK_DECK_ID` 未設定の接続では、この誘発が及ぶ範囲は 1 Deck ではなく**アクセス可能な全 Deck**になる点に注意（複数 Deck へ横展開されるリスクは `deck_id` を都度検証する本体側フィルタだけが頼り）。この代償を **①削除・カスケード削除は論理削除＋アンドゥで、上書き・改名・移動は変更前の状態が変更履歴（§5.1）に残り（GUI からの復元は Activity ビューで行う。未実装）、誤操作の拡散はレート制限で抑える** と **②機微な接続は capability を deny する、または `JOT_DECK_DECK_ID` で対象 Deck を限定して封じられる** ことで受ける。外部由来カードに provenance ラベルを付す（未実装）。 |
+| **構造の復元性** | カラム/カードの削除ミスは論理削除＋アンドゥ（`002` §3）で戻せる。`patch_card` の内容上書き・`update_column` の改名・`move_card` / `move_column` の位置変更は論理削除の対象外だが、変更前の状態が変更履歴（§5.1）に残り、そこから戻せる（GUI からの復元は Activity ビューで行う。未実装）。加えて CAS・レート制限で暴走の代償を抑える。 |
 | **カード長 backstop** | 1 カードの最大長（本体のカード長 backstop）。 |
 | **レート制限** | 接続ごとの writes/分 上限。カード長 backstop が縛れない「小カード大量投入」の暴走を抑える。 |
 | **べき等性** | `append_card` は idempotency key を受け、同一キーの再送は新規作成せず既存 id を返す。ホスト再送での重複カードを防ぐ。 |
-| **帰属** | 各書き込みに接続 id を記録し、どの接続（ブリッジ）起因かを辿れる。`source=agent` フラグの上位互換。 |
+| **帰属** | 各書き込みを変更履歴（§5.1）に書き込み主（接続 id と `clientInfo.name`）付きで記録し、どの接続（ブリッジ）起因かを辿れる。ブリッジは各書き込みを接続 id・Deck・tool・対象 id とともに stderr にも 1 行ログする。 |
 
 ### 5.1 変更履歴
 
@@ -282,7 +284,7 @@ flowchart LR
 - **保持期間は 30 日**。論理削除の物理削除（`002` §3）と同じ cleanup で消す。Deck を削除するとその履歴も消える。
 - 履歴からの復元は GUI の操作として行い、MCP tool には出さない（§4.4 と同じく、エージェントに巻き戻しの手段を与えない）。
 
-**GUI: Activity ビュー**。Deck 全体の時点スナップショット（文書のバージョン履歴型）は採らない ―― GUI の編集は記録しないため、履歴から組み立てた過去の Deck は実在しない状態になる。代わりに、外部書き込みで実際に困る場面（暴走・インジェクションで 1 接続が多数を書き換えた、Reporter が誤って上書きした）に合わせて、**書き込み主ごとにまとめた変更の一覧**として見せる。
+**GUI: Activity ビュー（未実装）**。GUI の編集は記録しないため、履歴から Deck 全体の過去時点を組み立てても実在した状態にはならない。そこで Activity ビューは、外部書き込みで実際に困る場面（暴走・インジェクションで 1 接続が多数を書き換えた、Reporter が誤って上書きした）に合わせて、**書き込み主ごとにまとめた変更の一覧**として見せる。
 
 - **入口は 2 つ**: Deck 全体の Activity ビュー（キー 1 つで開く）と、カードフォーカスから開くそのカードだけに絞った履歴。外部から書き換えられたカードには出どころの小さな印を付け、そこから辿れるようにする。
 - **まとまり**: 同じ書き込み主の、時間的に連続した変更を 1 グループにする。グループ単位でまとめて復元でき、個別の変更も 1 件ずつ復元できる。

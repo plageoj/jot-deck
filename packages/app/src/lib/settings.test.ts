@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SETTINGS,
   FONT_SIZE_MAX,
@@ -185,6 +185,28 @@ describe("SettingsStore (DB-backed)", () => {
     expect(parsed.theme).toBe("light");
     expect(parsed.fontSize).toBe(18);
   });
+
+  it.each([
+    ["dark", false, "light"],
+    ["light", false, "dark"],
+    ["auto", true, "light"],
+    ["auto", false, "dark"],
+  ] as const)(
+    "toggleTheme from %s (OS dark: %s) switches to %s and persists",
+    async (from, osDark, to) => {
+      vi.stubGlobal("matchMedia", (query: string) => ({
+        matches: osDark && query === "(prefers-color-scheme: dark)",
+      }));
+      await store.load();
+      store.update("theme", from);
+      store.toggleTheme();
+      await store.persist();
+
+      expect(store.state.theme).toBe(to);
+      expect(JSON.parse(stub.store.get(SETTINGS_DB_KEY)!).theme).toBe(to);
+      vi.unstubAllGlobals();
+    },
+  );
 
   it("shortcutLabel shows the effective key and follows remaps", async () => {
     await store.load();

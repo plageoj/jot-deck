@@ -6,7 +6,7 @@
 
 本書は、Reporter と Jot Deck 本体の間のインターフェース（トランスポート・プロトコル・責務境界）を定義する。
 
-> このドキュメントは構想段階の設計方針であり、実装済み仕様ではない。
+> 本書のホスト側（Reporter の spawn、確定チャネル、ストリームチャネル、per-Reporter 認証スコープ）は `crates/reporter-host` と `packages/app/src-tauri/src/reporter.rs` に実装済みである。同期エンジン（`003` Phase 9）と配管パッケージ / SDK（§9.5）は未実装で、Reporter 本体（§9）は本リポジトリに含まない。
 
 ---
 
@@ -17,7 +17,7 @@
 Reporter の出力先として素の markdown 群ではなく Jot Deck を採用する根拠：
 
 - **入力時点で構造化が済む**: カラム = 分類軸、カード = tweet サイズの原子単位。RAG でいうチャンキング・分類・メタ付与を、入力の瞬間に人間/AI が肩代わりした状態になる。
-- **構造的な検索・絞り込み**: FTS5・スコア・タグ・カラム所属・タイムスタンプが第一級。「スコア上位」「特定タグ」「特定カラム」を SQL 一発で引ける。
+- **構造的な検索・絞り込み**: 本文検索・スコア・タグ・カラム所属・タイムスタンプが第一級（FTS5 全文検索は `003` Phase 11）。「スコア上位」「特定タグ」「特定カラム」を SQL 一発で引ける。
 - **安定した ID（ULID）**: カードに不変 ID があるため、後からの追記・更新・出典リンクが壊れない。
 
 ### 1.2 3 つの不変制約
@@ -73,10 +73,10 @@ flowchart TB
 
 ### 2.2 ホストが Reporter を spawn する
 
-Jot Deck 本体がホストとなり、設定に基づいて各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。この形により：
+Jot Deck 本体がホストとなり、登録された各 Reporter を**子プロセスとして spawn** する（Claude Desktop の `mcpServers` と同じモデル）。登録は Reporters ダイアログで行い（名前・バイナリの絶対パス・引数・環境変数と §2.3 のスコープ。全 Reporter の登録を共有 `settings` テーブルのキー `reporters` に 1 つの一覧として保存）、同ダイアログの Start / Stop で起動・停止する。Reporter の stdin/stdout は JSON-RPC 用にホストが握り、stderr はホストの stderr にそのまま流す。この形により：
 
-- ライフサイクルが親に従属（本体が死ねば Reporter も畳む。孤児プロセスなし）。
-- 採番・INSERT を本体 Repository に一元化する制約を**アーキテクチャで強制**できる。Reporter は DB に触る手段を物理的に持たない。
+- ライフサイクルが親に従属（子は `kill_on_drop` で spawn し、Stop などで子ハンドルが drop されると Reporter を kill する。本体プロセスの終了時に drop が走る保証はなく、その場合 Reporter には stdin のクローズしか届かないため、それを無視する Reporter は孤児として残り得る）。
+- 採番・INSERT を本体 Repository に一元化する。Reporter のプロトコルには DB を直接触る手段がなく、ホストが GUI と同じコネクションで Reporter の要求を処理する。ただし Reporter は OS サンドボックスなしでユーザー権限の子プロセスとして動くため、DB ファイルを直接開くことはできる。§2.3 のスコープが制限するのはプロトコル経由の要求だけであり、登録する Reporter バイナリは信頼できるものでなければならない。
 
 **一次 Reporter もサードパーティ Reporter も、等しく本体が spawn する。** サードパーティ製は、power-user がバイナリのフルパスを設定に登録し、本体がそれを spawn する（Claude Desktop の `mcpServers` 登録と同じ操作）。したがってサードパーティ Reporter も一次実装と**同一のトランスポート（stdio + Reporter プロトコル）と両チャネル（committed / ephemeral）**を得る。§4 のストリーミング体験はサードパーティにも等しく開かれる。MCP 経由（`008`）とは異なる到達経路である点に注意（→ §3.2）。
 
@@ -86,9 +86,10 @@ Jot Deck 本体がホストとなり、設定に基づいて各 Reporter を**�
 
 本体 spawn は「自分が起動した」ことしか保証せず、登録バイナリの良性はユーザ登録に依存する（§2.2 の power-user 割り切り）。悪意ある登録 Reporter が任意カラムへ書けるのを防ぐため、**Reporter ごとに書き込みを制限するスコープ**を持つ。
 
-- **スコープは Deck ごとの登録に紐づく**（＝デッキ単位）。Reporter 登録 UI で編集する。
-- **3 項目で構成する**: `deny`（capability `append` / `edit` / `delete` / `structure` の個別拒否）・`max_writes_per_min`（未指定はホスト既定 120）・`allowed_columns`（書き込み可能カラムの allowlist。指定時は `column.ensure` の新規作成も不可）。
-- **fail-closed**: ホストは不明な capability・レート 0・空 allowlist を登録/起動時に拒否する。
+- **スコープは Reporter ごとの登録に紐づく**。Reporter 登録 UI で編集する。
+- **4 項目で構成する**: `deck_ids`（扱える Deck の一覧。未指定は全 Deck。新規登録は開いている Deck だけで始まる）・`deny`（capability `append` / `edit` / `delete` / `structure` の個別拒否）・`max_writes_per_min`（未指定はホスト既定 120）・`allowed_columns`（書き込み可能カラムの allowlist。複数 Deck のカラムを含められる。指定時は `column.ensure` の新規作成も不可）。
+- **MCP 接続の制約と同じものである。** 4 項目はそれぞれ `008` の `JOT_DECK_DECK_ID` / `JOT_DECK_DENY` / `JOT_DECK_MAX_WRITES_PER_MIN` / `JOT_DECK_WRITE_COLUMNS` と同じ意味を持ち、ホストは MCP ブリッジと同じ実装（`jot_deck_core::access` の接続ポリシー）で適用する。Deck の解決規則（§6.1）も MCP と同じ（`008` §4.5）。
+- **fail-closed**: ホストは不明な capability・レート 0・空の Deck 一覧・空 allowlist を登録/起動時に拒否する。
 - **`private=true` カラムは読み書きとも常に拒否する**（`002` の `private` カラム定義 / `008` §4.5 と同じ不変条件）。**読み取りの除外は `private` のみ**で、スコープは読み取り用の絞り込みを持たない ―― Reporter に見せたくないカラムは `private` にする。
 
 ---
@@ -146,7 +147,7 @@ Reporter のトランスポートは MCP にならった**独自メソッド**�
 
 - **何で刻むかはプロトコルで規定しない**: どこで 1 枚に切るか（話者交代？沈黙？決定確定？）は完全にドメイン固有であり、各 Reporter の差別化の中核。薄い文字起こしラッパーとの差はここで出る。配管パッケージ（§9.5）は**意味境界（発話・文・話者ターン・沈黙）を主、文字数を目安**にした既定のチャンカーを持ち、tweet サイズのカードを標準とする。
 - **本体の backstop は暴走を止めるだけ**: 行儀の悪い Reporter が commit せず delta を垂れ流すのを防ぐため、本体は次の上限を強制する。
-    - **長さ**: 1 カード 4000 字（`MAX_CARD_LENGTH`）。MCP（`008` §5）・GUI と共通の値で、`initialize` の `constraints.max_card_length` で Reporter に公開する。
+    - **長さ**: 1 カード 4000 字（`MAX_CARD_LENGTH`）。MCP（`008` §5）と共通の値（GUI の手編集には課さない）で、`initialize` の `constraints.max_card_length` で Reporter に公開する。
     - **時間**: ストリームの占有ロックのリース 120 秒（`002` §5.2）。`delta` は DB に触れないためリースを延ばさない。延長は同じ Reporter が `card.stream.begin` を呼び直して行う。
 - **超過時、本体は内容を作らず拒否するだけ**: 区切り位置を決めるのは常に Reporter であり、本体が強制 commit することはない。
     - 長さ超過の `card.stream.end` / `card.patch` はエラーを返し、何も書かない。Reporter は短いカードに分割して送り直す。
@@ -163,17 +164,23 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 | メソッド | 方向 | 説明 |
 |:---|:---|:---|
-| `card.append` | Reporter → 本体 | カード新規作成。本体が採番し **ULID を返す**。Reporter は以降この id を握る。 |
-| `card.patch` / `card.commit` | Reporter → 本体 | 確定 edit。永続 + 同期に乗る。 |
-| `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先は接続 Deck 内のカラムに限る。 |
+| `initialize` / `ping` | Reporter → 本体 | ハンドシェイク / 死活確認。`initialize` はこの Reporter の実効スコープ（`capabilities`。`deck.describe` と同じく `write_columns` / `pinned_deck_ids` を含む）と制約値（`max_card_length` / `max_writes_per_min`）を返す。 |
+| `card.append` | Reporter → 本体 | カード新規作成（`column_id`, `content`, 任意の `idempotency_key`）。本体が採番し **ULID を返す**（`{ card_id, column_id, position, created_at }`）。Reporter は以降この id を握る。 |
+| `card.patch` / `card.commit` | Reporter → 本体 | 確定 edit（`card_id`, `content`, `expected_updated_at`。`002` §5.3 の楽観ロック）。永続 + 同期に乗る。 |
+| `card.move` | Reporter → 本体 | カードのカラム間移動 / 並べ替え。アンカー（`before_card_id` / `after_card_id`、どちらか一方。省略時は移動先末尾）で意図を表明し、position は本体が採番。移動先はカードと同じ Deck 内のカラムに限る。 |
 | `card.delete` | Reporter → 本体 | カードを論理削除（復元可能）。物理削除・復元はユーザの削除スタックと cleanup に委ねる。 |
 | `card.read` | Reporter → 本体 | 既存カードの読み返し（文脈把握・過去カードの更新対象特定）。 |
-| `deck.query` | Reporter → 本体 | カラム構成・直近カード等の問い合わせ。 |
-| `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等）。可視範囲に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ column_id, name, position, created }`）。 |
-| `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ）。 |
+| `deck.list` | Reporter → 本体 | この Reporter が扱える Deck の一覧（`008` §4.2 の `list_decks` と同じ返り値 `{ decks: [{ deck_id, name, active }] }`）。 |
+| `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` / `deck.describe` | Reporter → 本体 | カラム構成・直近カード・検索・Deck の実行時実体の問い合わせ。引数と返り値は `008` §4.2 の同名 tool と同じ。 |
+| `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等。`name` 必須、`deck_id` / `description` / `private` は任意）。書き込みスコープ内に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ deck_id, column_id, name, position, created }`）。 |
+| `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ。`null` は省略と同じで、`description` のクリアは空文字）。 |
 | `column.move` | Reporter → 本体 | カラムの並べ替え。アンカー（`before_column_id` / `after_column_id`、どちらか一方。省略時は末尾）で意図を表明し、position は本体が採番。 |
 
+**対象 Deck の決め方は MCP と同じ**（`008` §4.5）。Deck 単位のメソッド（`deck.*` と `column.ensure`）は任意引数 `deck_id` で対象を指定し、スコープが 1 Deck だけなら省略できる。カード / カラムを ID で指すメソッドは、その ID の所属 Deck が対象になる。スコープ外の Deck・カード・カラムは見えない。
+
 `card.*` / `column.*` はいずれも request/response で、**ID / position の採番は本体が一元化**（§7）。カード・カラムの順序は生の position ではなく「どのカード/カラムの前/後」という**アンカー**で表明する。Reporter は append を主としつつ（§1.3 の append-mostly）、既存カードの再配置（`card.move`）と論理削除（`card.delete`）も行える ―― これらは姉妹設計 `008-mcp-server.md` §4.1 が汎用エージェントへ公開する `move_card` / `delete_card` と**同じ core を 007 トランスポートで叩く**（§2.1 の共有 core）。書き込みスコープ（§2.3）は `card.delete` を独立の権限として扱える。
+
+エラーは JSON-RPC の error で返す。トランスポート層の `-32700`（parse error）/ `-32601`（method not found）/ `-32602`（invalid params）に加え、アプリケーションのコードは `-32001` Unauthorized（明示指定したカラムがスコープ外・private）/ `-32002` NotFound（不在・削除済みに加え、private カラム内のカードの `card.read` や書き込みも存在を漏らさないようこちら）/ `-32003` InvalidOperation（長さ超過など）/ `-32004` Conflict（CAS 不一致・占有競合 → 再読込して再試行）/ `-32005` PolicyDenied（capability 無効・レート上限超過）。
 
 #### 6.1.1 構造メソッド（カラムの作成 / 再編）
 
@@ -181,7 +188,7 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 - **`column.ensure` が Reporter の自前プロビジョニングを可能にする。** name キーの get-or-create なので、Reporter はテンプレートのカラム（§9：会議議事録なら `決定事項` `ToDo` 等）を**起動時に自分で用意**する。再送・再起動でも同名は既存を返すため列が重複しない。
 - **構造再編もランタイムで行える。** 分類軸の変更（`column.update` の `description` 書き換え）やカラム順の入れ替え（`column.move`）を、カード追記と同じ確定チャネルで表明する。
-- **008 の外部エージェント向け絞り込みは持ち込まない。** `idempotency_key`（§5）・write allowlist・capability といった 008 §4.5/§5 の防具は汎用エージェント境界の関心事。Reporter は本体 spawn の信頼境界内で動く（§3.1）ため、これらはメソッド引数に出さない。ただし**サードパーティ Reporter の per-Reporter 書き込みスコープ（§2.3 の認証スコープ）は、カード書き込みと同様この構造メソッドにも本体側で適用される** ―― `private` カラムへの読み書き禁止を含む（§2.3）。
+- **書き込みの絞り込みはメソッド引数ではなく登録スコープで持つ。** capability・レート上限・write allowlist は、MCP では接続の設定（`008` §4.5/§5）、Reporter では **per-Reporter 書き込みスコープ（§2.3 の認証スコープ）**として与え、カード書き込みと同様この構造メソッドにも本体側で適用される ―― `private` カラムへの読み書き禁止を含む（§2.3）。allowlist を持つ Reporter の `column.ensure` は新規作成できない（既存カラムの取得は可）。
 
 ### 6.2 ストリームチャネル
 
@@ -189,11 +196,13 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 | メソッド | 方向 | 形 | 説明 |
 |:---|:---|:---|:---|
-| `card.stream.begin(id)` | Reporter → 本体 | request/response | ストリーム開始。対象カードを Reporter 所有としてロック取得し、**取得可否（成功／競合エラー）を返す**。ack を得るまで `delta` を送らない。 |
-| `card.stream.delta(id, chunk)` | Reporter → 本体 | notification | 途中経過。本体は frontend にそのまま流すのみ。**DB は触らない**。片方向・投げっぱなし。 |
-| `card.stream.end(id)` | Reporter → 本体 | request/response | ストリーム終了。確定チャネルに落とし（commit）、**commit 結果（`updated_at` 等）またはエラーを返して成功時にロックを解放**する。 |
+| `card.stream.begin(card_id)` | Reporter → 本体 | request/response | ストリーム開始。既存カード（先に `card.append` で作る）を Reporter 所有としてロック取得し、**取得可否（成功時は `{ card_id, column_id, locked_by }`／競合エラー）を返す**。ack を得るまで `delta` を送らない。 |
+| `card.stream.delta(card_id, chunk)` | Reporter → 本体 | notification | 途中経過。本体は frontend にそのまま流すのみ。**DB は触らない**。片方向・投げっぱなし。 |
+| `card.stream.end(card_id, content)` | Reporter → 本体 | request/response | ストリーム終了。最終テキスト `content` を確定チャネルに落とし（commit）、**commit 結果（`{ card_id, updated_at }`）またはエラーを返して成功時にロックを解放**する。 |
 
-ライフサイクルは短命・周期的： `begin(ack) → delta… → end(commit) →（次の）begin`。境界の 2 メソッドだけが確定応答を持ち、間の `delta` は揮発する。
+ライフサイクルは短命・周期的： `begin(ack) → delta… → end(commit) →（次の）begin`。境界の 2 メソッドだけが確定応答を持ち、間の `delta` は揮発する。`begin` / `end` は `edit` capability で許可される。
+
+`end` はロック保持を条件に書き込み、`updated_at` の CAS は取らない。一方 `card.patch`（と MCP の `patch_card`）は CAS だけを見て占有ロックを確認しないため、ストリーム中の同一カードへの patch は成功し、その後の `end` がそれを上書きする。上書き前の本文は変更履歴（`008` §5.1）に残る。
 
 ---
 
@@ -201,8 +210,8 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 
 Reporter が delta を流し込む最中のユーザ手編集は衝突する。カード編集の競合制御（占有ロック・楽観ロック）は `002-data-structure.md` §5 に一元定義される。本節はその Reporter における具体化：`stream.begin`〜`end` の間、対象カードは**その Reporter の占有**（`002` §5.2 の `locked_by`）とみなす。
 
-- ユーザ編集をロック、または「◍ AI 生成中」として視覚化。
-- 既存の focus model（column / card / edit / command）に、**streaming（read-only 表示）状態**を追加するイメージ。
+- ストリーム中のカードは「◍ AI generating」と表示し、ユーザ編集をロックする。
+- 既存の focus model（column / card / edit / command）はそのままで、ストリーム中のカードはフォーカスできるが edit に入れない **read-only 表示**になる。
 - `stream.begin` の応答でロック取得可否が返り（競合時はエラー → ストリームを始めない）、`end`（commit）の応答で確定結果を受けてロックを解放する。放棄・クラッシュ時は `002` §5.2 のリース失効で回収する（→ 5 章の max open duration backstop と同根）。
 
 position 採番はユーザ手編集と AI 追記が同じカラム末尾を奪い合うため、**本体 Repository に一元化**（Reporter に採番させない）。

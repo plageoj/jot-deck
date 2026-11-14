@@ -176,6 +176,13 @@ export function deserializeSettings(raw: string | null): SettingsState {
   };
 }
 
+function prefersDarkScheme(): boolean {
+  return (
+    typeof matchMedia === "function" &&
+    matchMedia("(prefers-color-scheme: dark)").matches
+  );
+}
+
 export class SettingsStore {
   state = $state<SettingsState>({ ...DEFAULT_SETTINGS });
   loaded = $state(false);
@@ -244,6 +251,17 @@ export class SettingsStore {
   update<K extends keyof SettingsState>(key: K, value: SettingsState[K]) {
     this.state[key] = value;
     void this.persist();
+  }
+
+  /**
+   * Switch between dark and light. `auto` resolves through the OS color
+   * scheme first, so the toggle always flips what is on screen.
+   */
+  toggleTheme() {
+    const dark =
+      this.state.theme === "dark" ||
+      (this.state.theme === "auto" && prefersDarkScheme());
+    this.update("theme", dark ? "light" : "dark");
   }
 
   /**

@@ -601,14 +601,15 @@
 
 {#if focus.showReporters && data.currentDeck}
   <ReportersDialog
-    deckId={data.currentDeck.id}
-    columns={data.columns}
-    listReporters={(deckId) => data.listReporters(deckId)}
+    currentDeckId={data.currentDeck.id}
+    decks={data.decks}
+    loadColumns={(deckId) => data.listDeckColumns(deckId)}
+    listReporters={() => data.listReporters()}
     listRunning={() => data.listRunningReporters()}
-    onAdd={(deckId, config) => data.addReporter(deckId, config)}
-    onUpdate={(deckId, config) => data.updateReporter(deckId, config)}
-    onRemove={(deckId, reporterId) => data.removeReporter(deckId, reporterId)}
-    onStart={(deckId, reporterId) => data.startReporter(deckId, reporterId)}
+    onAdd={(config) => data.addReporter(config)}
+    onUpdate={(config) => data.updateReporter(config)}
+    onRemove={(reporterId) => data.removeReporter(reporterId)}
+    onStart={(reporterId) => data.startReporter(reporterId)}
     onStop={(reporterId) => data.stopReporter(reporterId)}
     onClose={() => (focus.showReporters = false)}
   />

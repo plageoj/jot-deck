@@ -16,6 +16,7 @@ import {
   type KeyBinding,
   type KeyLabels,
 } from "./keybindings";
+import { COMMANDS } from "./commands";
 
 describe("findAction", () => {
   it("should find single-key action in column mode", () => {
@@ -218,12 +219,15 @@ describe("formatSequence", () => {
 describe("isBrowserReserved", () => {
   it("flags the keys a browser keeps for itself", () => {
     expect(isBrowserReserved("Ctrl+t")).toBe(true);
+    expect(isBrowserReserved("Ctrl+w")).toBe(true);
+    expect(isBrowserReserved("Ctrl+n")).toBe(true);
     expect(isBrowserReserved("Ctrl+Shift+P")).toBe(true);
     expect(isBrowserReserved("Ctrl+p")).toBe(false);
     expect(isBrowserReserved("F1")).toBe(false);
   });
 
   it("leaves every default action reachable in a browser", () => {
+    const paletteActions = new Set(COMMANDS.map((c) => c.action));
     for (const reserved of DEFAULT_KEYBINDINGS.filter((b) => isBrowserReserved(b.sequence))) {
       for (const mode of reserved.modes) {
         const alternative = DEFAULT_KEYBINDINGS.find(
@@ -232,7 +236,10 @@ describe("isBrowserReserved", () => {
             b.modes.includes(mode) &&
             !isBrowserReserved(b.sequence),
         );
-        expect(alternative, `${reserved.sequence} in ${mode} mode`).toBeDefined();
+        expect(
+          alternative !== undefined || paletteActions.has(reserved.action),
+          `${reserved.sequence} in ${mode} mode`,
+        ).toBe(true);
       }
     }
   });

@@ -44,7 +44,7 @@ await db.createCard({ column_id: "...", content: "Hello" });
 
 ### 特徴
 
-* Rust バックエンドと完全互換の SQL スキーマ
+* Rust バックエンドと同じテーブル定義（`decks` / `columns` / `cards` / `tags` / `card_tags` / `settings`）。外部書き込み（MCP / Reporter）専用の `idempotency_keys` / `change_history` は持たない
 * 論理削除（soft delete）対応
 * 位置管理（position）対応
 * タグ同期機能
@@ -60,7 +60,7 @@ await db.createCard({ column_id: "...", content: "Hello" });
 
 ### 設定ファイル
 
-`packages/app/playwright.config.ts`:
+`packages/app/playwright.config.ts`（抜粋）:
 
 ```typescript
 import { defineConfig, devices } from "@playwright/test";
@@ -86,12 +86,20 @@ export default defineConfig({
 
 ```
 packages/app/e2e/
-└── demo.spec.ts    # デモ用 E2E テスト
+├── e2e-helpers.ts             # 共通ヘルパー（アプリ起動待ち、エディタ入力、新規 Deck 作成など）
+├── browser-runtime.spec.ts    # ブラウザ実行時の UI（Tauri 専用機能の案内、チートシートの注記、タッチ端末向け案内）
+├── clipboard.spec.ts          # システムクリップボード（Ctrl+c / Ctrl+x / Ctrl+v）
+├── command-palette.spec.ts    # コマンドパレットとキーバインドチートシート
+├── deck-management.spec.ts    # Deck の作成・切り替え・リネーム・削除
+├── demo.spec.ts               # デモ用 E2E テスト
+└── tags.spec.ts               # タグのハイライト・フィルタ・補完
 ```
 
 ---
 
 ## npm スクリプト
+
+`packages/app` のスクリプト（リポジトリルートからは `pnpm --filter app test:e2e` のように実行します）:
 
 | コマンド | 説明 |
 |:---|:---|
@@ -107,13 +115,12 @@ packages/app/e2e/
 
 ### テストシナリオ
 
-1. **初期セットアップ**: Deck と Column の作成
+1. **初期セットアップ**: 新しい Deck と Column の作成
 2. **カラム操作**: `c` キーでカラム追加、`h`/`l`（または `←`/`→`）でナビゲーション
-3. **カード作成**: `o` キーで新規カード、Vim モードで編集
+3. **カード作成**: `o` キーで新規カード、エディタで入力して `Ctrl+Enter` で保存
 4. **カード操作**:
    - `j`/`k`（または `↓`/`↑`）: 上下移動
    - `gg`/`G`（または `Ctrl+↑`/`Ctrl+↓`）: 先頭/末尾へジャンプ
-   - `Ctrl+u`/`Ctrl+d`（または `PageUp`/`PageDn`）: 半ページスクロール
    - `yy`/`p`: コピー/ペースト
    - `dd`/`u`: 削除/アンドゥ
    - `J`/`K`（または `Shift+↓`/`Shift+↑`）: カード並び替え
@@ -122,20 +129,21 @@ packages/app/e2e/
 5. **カラムジャンプ**: `g1`〜`g9` で直接移動
 6. **カラム並び替え**: `H`/`L`（または `Shift+←`/`Shift+→`）
 
-### Vim モード対応
+### エディタ操作ヘルパー
 
-CodeMirror の Vim モードと連携するため、ヘルパー関数を用意：
+`e2e/e2e-helpers.ts` にエディタ操作のヘルパー関数を用意しています。エディタは開いた時点で入力可能（Vim モード有効時は Insert モード）なため、`i` を押さずにそのまま入力します：
 
 ```typescript
 // エディタ内でテキストを入力
-async function typeInEditor(page: Page, text: string) {
-  await page.keyboard.press("i");  // インサートモードへ
+export async function typeInEditor(page: Page, text: string) {
   await page.keyboard.type(text, { delay: 30 });
+  await page.waitForTimeout(100);
 }
 
 // 保存して終了
-async function saveAndExitEditor(page: Page) {
+export async function saveAndExitEditor(page: Page) {
   await page.keyboard.press("Control+Enter");
+  await page.waitForTimeout(300);
 }
 ```
 
@@ -164,7 +172,7 @@ cd packages/app
 pnpm test:e2e:demo
 ```
 
-`--headed` オプションにより、ブラウザが表示された状態でテストが実行され、動画が録画されます。
+`--headed` オプションにより、ブラウザが表示された状態でテストが実行されます。動画は `video: "on"` によりすべてのテストで録画されます。
 
 ---
 
@@ -194,12 +202,14 @@ pnpm test:e2e:demo
 
 ### GitHub Actions での実行例
 
+現在の CI ワークフロー（`.github/workflows/ci.yml`）は E2E テストを実行していません。組み込む場合の例：
+
 ```yaml
 - name: Install Playwright Browsers
-  run: pnpm exec playwright install chromium
+  run: pnpm --filter app exec playwright install chromium
 
 - name: Run E2E Tests
-  run: pnpm test:e2e
+  run: pnpm --filter app test:e2e
 ```
 
 ---
