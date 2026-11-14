@@ -173,7 +173,7 @@ Read/Edit が発生し得るため、純 notification ではなく**双方向 JS
 | `deck.list` | Reporter → 本体 | この Reporter が扱える Deck の一覧（`008` §4.2 の `list_decks` と同じ返り値 `{ decks: [{ deck_id, name, active }] }`）。 |
 | `deck.list_columns` / `deck.recent_cards` / `deck.search_cards` / `deck.describe` | Reporter → 本体 | カラム構成・直近カード・検索・Deck の実行時実体の問い合わせ。引数と返り値は `008` §4.2 の同名 tool と同じ。 |
 | `column.ensure` | Reporter → 本体 | 名前キーで get-or-create（べき等。`name` 必須、`deck_id` / `description` / `private` は任意）。書き込みスコープ内に同名カラムがあれば取得、無ければ末尾に作成し、本体が採番した **ULID を返す**（`{ deck_id, column_id, name, position, created }`）。 |
-| `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ）。 |
+| `column.update` | Reporter → 本体 | カラムの `name` / `description` / `private` を更新（指定分のみ。`null` は省略と同じで、`description` のクリアは空文字）。 |
 | `column.move` | Reporter → 本体 | カラムの並べ替え。アンカー（`before_column_id` / `after_column_id`、どちらか一方。省略時は末尾）で意図を表明し、position は本体が採番。 |
 
 **対象 Deck の決め方は MCP と同じ**（`008` §4.5）。Deck 単位のメソッド（`deck.*` と `column.ensure`）は任意引数 `deck_id` で対象を指定し、スコープが 1 Deck だけなら省略できる。カード / カラムを ID で指すメソッドは、その ID の所属 Deck が対象になる。スコープ外の Deck・カード・カラムは見えない。

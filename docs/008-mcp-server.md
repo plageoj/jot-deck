@@ -141,7 +141,7 @@ flowchart LR
 - **作成の可否**: create は、接続が **structure capability を持ち（既定 ON、opt-out で無効化可 → §5）** かつ **write allowlist が明示されていない**ときだけ成功する。structure を deny した接続では `ensure_column` 自体が使えない（`tools/list` から外れ、呼び出しは名前 lookup の前に capability エラーになる）。allowlist を明示した接続では **create はエラー**で失敗する（allowlist は固定集合の意図なので新規作成と排他）。ただし書き込みスコープ内の同名カラムがあれば get として id を返す ―― **既存カラムの取得は妨げない**。名前 lookup は指定 Deck の書き込みスコープ内のみを探索し、private / allowlist 外の同名はヒットさせず（漏洩防止）、列は ULID キーなので見かけ上の重複名は許容する。
 
 #### `update_column`
-- **引数**: `column_id`（string, ULID, 必須）, `name` / `description` / `private`（いずれも任意, 指定分のみ更新。空文字の `description` はクリア）
+- **引数**: `column_id`（string, ULID, 必須）, `name` / `description` / `private`（いずれも任意, 指定分のみ更新。`null` は省略と同じ。`description` は空文字でクリア）
 - **返り値**: `{ column_id, name, description, private }`
 - **意味**: カラムの改名・分類軸の書き換え・公開/非公開の切り替え。大規模再編で「このカラムの意味を変える」操作を担う。write スコープ外カラムは authorization error。
 

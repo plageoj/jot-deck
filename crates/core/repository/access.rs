@@ -289,10 +289,11 @@ where
     Ok(Option::<T>::deserialize(de)?.unwrap_or_default())
 }
 
-/// 省略（変更しない）と、`null` / 空文字（クリア）を区別する。`default` と組で使う
-/// ―― serde はキーがあるときだけこの関数を呼ぶ。
+/// 省略・`null`（変更しない）と空文字（クリア）を区別する。LLM クライアントは任意引数に
+/// `null` を送りがちなので、`null` でクリアすると意図せず説明を消してしまう ―― クリアは
+/// 明示的な空文字だけに限る。`default` と組で使う。
 fn clearable<'de, D: Deserializer<'de>>(de: D) -> Result<Option<Option<String>>, D::Error> {
-    Ok(Some(Option::<String>::deserialize(de)?.filter(|s| !s.is_empty())))
+    Ok(Option::<String>::deserialize(de)?.map(|s| Some(s).filter(|s| !s.is_empty())))
 }
 
 #[derive(Deserialize)]
@@ -943,7 +944,9 @@ mod tests {
         update_column(&f.conn, &p, &author(), &json!({ "column_id": f.col_a, "description": "papers" })).unwrap();
         let kept = update_column(&f.conn, &p, &author(), &json!({ "column_id": f.col_a, "name": "Reading" })).unwrap();
         assert_eq!(kept.result["description"], "papers");
-        let cleared = update_column(&f.conn, &p, &author(), &json!({ "column_id": f.col_a, "description": null })).unwrap();
+        let null_kept = update_column(&f.conn, &p, &author(), &json!({ "column_id": f.col_a, "description": null })).unwrap();
+        assert_eq!(null_kept.result["description"], "papers");
+        let cleared = update_column(&f.conn, &p, &author(), &json!({ "column_id": f.col_a, "description": "" })).unwrap();
         assert!(cleared.result["description"].is_null());
     }
 
